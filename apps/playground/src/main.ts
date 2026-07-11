@@ -13,6 +13,7 @@ import {
   type SyntheticLoopFixture
 } from "./spike/create-synthetic-loop";
 import { readFrameTagFromVideoFrame } from "./spike/frame-tag";
+import { mountM2Playground } from "./m2-playground";
 
 interface BrowserStressResult {
   readonly fixture: SyntheticCodecEvidence;
@@ -39,6 +40,8 @@ interface RenderedMotionSpikeApi {
   readonly ready: Promise<SyntheticCodecEvidence>;
   runStress(): Promise<BrowserStressResult>;
   snapshot(): BrowserPlayerSnapshot | null;
+  pause(): void;
+  resume(): Promise<void>;
   dispose(): void;
 }
 
@@ -54,11 +57,12 @@ app.innerHTML = `
   <div class="page-shell">
     <header class="hero">
       <div>
-        <p class="eyebrow">WebCodecs scheduling experiment · M1</p>
-        <h1>Continuous rendered motion</h1>
+        <p class="eyebrow">Open web rendered motion lab · M1 + M2</p>
+        <h1>Motion that keeps its momentum</h1>
         <p class="lede">
-          One encoded loop. One decoder configuration. New rational timestamps
-          every iteration—and no seek, reset, or flush at the seam.
+          Continuous loops and interaction clips are scheduled as frames—not
+          opaque video seeks—so a new intent can reverse without deliberately
+          holding or repeating a content frame.
         </p>
       </div>
       <div class="status-cluster" aria-live="polite">
@@ -67,7 +71,15 @@ app.innerHTML = `
       </div>
     </header>
 
-    <main class="experiment-grid">
+    <main class="page-content">
+      <div id="m2-playground-root"></div>
+
+      <div class="milestone-heading">
+        <p class="eyebrow">Continuous loop experiment · M1</p>
+        <h2>Prove the seam before freezing the format</h2>
+      </div>
+
+      <div class="experiment-grid">
       <section class="stage-card" aria-labelledby="stage-title">
         <div class="card-heading">
           <div>
@@ -146,6 +158,7 @@ app.innerHTML = `
           <li>Headless results prove ordering—not physical display scan-out.</li>
         </ul>
       </aside>
+      </div>
     </main>
   </div>
 `;
@@ -160,6 +173,7 @@ const restartButton = requireElement<HTMLButtonElement>("#restart-button");
 const stressButton = requireElement<HTMLButtonElement>("#stress-button");
 const stressProgress = requireElement<HTMLProgressElement>("#stress-progress");
 const stressResult = requireElement<HTMLOutputElement>("#stress-result");
+const m2Root = requireElement<HTMLElement>("#m2-playground-root");
 
 let orbitFixture: SyntheticLoopFixture | null = null;
 let player: LoopCanvasPlayer | null = null;
@@ -174,12 +188,19 @@ const ready = new Promise<SyntheticCodecEvidence>((resolve, reject) => {
   rejectReady = reject;
 });
 void ready.catch(() => undefined);
+mountM2Playground(m2Root, ready);
 
 window.__renderedMotionSpike = {
   ready,
   runStress,
   snapshot: () =>
     latestSnapshot === null ? null : serializeSnapshot(latestSnapshot),
+  pause: () => {
+    player?.pause();
+  },
+  resume: async () => {
+    await player?.resume();
+  },
   dispose: () => {
     player?.dispose();
     player = null;

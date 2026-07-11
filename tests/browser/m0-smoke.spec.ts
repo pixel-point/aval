@@ -14,7 +14,7 @@ test("loads the scheduling playground without a browser error", async ({ page })
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "Continuous rendered motion" })
+    page.getByRole("heading", { name: "Motion that keeps its momentum" })
   ).toBeVisible();
   expect(errors).toEqual([]);
 });

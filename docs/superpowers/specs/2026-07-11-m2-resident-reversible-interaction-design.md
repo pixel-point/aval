@@ -65,7 +65,8 @@ The plan rejects work before allocation unless all of these hold:
 For M2, the tracked player working set is deliberately conservative:
 
 ```text
-unique texture bytes × 1.25 + one width × height × 4 staging buffer
+(resident texture bytes + three streaming frames) × 1.25
+  + one width × height × 4 staging buffer
 ```
 
 The 24 MiB clip cap and 48 MiB edge cap apply to logical deduplicated RGBA
@@ -100,8 +101,9 @@ are opaque creator-supplied strings. Its internal phases are:
 - source or target runway.
 
 Requests received between content ticks are sequence-numbered and coalesced at
-the next tick. That tick is the next eligible content frame. The controller
-performs no direction change between ticks.
+the next tick, with at most 32 retained inputs and the newest intent preserved.
+Diagnostic history is a bounded 256-tick ring. That tick is the next eligible
+content frame. The controller performs no direction change between ticks.
 
 The exact frame rules are:
 
@@ -148,19 +150,22 @@ immediately following cached runway frame `R - 1`.
 
 An active reversal increments the path generation, bounds any obsolete input
 horizon, closes stale outputs, and submits the opposite body. It never resets,
-reconfigures, or flushes at that runtime boundary. Readiness measures both
-directions and uses the shortest runway from 6 through 12 frames that covers
-observed recovery plus one content-frame margin. The fixture may declare eight
-frames only when both measured directions pass. Otherwise M2 readiness fails
-instead of weakening the guarantee.
+reconfigures, or flushes at that runtime boundary. M2's reference fixture uses
+fixed eight-frame runways and gates readiness on a sequential preflight of both
+directions, including one content-frame margin. If either measured direction
+needs more than eight frames, readiness fails instead of weakening the
+guarantee. Selecting the shortest passing runway from 6 through 12 frames is a
+compiler responsibility in a later milestone.
 
 ## 7. Lifecycle
 
 Logical time freezes while hidden, rebuilding, context-lost, or paused. Hiding
 may release resident textures. WebGL context loss invalidates every GPU handle
-without changing the committed semantic endpoint. Resume or restoration
-rebuilds the cache and decoder lead, redraws the saved logical frame, and only
-then advances the clock.
+without changing the committed semantic endpoint. M2 restoration performs
+fresh preparation from that committed endpoint and reapplies the newest
+requested intent before advancing the clock. It does not claim exact in-flight
+clip-cursor restoration; context loss itself is outside the continuous visual
+guarantee.
 
 Resource generation is distinct from path generation. A late asynchronous
 upload from an old resource generation and a decoder output from an old path
@@ -179,8 +184,9 @@ The playground presents a semantic host control whose hover/focus engagement
 drives arbitrary fixture states such as `resting` and `engaged`. It shows phase,
 direction, clip cursor, requested and visual states, path generation, recovery
 lead, resident layers and bytes, closed source frames, stale outputs, context
-generation, and underflows. A deterministic rapid-input action runs the same
-controller and renderer without waiting in real time.
+generation, and underflows. A deterministic accelerated action runs a separate
+controller against the same renderer to validate cached layer ordering without
+waiting in real time; it is not a realtime decoder-recovery proof.
 
 ## 9. Verification Gate
 
