@@ -388,11 +388,18 @@ export class DecoderWorkerClient {
     this.#rejectAllWaiters(abortError);
     this.#closeAllFrames(true);
 
-    const requestId = this.#allocateRequestId();
-    this.#disposeRequestId = requestId;
     this.#disposePromise = new Promise<void>((resolve) => {
       this.#resolveDispose = resolve;
     });
+    // A fatal transport boundary already terminated the worker. Waiting for a
+    // command that can no longer be delivered only delays static recovery.
+    if (this.#failure !== null) {
+      this.#finishDispose();
+      return this.#disposePromise;
+    }
+
+    const requestId = this.#allocateRequestId();
+    this.#disposeRequestId = requestId;
     this.#disposeTimer = setTimeout(() => {
       this.#finishDispose();
     }, this.#disposeTimeoutMs);

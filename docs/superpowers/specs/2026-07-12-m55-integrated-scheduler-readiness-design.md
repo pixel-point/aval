@@ -963,6 +963,16 @@ supported real-browser run. VP8 is not substituted. The proof is runtime
 scheduling conformance, not observed display scan-out or named-device
 certification.
 
+Realtime evidence keeps three timing layers distinct. RAF timestamps grade
+the health of display opportunities. Post-draw `performance.now()` timestamps
+grade canvas submission cadence after the synchronous production draw path,
+and callback-to-draw latency has its own hard bound. A callback timestamp is
+not relabeled as a presentation timestamp: irregular headless RAF phase can
+quantize the selected opportunity before the actual draw completes. Tolerant
+GPU readback remains in the deterministic boundary proof; the realtime cadence
+drive does not insert a synchronous proof-only framebuffer readback into every
+RAF callback.
+
 ## 19. Verification Gate
 
 M5.5 is complete only when all of these pass.

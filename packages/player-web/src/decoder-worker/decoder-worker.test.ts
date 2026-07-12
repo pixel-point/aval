@@ -131,7 +131,13 @@ describe("dedicated decoder worker boundary", () => {
     });
     expect(frame.closeCalls).toBe(1);
     expect(client.openFrames).toBe(0);
-    await client.dispose();
+    const disposePosts = clientPort.postedTypes.filter((type) =>
+      type === "dispose"
+    ).length;
+    const disposal = client.dispose();
+    await expect(disposal).resolves.toBeUndefined();
+    expect(clientPort.postedTypes.filter((type) => type === "dispose"))
+      .toHaveLength(disposePosts);
   });
 
   it("probes WebCodecs support before constructing the sole decoder", async () => {

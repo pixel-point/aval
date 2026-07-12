@@ -32,6 +32,13 @@ export interface ActiveRouteCompletion {
   readonly promoted: Readonly<SequencedEdge> | null;
 }
 
+export interface RoutePlanCheckpoint {
+  readonly pending: Readonly<SequencedEdge> | null;
+  readonly active: Readonly<SequencedEdge> | null;
+  readonly followOn: Readonly<SequencedEdge> | null;
+  readonly reversal: Readonly<SequencedEdge> | null;
+}
+
 /**
  * Owns the engine's small route plan and its cross-slot mutations.
  *
@@ -214,6 +221,22 @@ export class RoutePlan implements RoutePlanView {
     this.#active = null;
     this.#followOn = null;
     this.#reversal = null;
+  }
+
+  public checkpoint(): Readonly<RoutePlanCheckpoint> {
+    return Object.freeze({
+      pending: this.#pending,
+      active: this.#active,
+      followOn: this.#followOn,
+      reversal: this.#reversal
+    });
+  }
+
+  public restore(checkpoint: Readonly<RoutePlanCheckpoint>): void {
+    this.#pending = checkpoint.pending;
+    this.#active = checkpoint.active;
+    this.#followOn = checkpoint.followOn;
+    this.#reversal = checkpoint.reversal;
   }
 
   #requireActive(): Readonly<SequencedEdge> {

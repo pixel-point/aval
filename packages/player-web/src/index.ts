@@ -5,7 +5,7 @@ export {
   validateFrameRate,
   type RationalFrameRate,
   type VirtualFramePosition
-} from "./experimental/rational-time.js";
+} from "./runtime/rational-time.js";
 export {
   createEncodedLoopUnit,
   validateEncodedLoopUnit,
@@ -212,3 +212,373 @@ export {
   type CreateDecoderWorkerClientOptions,
   type OwnedDecoderWorkerPort
 } from "./decoder-worker/factory.js";
+export {
+  MAX_RUNTIME_DIAGNOSTIC_TEXT_LENGTH,
+  MAX_RUNTIME_FAILURE_MESSAGE_LENGTH,
+  RUNTIME_FAILURE_CODES,
+  RuntimePlaybackError,
+  isRuntimePlaybackError,
+  normalizeRuntimeFailure,
+  type RuntimeFailure,
+  type RuntimeFailureCode,
+  type RuntimeFailureContext
+} from "./runtime/errors.js";
+export {
+  DecodeTimeline,
+  type DecodeSampleMetadata,
+  type DecodeTimelineBatchPlan,
+  type DecodeTimelineFrameRequest,
+  type DecodeTimelineSnapshot,
+  type DecodeUnitOccurrence
+} from "./runtime/decode-timeline.js";
+export {
+  RuntimeAssetCatalog,
+  installRuntimeAssetCatalog,
+  type RuntimeCatalogAccessUnit,
+  type RuntimeCatalogIdIndex,
+  type RuntimeCatalogPortEntry,
+  type RuntimeCatalogPortIndex,
+  type RuntimeCatalogRecordIndex,
+  type RuntimeCatalogStaticFrame
+} from "./runtime/asset-catalog.js";
+export {
+  createOpaqueRenditionCandidates,
+  inspectOpaqueRenditionCandidate,
+  type RuntimeOpaqueRendition,
+  type RuntimeOpaqueRenditionCandidate,
+  type RuntimeOpaqueRenditionInspection
+} from "./runtime/rendition-selection.js";
+export {
+  WorkerSampleFactory,
+  type CreateWorkerSampleBatchInput,
+  type DecoderWorkerSampleBatch,
+  type WorkerSampleCatalog,
+  type WorkerSampleFactoryOptions,
+  type WorkerSampleFrameRequest
+} from "./runtime/worker-samples.js";
+export {
+  BYTES_PER_RGBA_PIXEL,
+  GPU_OVERHEAD_DENOMINATOR,
+  GPU_OVERHEAD_NUMERATOR,
+  MAX_PLAYER_RUNTIME_BYTES,
+  RUNTIME_MEBIBYTE,
+  STREAMING_TEXTURE_LAYER_COUNT,
+  checkedByteNumber,
+  checkedByteProduct,
+  checkedByteSum,
+  checkedRgbaBytes,
+  roundedGpuAllocationBytes,
+  validateNonNegativeSafeInteger,
+  validatePositiveSafeInteger
+} from "./runtime/checked-runtime-bytes.js";
+export {
+  MAX_INTERACTION_CACHE_LAYERS,
+  MAX_REVERSIBLE_ENDPOINT_PAIR_BYTES,
+  createInteractionCachePlan,
+  createInteractionCachePlanFromSemanticSequences,
+  type InteractionCacheCutRunway,
+  type InteractionCacheDeviceLimits,
+  type InteractionCacheEndpointRunway,
+  type InteractionCacheLayer,
+  type InteractionCachePlan,
+  type InteractionCachePlanInput,
+  type InteractionCacheReversibleClip,
+  type InteractionCacheSemanticInput,
+  type InteractionCacheSequence,
+  type SemanticCutRunwayInput,
+  type SemanticEndpointRunwayInput,
+  type SemanticReversibleClipInput
+} from "./runtime/interaction-cache-plan.js";
+export {
+  MAX_RESOURCE_RING_CAPACITY,
+  MIN_RESOURCE_RING_CAPACITY,
+  RESOURCE_DECODE_SURFACE_COUNT,
+  createRuntimeResourcePlan,
+  maximumActualEncodedWindowBytes,
+  type RuntimeResourceCatalogView,
+  type RuntimeResourcePlan,
+  type RuntimeResourcePlanInput
+} from "./runtime/resource-plan.js";
+export {
+  DEFAULT_INTERACTION_CACHE_PREPARATION_TIMEOUT_MS,
+  InteractionCachePreparationTimeoutError,
+  asInteractionCachePreparationRenderer,
+  asInteractionCachePreparationWorker,
+  prepareInteractionCache,
+  type InteractionCachePreparationInput,
+  type InteractionCachePreparationRenderer,
+  type InteractionCachePreparationReport,
+  type InteractionCachePreparationUnitCatalog,
+  type InteractionCachePreparationWorker,
+  type PrepareInteractionCacheOptions
+} from "./runtime/interaction-cache-preparation.js";
+export {
+  OPAQUE_STREAMING_SLOT_COUNT,
+  OpaqueFrameRenderer,
+  RendererUploadTimeoutError,
+  type OpaqueFrameRendererBackend,
+  type OpaqueFrameRendererBackendLimits,
+  type OpaqueFrameRendererOptions,
+  type OpaqueFrameRendererSnapshot,
+  type OpaqueFrameRendererTimerHost,
+  type OpaqueFrameTextureLayout,
+  type OpaqueTextureKind
+} from "./runtime/opaque-frame-renderer.js";
+export {
+  BrowserOpaqueFrameBackend,
+  type BrowserOpaqueFrameBackendOptions
+} from "./runtime/opaque-frame-renderer-browser.js";
+export {
+  BrowserStaticCanvasPlane,
+  BrowserStaticSurfaceDecoder,
+  StaticSurfaceDecodeTimeoutError,
+  StaticSurfaceStore,
+  StaticSurfaceStoreDisposedError,
+  StaticSurfaceUnavailableError,
+  asStaticSurfaceCatalog,
+  type BrowserDecodedStaticSurface,
+  type BrowserStaticSurfaceDecoderOptions,
+  type BrowserStaticSurfaceTimerHost,
+  type DecodedStaticSurface,
+  type StaticPresentationPlane,
+  type StaticSurfaceCatalogView,
+  type StaticSurfaceDecodeOptions,
+  type StaticSurfaceDecoder,
+  type StaticSurfacePresentationReport,
+  type StaticSurfaceStoreSnapshot,
+  type StaticSurfaceValidationReport
+} from "./runtime/static-surfaces.js";
+export {
+  createBrowserOpaqueCandidateComposition,
+  type BrowserOpaqueCandidateComposition,
+  type BrowserOpaqueCandidateCompositionOptions,
+  type BrowserOpaqueCandidateControls,
+  type BrowserOpaqueCandidateSnapshot,
+  type BrowserOpaqueCleanupSnapshot,
+  type BrowserOpaquePlaybackSnapshot,
+  type BrowserOpaqueReadPixelsResult,
+  type BrowserOpaqueReadinessSnapshot,
+  type BrowserOpaqueRendererSnapshot,
+  type BrowserOpaqueWorkerSnapshot
+} from "./runtime/browser-opaque-candidate.js";
+export {
+  MAX_PRESENTATION_RING_CAPACITY,
+  MIN_PRESENTATION_RING_CAPACITY,
+  PresentationRing,
+  validatePresentationRingCapacity,
+  type PresentationRingEnqueueResult,
+  type PresentationRingEntry,
+  type PresentationRingExpectedFrame,
+  type PresentationRingInsertion,
+  type PresentationRingOptions,
+  type PresentationRingSnapshot,
+  type PresentationRingSnapshotEntry,
+  type PresentationRingTakeResult
+} from "./runtime/presentation-ring.js";
+export {
+  calculateRequiredEdgeLeadFrames,
+  planEdgeLead,
+  type EdgeLeadInput,
+  type EdgeLeadPlan,
+  type RequiredEdgeLeadInput
+} from "./runtime/edge-lead.js";
+export {
+  planSubmissionHorizon,
+  planUnresolvedSubmissionHorizon,
+  type SourceBodyCursor,
+  type SourceBoundary,
+  type SubmissionHorizonDecision,
+  type SubmissionHorizonInput,
+  type UnresolvedSubmissionHorizon,
+  type UnresolvedSubmissionHorizonInput
+} from "./runtime/submission-horizon.js";
+export {
+  PathScheduler,
+  type PathSchedulerClock,
+  type PathSchedulerFramePurpose,
+  type PathSchedulerOptions,
+  type PathSchedulerPumpOptions,
+  type PathSchedulerPumpReport,
+  type PathSchedulerResidentFrame,
+  type PathSchedulerSnapshot,
+  type PathSchedulerStatus,
+  type PathSchedulerTakeResult,
+  type PathSchedulerTraceRecord,
+  type PathSchedulerWorkerAdapter,
+  type PrepareScheduledRouteInput,
+  type StartResidentRunwayInput,
+  type StartScheduledBodyInput
+} from "./runtime/path-scheduler.js";
+export {
+  MAX_READINESS_RING_CAPACITY,
+  MIN_READINESS_MEASURED_OUTPUTS,
+  MIN_READINESS_RING_CAPACITY,
+  MIN_READINESS_THROUGHPUT_MULTIPLE,
+  READINESS_RECOVERY_MARGIN_FRAMES,
+  ReadinessMetricsRecorder,
+  calculateReadinessMetrics,
+  idealReadinessDeadlineMs,
+  nearestRankPercentile,
+  type ReadinessFrameMeasurement,
+  type ReadinessFrameMetric,
+  type ReadinessMediaIdentity,
+  type ReadinessMetricFailureReason,
+  type ReadinessMetricsInput,
+  type ReadinessMetricsRecorderOptions,
+  type ReadinessMetricsReport,
+  type ReadinessRecorderSubmission
+} from "./runtime/readiness-metrics.js";
+export {
+  evaluateAllRoutesReadiness,
+  type AllRoutesReadinessEvidence,
+  type AllRoutesReadinessInput,
+  type AllRoutesReadinessReport,
+  type CutReadinessEvidence,
+  type EdgeDryRunEvidence,
+  type EndpointRecoveryEvidence,
+  type InitialRingReadinessEvidence,
+  type InverseReadinessEvidence,
+  type LoopReadinessEvidence,
+  type ReadinessEdgeReport,
+  type ReadinessEvaluationFailure,
+  type ReadinessEvaluationFailureCode,
+  type ReadinessSourceFrameReport,
+  type ResourceReadinessEvidence,
+  type RoutePhaseEvidence
+} from "./runtime/readiness-evaluator.js";
+export {
+  runAllRoutesReadiness,
+  type CutAdapterResult,
+  type EdgeAdapterInput,
+  type EdgeDryRunAdapterResult,
+  type EndpointAdapterInput,
+  type EndpointAdapterResult,
+  type InitialRingAdapterInput,
+  type InverseAdapterInput,
+  type InverseAdapterResult,
+  type LoopAdapterInput,
+  type LoopAdapterResult,
+  type ReadinessRunnerAdapters,
+  type ReadinessRunnerInput,
+  type ReadinessRunnerResult,
+  type ResourceAdapterInput,
+  type RoutePhaseAdapterResult,
+  type WarmupAdapterInput,
+  type WarmupAdapterResult
+} from "./runtime/readiness-runner.js";
+export {
+  GraphRequestSettlementError,
+  RequestPromiseInvariantError,
+  RequestPromises,
+  type RequestPromisesOptions,
+  type RequestSettlementEffect
+} from "./runtime/request-promises.js";
+export {
+  EffectHost,
+  EffectHostInvariantError,
+  type EffectHostDraw,
+  type EffectHostEvent,
+  type EffectHostOptions,
+  type EffectHostReadinessEvent,
+  type EffectHostSnapshot,
+  type EffectHostTraceRecord
+} from "./runtime/effect-host.js";
+export {
+  RealtimeDriver,
+  RealtimeDriverDisposedError,
+  type RealtimeContentTickContext,
+  type RealtimeContentTickResult,
+  type RealtimeDriverOptions,
+  type RealtimeDriverSnapshot,
+  type RealtimeTickOutcome,
+  type RealtimeUnderflowEvent
+} from "./runtime/realtime-driver.js";
+export {
+  RUNTIME_READINESS_LADDER,
+  RUNTIME_READINESS_LEVELS,
+  RUNTIME_TRACE_CAPACITY,
+  STATIC_REASONS,
+  createRuntimeCandidateReport,
+  createRuntimeReadinessReport,
+  summarizeStaticReason,
+  translateGraphReadiness,
+  type GraphReadinessTranslation,
+  type RuntimeCandidateReport,
+  type RuntimeFrameKey,
+  type RuntimeGraphTrace,
+  type RuntimeMediaCursor,
+  type RuntimeMediaPresentation,
+  type RuntimeReadiness,
+  type RuntimeReadinessReport,
+  type RuntimeReadinessResult,
+  type RuntimeSchedulerSnapshot,
+  type RuntimeTraceCounters,
+  type RuntimeTraceRecord,
+  type StaticReason,
+  type StaticReasonSummaryInput
+} from "./runtime/model.js";
+export {
+  IntegratedPlayer,
+  IntegratedPlaybackInvariantError,
+  PlaybackFallbackError,
+  type IntegratedCandidateActivationOptions,
+  type IntegratedCandidateAttempt,
+  type IntegratedCandidateAttemptContext,
+  type IntegratedCandidateAvailability,
+  type IntegratedCandidateFactory,
+  type IntegratedCandidatePrepareOptions,
+  type IntegratedContentTickContext,
+  type IntegratedContentTickResult,
+  type IntegratedPlaybackSession,
+  type IntegratedPlaybackTickContext,
+  type IntegratedPlaybackTraceState,
+  type IntegratedPlayerOptions,
+  type IntegratedPlayerSnapshot,
+  type IntegratedPlayerTrace,
+  type IntegratedRealtimeDriverOptions,
+  type IntegratedPreparedActivation,
+  type IntegratedPreparedContentTick,
+  type IntegratedPrepareOptions,
+  type IntegratedPrepareResult,
+  type IntegratedStaticSurfaceStore,
+  type IntegratedTimerHost
+} from "./runtime/integrated-player.js";
+export {
+  OpaqueCandidateFactory,
+  createOpaqueCandidateWorkerSetup,
+  type OpaqueCandidateActivationInput,
+  type OpaqueCandidateCachePreparer,
+  type OpaqueCandidateFactoryOptions,
+  type OpaqueCandidatePreparedMedia,
+  type OpaqueCandidateReadinessFactory,
+  type OpaqueCandidateReadinessSession,
+  type OpaqueCandidateReadinessSessionInput,
+  type OpaqueCandidateRendererFactory,
+  type OpaqueCandidateRendererReservation,
+  type OpaqueCandidateTimerHost,
+  type OpaqueCandidateWorker,
+  type OpaqueCandidateWorkerFactory,
+  type OpaqueCandidateWorkerSetup
+} from "./runtime/opaque-candidate-factory.js";
+export {
+  CutPresentationCoordinator,
+  CutPresentationInvariantError,
+  CutPresentationSupersededError,
+  type CutActivationInput,
+  type CutActivationReport,
+  type CutFrameMedia,
+  type CutPresentationCoordinatorOptions,
+  type CutPresentationRenderer,
+  type CutPresentationScheduler,
+  type CutPresentationSnapshot,
+  type CutPresentationStatus,
+  type CutResidentRunwayFrame
+} from "./runtime/cut-presentation-coordinator.js";
+export {
+  ReversiblePresentationCoordinator,
+  ReversiblePresentationInvariantError,
+  type PreparedReversiblePresentation,
+  type PreparedReversibleRunwayFrame,
+  type ReversiblePresentationRenderer,
+  type ReversiblePresentationSnapshot
+} from "./runtime/reversible-presentation.js";

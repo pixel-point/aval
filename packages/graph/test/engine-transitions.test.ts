@@ -44,6 +44,25 @@ describe("MotionGraphEngine transition routing", () => {
     });
   });
 
+  it("previews a reversible tick exactly without advancing its active route", () => {
+    const engine = animatedEngine(reversibleGraph());
+    engine.request("hover");
+    engine.tick({ contentOrdinal: 0n });
+    const beforeSnapshot = engine.snapshot();
+    const beforeTrace = engine.getTrace();
+
+    const firstPreview = engine.previewTick({ contentOrdinal: 1n });
+    const secondPreview = engine.previewTick({ contentOrdinal: 1n });
+
+    expect(firstPreview).toEqual(secondPreview);
+    expect(firstPreview.presentation).toEqual(
+      reversiblePresentation("idle-to-hover", 1, "forward")
+    );
+    expect(engine.snapshot()).toEqual(beforeSnapshot);
+    expect(engine.getTrace()).toEqual(beforeTrace);
+    expect(engine.tick({ contentOrdinal: 1n })).toEqual(firstPreview);
+  });
+
   it("reverses an active reverse clip forward to the adjacent frame", () => {
     const engine = animatedEngine(reversibleGraph());
     engine.request("hover");
@@ -397,6 +416,25 @@ describe("MotionGraphEngine transition routing", () => {
     expect(settleEffects(committed)).toEqual([
       settle([success.requestId!], "resolve", "target-committed")
     ]);
+  });
+
+  it("previews a locked tick exactly without advancing its active route", () => {
+    const engine = animatedEngine(lockedFollowOnGraph());
+    engine.request("loading");
+    engine.tick({ contentOrdinal: 0n });
+    const beforeSnapshot = engine.snapshot();
+    const beforeTrace = engine.getTrace();
+
+    const firstPreview = engine.previewTick({ contentOrdinal: 1n });
+    const secondPreview = engine.previewTick({ contentOrdinal: 1n });
+
+    expect(firstPreview).toEqual(secondPreview);
+    expect(firstPreview.presentation).toEqual(
+      lockedPresentation("idle-to-loading", 1)
+    );
+    expect(engine.snapshot()).toEqual(beforeSnapshot);
+    expect(engine.getTrace()).toEqual(beforeTrace);
+    expect(engine.tick({ contentOrdinal: 1n })).toEqual(firstPreview);
   });
 });
 

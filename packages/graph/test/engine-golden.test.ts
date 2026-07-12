@@ -302,6 +302,115 @@ describe("MotionGraphEngine golden lifecycle traces", () => {
     });
   });
 
+  it("previews a completion-triggered tick exactly without committing it", () => {
+    const definition = graph({
+      sourceKind: "held",
+      sourcePortals: [0],
+      start: { type: "cut", maxWaitFrames: 1 }
+    });
+    const baseEdge = definition.edges[0]!;
+    const engine = animatedEngine({
+      ...definition,
+      edges: [{ ...baseEdge, trigger: { type: "completion" } }]
+    });
+    const beforeSnapshot = engine.snapshot();
+    const beforeTrace = engine.getTrace();
+
+    const preview = engine.previewTick({
+      contentOrdinal: 0n,
+      routeReady: false
+    });
+
+    expect(preview.snapshot).toMatchObject({
+      phase: "stable",
+      visualState: "hover",
+      requestedState: "hover"
+    });
+    expect(engine.snapshot()).toEqual(beforeSnapshot);
+    expect(engine.getTrace()).toEqual(beforeTrace);
+    expect(
+      engine.tick({ contentOrdinal: 0n, routeReady: false })
+    ).toEqual(preview);
+  });
+
+  it("previews stable ticks exactly without advancing the graph journal", () => {
+    const engine = animatedEngine(graph());
+    const beforeSnapshot = engine.snapshot();
+    const beforeTrace = engine.getTrace();
+
+    const preview = engine.previewTick({ contentOrdinal: 0n });
+
+    expect(preview.snapshot).toMatchObject({
+      phase: "stable",
+      visualState: "idle",
+      contentOrdinal: 0n
+    });
+    expect(engine.snapshot()).toEqual(beforeSnapshot);
+    expect(engine.getTrace()).toEqual(beforeTrace);
+    expect(engine.tick({ contentOrdinal: 0n })).toEqual(preview);
+  });
+
+  it("restores pending requests, counters, routes, and trace across repeated previews", () => {
+    const engine = animatedEngine(graph());
+    const first = engine.request("hover");
+    const duplicate = engine.request("hover");
+    const beforeSnapshot = engine.snapshot();
+    const beforeTrace = engine.getTrace();
+
+    const firstPreview = engine.previewTick({ contentOrdinal: 0n });
+    const secondPreview = engine.previewTick({ contentOrdinal: 0n });
+
+    expect(firstPreview).toEqual(secondPreview);
+    expect(firstPreview.effects).toContainEqual(
+      settle([first.requestId!, duplicate.requestId!], {
+        type: "resolve",
+        timing: "microtask",
+        reason: "target-committed"
+      })
+    );
+    expect(engine.snapshot()).toEqual(beforeSnapshot);
+    expect(engine.snapshot()).toMatchObject({
+      phase: "waiting",
+      pendingEdgeId: "idle-to-hover",
+      pendingRequestCount: 2,
+      inputSequence: 2,
+      inputsSinceTick: 2,
+      contentOrdinal: null
+    });
+    expect(engine.getTrace()).toEqual(beforeTrace);
+
+    expect(engine.tick({ contentOrdinal: 0n })).toEqual(firstPreview);
+    expect(engine.snapshot().inputsSinceTick).toBe(0);
+    expect(engine.request("hover")).toMatchObject({
+      requestId: 3,
+      sequence: 3
+    });
+  });
+
+  it("restores the graph when preview evaluation throws after tick admission", () => {
+    const engine = animatedEngine(graph());
+    engine.request("hover");
+    const beforeSnapshot = engine.snapshot();
+    const beforeTrace = engine.getTrace();
+    const throwingOptions = {
+      contentOrdinal: 0n,
+      get routeReady(): boolean {
+        throw new Error("preview readiness failed");
+      }
+    };
+
+    expect(() => engine.previewTick(throwingOptions)).toThrowError(
+      "preview readiness failed"
+    );
+    expect(engine.snapshot()).toEqual(beforeSnapshot);
+    expect(engine.getTrace()).toEqual(beforeTrace);
+    expect(engine.tick({ contentOrdinal: 0n }).snapshot).toMatchObject({
+      phase: "stable",
+      contentOrdinal: 0n,
+      inputsSinceTick: 0
+    });
+  });
+
   it("does not invent an implicit completion route for a finite body", () => {
     const engine = animatedEngine(
       graph({
@@ -599,7 +708,7 @@ describe("MotionGraphEngine golden lifecycle traces", () => {
       phase: "error",
       requestedState: "hover",
       visualState: "idle",
-      isTransitioning: true,
+      isTransitioning: false,
       pendingRequestCount: 0
     });
   });

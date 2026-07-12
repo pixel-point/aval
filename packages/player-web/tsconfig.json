@@ -7,12 +7,16 @@
     "emitDeclarationOnly": true,
     "outDir": "dist",
     "rootDir": "src",
-    "tsBuildInfoFile": "dist/player-web.tsbuildinfo"
+    "tsBuildInfoFile": "dist/player-web.tsbuildinfo",
+    "types": []
   },
   "include": [
     "src/**/*.ts"
   ],
   "references": [
+    {
+      "path": "../graph"
+    },
     {
       "path": "../format"
     }

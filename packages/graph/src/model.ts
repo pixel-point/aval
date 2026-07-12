@@ -248,6 +248,21 @@ export interface MotionGraphTickOptions {
   readonly routeReady?: boolean;
 }
 
+/** Host-supplied last successful draw identity for a failed presentation. */
+export interface MotionGraphStaticFailureOptions {
+  readonly retainedVisualState?: GraphStateId;
+}
+
+/** Last pixels actually drawn when an animated graph tick failed mid-barrier. */
+export interface MotionGraphRecoveryOptions {
+  readonly retainedVisualState?: GraphStateId;
+}
+
+/** Host-supplied last successful draw identity for terminal disposal. */
+export interface MotionGraphDisposeOptions {
+  readonly retainedVisualState?: GraphStateId;
+}
+
 export interface MotionGraphTraceRecord {
   readonly index: number;
   readonly result: Readonly<MotionGraphResult>;

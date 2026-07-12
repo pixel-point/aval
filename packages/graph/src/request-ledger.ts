@@ -25,6 +25,14 @@ interface PendingRequestGroup {
   readonly requestIds: number[];
 }
 
+export interface RequestLedgerCheckpoint {
+  readonly nextRequestId: number;
+  readonly pending: Readonly<{
+    readonly target: GraphStateId;
+    readonly requestIds: readonly number[];
+  }> | null;
+}
+
 /**
  * Tracks request completion groups without owning promises or scheduling work.
  *
@@ -107,6 +115,28 @@ export class RequestLedger {
       requestId,
       effect: createSettleEffect([requestId], outcome)
     });
+  }
+
+  public checkpoint(): Readonly<RequestLedgerCheckpoint> {
+    return Object.freeze({
+      nextRequestId: this.#nextRequestId,
+      pending: this.#pending === null
+        ? null
+        : Object.freeze({
+            target: this.#pending.target,
+            requestIds: Object.freeze([...this.#pending.requestIds])
+          })
+    });
+  }
+
+  public restore(checkpoint: Readonly<RequestLedgerCheckpoint>): void {
+    this.#nextRequestId = checkpoint.nextRequestId;
+    this.#pending = checkpoint.pending === null
+      ? null
+      : {
+          target: checkpoint.pending.target,
+          requestIds: [...checkpoint.pending.requestIds]
+        };
   }
 
   #allocateRequestId(): number {

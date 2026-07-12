@@ -29,6 +29,15 @@ export interface CompletedOperation {
   readonly metadata?: Readonly<OperationResultMetadata>;
 }
 
+export interface OperationJournalCheckpoint {
+  readonly contentOrdinal: bigint | null;
+  readonly inputSequence: number;
+  readonly inputsSinceTick: number;
+  readonly routeOperationsLastTick: number;
+  readonly traceIndex: number;
+  readonly trace: readonly Readonly<MotionGraphTraceRecord>[];
+}
+
 /**
  * Owns the monotonically increasing operation counters and immutable result
  * trace for a graph engine. Tick work remains external: callers admit a tick,
@@ -131,6 +140,26 @@ export class OperationJournal {
 
   public getTrace(): readonly Readonly<MotionGraphTraceRecord>[] {
     return Object.freeze([...this.#trace]);
+  }
+
+  public checkpoint(): Readonly<OperationJournalCheckpoint> {
+    return Object.freeze({
+      contentOrdinal: this.#contentOrdinal,
+      inputSequence: this.#inputSequence,
+      inputsSinceTick: this.#inputsSinceTick,
+      routeOperationsLastTick: this.#routeOperationsLastTick,
+      traceIndex: this.#traceIndex,
+      trace: Object.freeze([...this.#trace])
+    });
+  }
+
+  public restore(checkpoint: Readonly<OperationJournalCheckpoint>): void {
+    this.#contentOrdinal = checkpoint.contentOrdinal;
+    this.#inputSequence = checkpoint.inputSequence;
+    this.#inputsSinceTick = checkpoint.inputsSinceTick;
+    this.#routeOperationsLastTick = checkpoint.routeOperationsLastTick;
+    this.#traceIndex = checkpoint.traceIndex;
+    this.#trace.splice(0, this.#trace.length, ...checkpoint.trace);
   }
 
   #nextSequence(): number {

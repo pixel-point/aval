@@ -723,6 +723,13 @@ underflow, and callback cancellation on disposal.
 Manual `tickOnce()` remains a test/proof adapter over the same integrated tick
 path. Do not add the M8 public pause/autoplay API or M7 visibility policy.
 
+In the browser proof, retain RAF opportunity timestamps, post-draw canvas
+submission timestamps, and callback-to-draw latency as separate evidence.
+Grade visible submission cadence from the post-draw timestamps and grade RAF
+host health independently. Do not add synchronous framebuffer readback to the
+realtime cadence callback; exact pixels are already covered by the separate
+deterministic boundary-readback drive.
+
 Run:
 
 ```text
