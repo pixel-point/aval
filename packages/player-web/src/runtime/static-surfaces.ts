@@ -4,12 +4,41 @@ import type { RuntimeAssetCatalog } from "./asset-catalog.js";
 import {
   checkedByteNumber,
   checkedByteProduct,
-  checkedRgbaBytes
+  checkedRgbaBytes,
+  validatePositiveSafeInteger
 } from "./checked-runtime-bytes.js";
+import {
+  captureLeasedStaticPngDecoder,
+  type LeasedStaticPngDecode
+} from "./leased-static-png-decoder.js";
 import {
   StaticSurfaceStoreDisposedError,
   StaticSurfaceUnavailableError
 } from "./static-surface-errors.js";
+import {
+  StaticSurfaceCache,
+  type StaticSurfaceCacheSnapshot,
+  type StaticSurfaceEviction
+} from "./static-surface-cache.js";
+import {
+  awaitSurfaceResourceReservation,
+  captureSurfaceResourceLease,
+  normalizeStaticSurfaceStoreOptions,
+  safelySetSurfaceRole,
+  type CapturedSurfaceResourceLease,
+  type StaticSurfaceStoreOptions,
+  type StaticSurfaceStoreResourceHost,
+  type StaticSurfaceStoreResourceLease,
+  type StaticSurfaceStoreSurfaceRole
+} from "./static-surface-store-resources.js";
+import { cloneStaticDecodeSnapshot } from "./static-surface-snapshot.js";
+
+export type {
+  StaticSurfaceStoreOptions,
+  StaticSurfaceStoreResourceHost,
+  StaticSurfaceStoreResourceLease,
+  StaticSurfaceStoreSurfaceRole
+} from "./static-surface-store-resources.js";
 
 export { BrowserStaticCanvasPlane } from "./browser-static-canvas-plane.js";
 export {
@@ -23,6 +52,9 @@ export {
 } from "./strict-static-decoder.js";
 export type {
   BrowserDecodedStaticSurface,
+  BrowserStaticDecoderResourceCategory,
+  BrowserStaticDecoderResourceHost,
+  BrowserStaticDecoderResourceLease,
   BrowserStaticSurfaceDecoderOptions,
   BrowserStaticSurfaceDecoderSnapshot,
   BrowserStaticSurfaceTimerHost,
@@ -109,15 +141,25 @@ export interface StaticSurfaceStoreSnapshot {
   readonly validatedStaticFrames: number;
   readonly validatedRgbaBytes: number;
   readonly decodedSurfaces: number;
+  readonly redecodedSurfaces: number;
   readonly closedSurfaces: number;
+  readonly leaseReservations: number;
+  readonly leaseReleases: number;
   readonly presentations: number;
   readonly errors: number;
+  readonly cache: Readonly<StaticSurfaceCacheSnapshot>;
   readonly decode: Readonly<StaticSurfaceDecodeSnapshot> | null;
+}
+
+interface ManagedStaticSurface<TSurface extends DecodedStaticSurface> {
+  readonly surface: TSurface;
+  readonly lease: CapturedSurfaceResourceLease;
+  close(): void;
 }
 
 interface RetainedSurface<TSurface extends DecodedStaticSurface> {
   readonly staticFrame: string;
-  readonly surface: TSurface;
+  readonly managed: ManagedStaticSurface<TSurface>;
 }
 
 export class StaticSurfaceStore<
@@ -125,19 +167,23 @@ export class StaticSurfaceStore<
 > {
   readonly #catalog: StaticSurfaceCatalogView;
   readonly #decoder: StaticSurfaceDecoder<TSurface>;
+  readonly #decodeLeasedPng: LeasedStaticPngDecode<TSurface> | null;
   readonly #plane: StaticPresentationPlane<TSurface>;
   readonly #width: number;
   readonly #height: number;
   readonly #surfaceBytes: number;
-  readonly #maximumRetainedBytes: number;
   readonly #allValidatedBytes: number;
   readonly #staticByState: ReadonlyMap<string, string>;
+  readonly #pngBytesByStaticFrame: ReadonlyMap<string, number>;
   readonly #referencedStaticIds: readonly string[];
   readonly #validated = new Set<string>();
   readonly #ownedSurfaces = new WeakSet<object>();
   readonly #closedSurfaces = new WeakSet<object>();
   readonly #surfaceClosers = new WeakMap<object, () => unknown>();
   readonly #controllers = new Set<AbortController>();
+  readonly #cache: StaticSurfaceCache<ManagedStaticSurface<TSurface>>;
+  readonly #resourceHost: Readonly<StaticSurfaceStoreResourceHost>;
+  readonly #retainOptionalSurfaces: boolean;
 
   #current: RetainedSurface<TSurface> | null = null;
   #incoming: RetainedSurface<TSurface> | null = null;
@@ -146,16 +192,20 @@ export class StaticSurfaceStore<
   #activePresentController: AbortController | null = null;
   #latestPresentation = 0;
   #disposed = false;
-  #peakRetainedSurfaces = 0;
   #decodedSurfaceCount = 0;
+  #redecodedSurfaceCount = 0;
   #closedSurfaceCount = 0;
+  #leaseReservationCount = 0;
+  #leaseReleaseCount = 0;
+  #localTouchSequence = 0;
   #presentationCount = 0;
   #errors = 0;
 
   public constructor(
     catalog: StaticSurfaceCatalogView,
     decoder: StaticSurfaceDecoder<TSurface>,
-    plane: StaticPresentationPlane<TSurface>
+    plane: StaticPresentationPlane<TSurface>,
+    options: Readonly<StaticSurfaceStoreOptions> = {}
   ) {
     validateObject(catalog, "static surface catalog");
     validateObject(decoder, "static surface decoder");
@@ -170,13 +220,17 @@ export class StaticSurfaceStore<
     this.#staticByState = new Map(
       manifest.states.map(({ id, staticFrame }) => [id, staticFrame])
     );
+    const pngBytesByStaticFrame = new Map<string, number>();
+    for (const frame of manifest.staticFrames) {
+      validatePositiveSafeInteger(frame.length, "static PNG byte length");
+      if (pngBytesByStaticFrame.has(frame.id)) {
+        throw new TypeError("static PNG descriptor is duplicated");
+      }
+      pngBytesByStaticFrame.set(frame.id, frame.length);
+    }
+    this.#pngBytesByStaticFrame = pngBytesByStaticFrame;
     this.#referencedStaticIds = Object.freeze(
       [...new Set(manifest.states.map(({ staticFrame }) => staticFrame))].sort()
-    );
-    this.#maximumRetainedBytes = checkedStaticByteCount(
-      2,
-      this.#surfaceBytes,
-      "two-surface static peak"
     );
     this.#allValidatedBytes = checkedStaticByteCount(
       this.#referencedStaticIds.length,
@@ -185,7 +239,13 @@ export class StaticSurfaceStore<
     );
     this.#catalog = catalog;
     this.#decoder = decoder;
+    this.#decodeLeasedPng = captureLeasedStaticPngDecoder(decoder);
     this.#plane = plane;
+    const normalizedOptions = normalizeStaticSurfaceStoreOptions(options);
+    this.#retainOptionalSurfaces = normalizedOptions.retainOptionalSurfaces;
+    this.#resourceHost = normalizedOptions.resourceHost ??
+      this.#createLocalResourceHost();
+    this.#cache = new StaticSurfaceCache<ManagedStaticSurface<TSurface>>();
   }
 
   public installInitial(options: {
@@ -236,7 +296,7 @@ export class StaticSurfaceStore<
     return operation;
   }
 
-  /** Sequentially probes every unique referenced static and closes each probe. */
+  /** Sequentially validates every unique referenced static. */
   public validateAll(options: {
     readonly signal?: AbortSignal;
   } = {}): Promise<Readonly<StaticSurfaceValidationReport>> {
@@ -247,9 +307,8 @@ export class StaticSurfaceStore<
       for (const staticFrame of this.#referencedStaticIds) {
         throwIfAborted(controller.signal);
         if (this.#validated.has(staticFrame)) continue;
-        const surface = await this.#decode(staticFrame, controller.signal);
-        this.#incoming = { staticFrame, surface };
-        this.#trackPeak();
+        const decoded = await this.#getOrDecode(staticFrame, controller.signal);
+        this.#setIncoming(staticFrame, decoded.managed);
         try {
           const nextNewlyValidated = checkedCounterIncrement(
             newlyValidated,
@@ -258,8 +317,7 @@ export class StaticSurfaceStore<
           this.#validated.add(staticFrame);
           newlyValidated = nextNewlyValidated;
         } finally {
-          this.#incoming = null;
-          this.#close(surface);
+          this.#releaseIncoming(decoded.managed);
         }
       }
       return Object.freeze({
@@ -292,21 +350,23 @@ export class StaticSurfaceStore<
     return this.#currentState;
   }
 
+  /** Page reclamation seam: hard-pinned current/incoming entries are skipped. */
+  public reclaimOldest(): Readonly<StaticSurfaceEviction> | null {
+    this.#assertActive();
+    return this.#cache.evictOldest();
+  }
+
   public snapshot(): Readonly<StaticSurfaceStoreSnapshot> {
-    const retained = Number(this.#current !== null) + Number(this.#incoming !== null);
+    const cache = this.#cache.snapshot();
     return Object.freeze({
       state: this.#disposed ? "disposed" : "active",
       currentState: this.#currentState,
       currentStaticFrame: this.#current?.staticFrame ?? null,
       incomingStaticFrame: this.#incoming?.staticFrame ?? null,
-      retainedSurfaces: retained,
-      peakRetainedSurfaces: this.#peakRetainedSurfaces,
-      retainedRgbaBytes: retained === 2
-        ? this.#maximumRetainedBytes
-        : retained * this.#surfaceBytes,
-      peakRetainedRgbaBytes: this.#peakRetainedSurfaces === 2
-        ? this.#maximumRetainedBytes
-        : this.#peakRetainedSurfaces * this.#surfaceBytes,
+      retainedSurfaces: cache.retainedSurfaces,
+      peakRetainedSurfaces: cache.peakRetainedSurfaces,
+      retainedRgbaBytes: cache.retainedBytes,
+      peakRetainedRgbaBytes: cache.peakRetainedBytes,
       validatedStaticFrames: this.#validated.size,
       validatedRgbaBytes: this.#validated.size === this.#referencedStaticIds.length
         ? this.#allValidatedBytes
@@ -316,9 +376,13 @@ export class StaticSurfaceStore<
             "validated static bytes"
           ),
       decodedSurfaces: this.#decodedSurfaceCount,
+      redecodedSurfaces: this.#redecodedSurfaceCount,
       closedSurfaces: this.#closedSurfaceCount,
+      leaseReservations: this.#leaseReservationCount,
+      leaseReleases: this.#leaseReleaseCount,
       presentations: this.#presentationCount,
       errors: this.#errors,
+      cache,
       decode: cloneStaticDecodeSnapshot(this.#decoder.snapshot?.())
     });
   }
@@ -340,15 +404,10 @@ export class StaticSurfaceStore<
     }
     this.#controllers.clear();
     this.#activePresentController = null;
-    if (this.#incoming !== null) {
-      this.#close(this.#incoming.surface);
-      this.#incoming = null;
-    }
-    if (this.#current !== null) {
-      this.#close(this.#current.surface);
-      this.#current = null;
-    }
+    this.#incoming = null;
+    this.#current = null;
     this.#currentState = null;
+    this.#cache.dispose();
     try {
       this.#plane.dispose?.();
     } catch {
@@ -370,6 +429,7 @@ export class StaticSurfaceStore<
     this.#assertActive();
     this.#assertLatest(generation);
     if (this.#current?.staticFrame === staticFrame) {
+      this.#cache.get(staticFrame, this.#nextTouchSequence());
       const presentationCount = checkedCounterIncrement(
         this.#presentationCount,
         "static surface presentations"
@@ -390,9 +450,9 @@ export class StaticSurfaceStore<
       });
     }
 
-    const surface = await this.#decode(staticFrame, signal);
-    this.#incoming = { staticFrame, surface };
-    this.#trackPeak();
+    const decoded = await this.#getOrDecode(staticFrame, signal);
+    const managed = decoded.managed;
+    this.#setIncoming(staticFrame, managed);
     try {
       throwIfAborted(signal);
       this.#assertActive();
@@ -403,7 +463,7 @@ export class StaticSurfaceStore<
       );
       try {
         this.#plane.present(
-          surface,
+          managed.surface,
           this.#width,
           this.#height,
           Object.freeze({ cover })
@@ -427,63 +487,121 @@ export class StaticSurfaceStore<
           // The first successful draw is the only coherent rollback surface.
           // Retain it provisionally while the already-queued newest request
           // replaces it, so the plane never points at a closed image.
-          this.#current = this.#incoming;
-          this.#incoming = null;
-          this.#currentState = state;
-          this.#validated.add(staticFrame);
-          this.#presentationCount = presentationCount;
+          try {
+            this.#commitIncoming(
+              state,
+              staticFrame,
+              presentationCount,
+              previous
+            );
+          } catch {
+            this.#retainProvisional(
+              state,
+              staticFrame,
+              presentationCount
+            );
+          }
         } else {
           this.#restoreAfterStalePresentation(previous, cover);
         }
         throw error;
       }
-      this.#current = this.#incoming;
-      this.#incoming = null;
-      this.#currentState = state;
-      this.#validated.add(staticFrame);
-      this.#presentationCount = presentationCount;
-      if (previous !== null) this.#close(previous.surface);
+      try {
+        this.#commitIncoming(
+          state,
+          staticFrame,
+          presentationCount,
+          previous
+        );
+      } catch (error) {
+        if (previous === null) {
+          this.#retainProvisional(state, staticFrame, presentationCount);
+        } else {
+          this.#restoreAfterStalePresentation(previous, cover);
+        }
+        throw error;
+      }
       return Object.freeze({
         state,
         staticFrame,
-        redecoded: true,
+        redecoded: decoded.decoded,
         rgbaBytes: this.#surfaceBytes
       });
     } finally {
-      if (this.#incoming?.surface === surface) {
-        this.#incoming = null;
-        this.#close(surface);
-      }
+      this.#releaseIncoming(managed);
     }
   }
 
-  async #decode(staticFrame: string, signal: AbortSignal): Promise<TSurface> {
+  async #getOrDecode(
+    staticFrame: string,
+    signal: AbortSignal
+  ): Promise<Readonly<{
+    managed: ManagedStaticSurface<TSurface>;
+    decoded: boolean;
+  }>> {
+    const touchSequence = this.#nextTouchSequence();
+    const cached = this.#cache.get(staticFrame, touchSequence);
+    if (cached !== null) return Object.freeze({ managed: cached, decoded: false });
+    return Object.freeze({
+      managed: await this.#decode(staticFrame, signal, touchSequence),
+      decoded: true
+    });
+  }
+
+  async #decode(
+    staticFrame: string,
+    signal: AbortSignal,
+    touchSequence: number
+  ): Promise<ManagedStaticSurface<TSurface>> {
     throwIfAborted(signal);
     this.#assertActive();
+    const wasValidated = this.#validated.has(staticFrame);
+    const lease = await this.#reserveSurface(staticFrame, signal);
     const decodedSurfaceCount = checkedCounterIncrement(
       this.#decodedSurfaceCount,
       "decoded static surfaces"
     );
-    const png = this.#catalog.copyStaticPng(staticFrame);
-    let surface: TSurface;
+    let surface: TSurface | null = null;
+    let ownsSurface = false;
     try {
-      surface = await this.#decoder.decode(png, {
+      const decodeOptions = Object.freeze({
         signal,
         expectedWidth: this.#width,
         expectedHeight: this.#height
       });
+      const byteLength = this.#pngBytesByStaticFrame.get(staticFrame);
+      if (byteLength === undefined) {
+        throw new StaticSurfaceUnavailableError(
+          "static PNG descriptor is unavailable"
+        );
+      }
+      const source = Object.freeze({
+        byteLength,
+        copy: () => this.#catalog.copyStaticPng(staticFrame)
+      });
+      const leasedDecode = this.#decodeLeasedPng?.(source, decodeOptions) ?? null;
+      // Explicit compatibility path for custom decoders without the internal
+      // reserve-before-copy capability.
+      surface = await (leasedDecode ?? this.#decoder.decode(
+        source.copy(),
+        decodeOptions
+      ));
     } catch (error) {
+      lease.release();
       if (signal.aborted) throw abortReason(signal);
       throw error;
     }
     this.#decodedSurfaceCount = decodedSurfaceCount;
     if (surface === null || typeof surface !== "object") {
+      lease.release();
       throw new StaticSurfaceUnavailableError("decoder returned no surface");
     }
     if (this.#ownedSurfaces.has(surface)) {
+      lease.release();
       throw new StaticSurfaceUnavailableError("decoder reused a surface identity");
     }
     this.#ownedSurfaces.add(surface);
+    ownsSurface = true;
     let width: unknown;
     let height: unknown;
     let close: unknown;
@@ -495,6 +613,7 @@ export class StaticSurfaceStore<
       height = Reflect.get(surface, "height");
     } catch {
       this.#closeUnknown(surface, close);
+      lease.release();
       throw new StaticSurfaceUnavailableError(
         "decoded static surface is invalid"
       );
@@ -511,15 +630,41 @@ export class StaticSurfaceStore<
       typeof close !== "function"
     ) {
       this.#closeUnknown(surface, close);
+      lease.release();
       throw new StaticSurfaceUnavailableError(
         "decoded static surface dimensions do not match the logical canvas"
       );
     }
     if (signal.aborted || this.#disposed) {
       this.#close(surface);
+      lease.release();
       throw signal.aborted ? abortReason(signal) : disposedError();
     }
-    return surface;
+    const managed: ManagedStaticSurface<TSurface> = Object.freeze({
+      surface,
+      lease,
+      close: (): void => this.#close(surface)
+    });
+    try {
+      this.#cache.install(
+        staticFrame,
+        managed,
+        this.#surfaceBytes,
+        lease,
+        touchSequence
+      );
+    } catch (error) {
+      if (ownsSurface) this.#close(surface);
+      lease.release();
+      throw error;
+    }
+    if (wasValidated) {
+      this.#redecodedSurfaceCount = checkedCounterIncrement(
+        this.#redecodedSurfaceCount,
+        "redecoded static surfaces"
+      );
+    }
+    return managed;
   }
 
   #enqueue<TResult>(
@@ -546,8 +691,14 @@ export class StaticSurfaceStore<
     });
     this.#tail = result.then(() => undefined, () => undefined);
     void result.finally(() => {
-      unlink();
-      this.#controllers.delete(controller);
+      try {
+        unlink();
+      } catch {
+        // Local operation ownership is terminal even when a hostile caller
+        // refuses listener removal.
+      } finally {
+        this.#controllers.delete(controller);
+      }
     }).catch(() => undefined);
     return result;
   }
@@ -556,12 +707,130 @@ export class StaticSurfaceStore<
     if (generation !== this.#latestPresentation) throw supersededError();
   }
 
-  #trackPeak(): void {
-    const retained = Number(this.#current !== null) + Number(this.#incoming !== null);
-    this.#peakRetainedSurfaces = Math.max(this.#peakRetainedSurfaces, retained);
-    if (retained > 2) {
-      throw new Error("static surface store exceeded the two-surface bound");
+  #setIncoming(
+    staticFrame: string,
+    managed: ManagedStaticSurface<TSurface>
+  ): void {
+    managed.lease.setRole("incoming");
+    try {
+      this.#cache.pinIncoming(staticFrame);
+      this.#incoming = { staticFrame, managed };
+    } catch (error) {
+      safelySetSurfaceRole(managed.lease, "optional");
+      throw error;
     }
+  }
+
+  #releaseIncoming(managed: ManagedStaticSurface<TSurface>): void {
+    if (this.#incoming?.managed !== managed) return;
+    const staticFrame = this.#incoming.staticFrame;
+    this.#incoming = null;
+    if (!this.#disposed) {
+      this.#cache.pinIncoming(null);
+      safelySetSurfaceRole(managed.lease, "optional");
+      if (!this.#retainOptionalSurfaces) this.#cache.remove(staticFrame);
+    }
+  }
+
+  #commitIncoming(
+    state: string,
+    staticFrame: string,
+    presentationCount: number,
+    previous: RetainedSurface<TSurface> | null
+  ): void {
+    const incoming = this.#incoming;
+    if (incoming === null || incoming.staticFrame !== staticFrame) {
+      throw new StaticSurfaceUnavailableError(
+        "incoming static surface disappeared before commit"
+      );
+    }
+    incoming.managed.lease.setRole("current");
+    try {
+      previous?.managed.lease.setRole("optional");
+    } catch (error) {
+      safelySetSurfaceRole(incoming.managed.lease, "incoming");
+      throw error;
+    }
+    this.#cache.pinCurrent(staticFrame);
+    this.#cache.pinIncoming(null);
+    this.#current = incoming;
+    this.#incoming = null;
+    this.#currentState = state;
+    this.#validated.add(staticFrame);
+    this.#presentationCount = presentationCount;
+    if (previous !== null && !this.#retainOptionalSurfaces) {
+      this.#cache.remove(previous.staticFrame);
+    }
+  }
+
+  #retainProvisional(
+    state: string,
+    staticFrame: string,
+    presentationCount: number
+  ): void {
+    const incoming = this.#incoming;
+    if (incoming === null || incoming.staticFrame !== staticFrame) return;
+    safelySetSurfaceRole(incoming.managed.lease, "current");
+    this.#cache.pinCurrent(staticFrame);
+    this.#cache.pinIncoming(null);
+    this.#current = incoming;
+    this.#incoming = null;
+    this.#currentState = state;
+    this.#validated.add(staticFrame);
+    this.#presentationCount = presentationCount;
+  }
+
+  async #reserveSurface(
+    staticFrame: string,
+    signal: AbortSignal
+  ): Promise<CapturedSurfaceResourceLease> {
+    const nextReservations = checkedCounterIncrement(
+      this.#leaseReservationCount,
+      "static surface lease reservations"
+    );
+    const pendingLease = this.#resourceHost.reserveDecodedSurface(Object.freeze({
+      staticFrame,
+      byteLength: this.#surfaceBytes,
+      role: "incoming" as const
+    }));
+    const rawLease = await awaitSurfaceResourceReservation(
+      pendingLease,
+      signal
+    );
+    const lease = captureSurfaceResourceLease(rawLease, () => {
+      this.#leaseReleaseCount = checkedCounterIncrement(
+        this.#leaseReleaseCount,
+        "static surface lease releases"
+      );
+    });
+    this.#leaseReservationCount = nextReservations;
+    return lease;
+  }
+
+  #nextTouchSequence(): number {
+    const value = this.#resourceHost.nextTouchSequence();
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new RangeError(
+        "static surface touch sequence must be a non-negative safe integer"
+      );
+    }
+    return value;
+  }
+
+  #createLocalResourceHost(): Readonly<StaticSurfaceStoreResourceHost> {
+    return Object.freeze({
+      reserveDecodedSurface: () => Object.freeze({
+        setRole: (_role: StaticSurfaceStoreSurfaceRole): void => undefined,
+        release: (): void => undefined
+      }),
+      nextTouchSequence: (): number => {
+        this.#localTouchSequence = checkedCounterIncrement(
+          this.#localTouchSequence,
+          "local static surface touch sequence"
+        );
+        return this.#localTouchSequence;
+      }
+    });
   }
 
   #restoreAfterStalePresentation(
@@ -570,7 +839,7 @@ export class StaticSurfaceStore<
   ): void {
     try {
       this.#plane.present(
-        previous.surface,
+        previous.managed.surface,
         this.#width,
         this.#height,
         Object.freeze({ cover })
@@ -616,34 +885,6 @@ export class StaticSurfaceStore<
   }
 }
 
-function cloneStaticDecodeSnapshot(
-  value: Readonly<StaticSurfaceDecodeSnapshot> | undefined
-): Readonly<StaticSurfaceDecodeSnapshot> | null {
-  if (value === undefined) return null;
-  const keys = [
-    "nativeAttempts",
-    "nativeSuccesses",
-    "pureAttempts",
-    "pureSuccesses",
-    "errors",
-    "peakPngCopyBytes",
-    "peakZlibBytes",
-    "peakFilteredBytes",
-    "peakRgbaBytes",
-    "bitmapCloses"
-  ] as const;
-  const result = {} as Record<(typeof keys)[number], number>;
-  for (const key of keys) {
-    const field = value[key];
-    if (!Number.isSafeInteger(field) || field < 0) {
-      throw new RangeError(`static decoder snapshot ${key} is invalid`);
-    }
-    result[key] = field;
-  }
-  return Object.freeze(result);
-}
-
-
 /** Live catalog satisfies the narrow store dependency without an adapter. */
 export function asStaticSurfaceCatalog(
   catalog: RuntimeAssetCatalog
@@ -657,9 +898,25 @@ function forwardAbort(
 ): () => void {
   if (source === undefined) return () => undefined;
   const abort = (): void => target.abort(abortReason(source));
-  if (source.aborted) abort();
-  else source.addEventListener("abort", abort, { once: true });
-  return () => source.removeEventListener("abort", abort);
+  if (source.aborted) {
+    abort();
+    return () => undefined;
+  }
+  let linked = true;
+  try {
+    source.addEventListener("abort", abort, { once: true });
+  } catch (error) {
+    // A host can retain the listener and still throw from registration.
+    // Roll that partial attachment back before exposing the failure.
+    try { source.removeEventListener("abort", abort); } catch {}
+    linked = false;
+    throw error;
+  }
+  return () => {
+    if (!linked) return;
+    linked = false;
+    source.removeEventListener("abort", abort);
+  };
 }
 
 function throwIfAborted(signal: AbortSignal): void {

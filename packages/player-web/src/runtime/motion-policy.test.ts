@@ -136,6 +136,47 @@ describe("MotionPolicyCoordinator", () => {
     }
   });
 
+  it.each(["visibility-suspended", "decoder-queued"] as const)(
+    "re-enters full motion from transient %s static mode",
+    (origin) => {
+      const coordinator = new MotionPolicyCoordinator({ policy: "full" });
+      coordinator.installStatic(origin);
+      expect(coordinator.snapshot().stickyFailure).toBe(false);
+      const transition = requireTransition(coordinator.nextTransition());
+      expect(transition.kind).toBe("enter-full");
+      expect(coordinator.commitAnimated(transition)).toBe(true);
+      expect(coordinator.snapshot()).toMatchObject({
+        actualMode: "animated",
+        staticOrigin: null,
+        stickyFailure: false
+      });
+    }
+  );
+
+  it("treats a context-loss interruption as reenterable until recovery fails", () => {
+    const coordinator = new MotionPolicyCoordinator({ policy: "full" });
+    coordinator.installAnimated();
+    coordinator.failToStatic("context-loss");
+    const transition = requireTransition(coordinator.nextTransition());
+    expect(coordinator.snapshot()).toMatchObject({
+      staticOrigin: "context-loss",
+      stickyFailure: false
+    });
+    expect(coordinator.commitAnimated(transition)).toBe(true);
+  });
+
+  it("can invalidate a policy transition for external visibility ownership", () => {
+    const coordinator = new MotionPolicyCoordinator();
+    coordinator.installAnimated();
+    coordinator.setPolicy("reduce");
+    const transition = requireTransition(coordinator.nextTransition());
+
+    coordinator.cancelTransition();
+
+    expect(transition.signal.aborted).toBe(true);
+    expect(coordinator.snapshot().transition).toBeNull();
+  });
+
   it("invalidates stale rapid-flip generations and accepts only the latest", () => {
     const coordinator = new MotionPolicyCoordinator();
     coordinator.installAnimated();

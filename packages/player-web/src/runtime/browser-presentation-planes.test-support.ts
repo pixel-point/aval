@@ -98,6 +98,7 @@ export function fakeCanvas() {
   let heightFailureCountdown = 0;
   let failWidthArmed = false;
   let failHeightArmed = false;
+  const listeners = new Map<string, Set<EventListener>>();
   const context = {
     clearRect() {},
     drawImage(...args: unknown[]) {
@@ -139,12 +140,34 @@ export function fakeCanvas() {
     },
     getContext(kind: string) {
       return kind === "2d" ? context : null;
+    },
+    addEventListener(type: string, listener: EventListener) {
+      const values = listeners.get(type) ?? new Set<EventListener>();
+      values.add(listener);
+      listeners.set(type, values);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      listeners.get(type)?.delete(listener);
     }
   } as unknown as HTMLCanvasElement;
   return {
     canvas,
     drawCalls,
     backingSets,
+    listenerCount(): number {
+      return [...listeners.values()].reduce(
+        (total, values) => total + values.size,
+        0
+      );
+    },
+    dispatchContext(type: "webglcontextlost" | "webglcontextrestored") {
+      let prevented = false;
+      const event = {
+        preventDefault() { prevented = true; }
+      } as unknown as Event;
+      for (const listener of listeners.get(type) ?? []) listener(event);
+      return { get prevented() { return prevented; } };
+    },
     failNextDraw(): void {
       failingDraws = 1;
     },

@@ -11,6 +11,11 @@ import {
   createBrowserPngNativeInflater,
   type BrowserPngNativeInflater
 } from "./png-inflate-browser.js";
+import { RuntimePlaybackError } from "./errors.js";
+import {
+  LEASED_STATIC_PNG_DECODER,
+  type LeasedStaticPngSource
+} from "./leased-static-png-decoder.js";
 import type {
   StaticSurfaceDecodeOptions,
   StaticSurfaceDecodeSnapshot,
@@ -30,6 +35,23 @@ export interface BrowserDecodedStaticSurface {
 export interface BrowserStaticSurfaceTimerHost {
   setTimeout(callback: () => void, milliseconds: number): unknown;
   clearTimeout(handle: unknown): void;
+}
+
+export type BrowserStaticDecoderResourceCategory =
+  | "png-copy"
+  | "png-zlib"
+  | "png-scratch";
+
+export interface BrowserStaticDecoderResourceLease {
+  release(): void;
+}
+
+export interface BrowserStaticDecoderResourceHost {
+  reserve(
+    category: BrowserStaticDecoderResourceCategory,
+    byteLength: number
+  ): BrowserStaticDecoderResourceLease |
+    PromiseLike<BrowserStaticDecoderResourceLease>;
 }
 
 export interface BrowserStaticSurfaceDecoderSnapshot
@@ -57,6 +79,7 @@ export interface BrowserStaticSurfaceDecoderOptions {
     width: number,
     height: number
   ) => Promise<ImageBitmap>;
+  readonly resourceHost?: BrowserStaticDecoderResourceHost;
 }
 
 interface CapturedStaticBitmap {
@@ -85,6 +108,11 @@ implements StaticSurfaceDecoder<BrowserDecodedStaticSurface> {
   readonly #createBitmap: BrowserStaticSurfaceDecoderOptions["createBitmap"];
   readonly #timeoutMs: number;
   readonly #timers: Readonly<BrowserStaticSurfaceTimerHost>;
+  readonly #reserveTransient: ((
+    category: BrowserStaticDecoderResourceCategory,
+    byteLength: number
+  ) => BrowserStaticDecoderResourceLease |
+    PromiseLike<BrowserStaticDecoderResourceLease>) | null;
 
   #nativeAttempts = 0;
   #nativeSuccesses = 0;
@@ -121,6 +149,9 @@ implements StaticSurfaceDecoder<BrowserDecodedStaticSurface> {
     this.#createBitmap = options.createBitmap ?? createBitmapFromRgba;
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_STATIC_DECODE_TIMEOUT_MS;
     this.#timers = options.timers ?? DEFAULT_STATIC_DECODE_TIMERS;
+    this.#reserveTransient = options.resourceHost === undefined
+      ? null
+      : captureStaticDecoderResourceHost(options.resourceHost);
     if (
       !Number.isSafeInteger(this.#timeoutMs) ||
       this.#timeoutMs <= 0 ||
@@ -161,34 +192,98 @@ implements StaticSurfaceDecoder<BrowserDecodedStaticSurface> {
     png: Uint8Array,
     options: StaticSurfaceDecodeOptions
   ): Promise<BrowserDecodedStaticSurface> {
-    throwIfAborted(options.signal);
-    const plan = validatePngProfile({
-      png,
-      expectedWidth: options.expectedWidth,
-      expectedHeight: options.expectedHeight
-    });
-    this.#peakPngCopyBytes = Math.max(
-      this.#peakPngCopyBytes,
-      plan.byteRange.length
-    );
-    this.#peakZlibBytes = Math.max(
-      this.#peakZlibBytes,
-      plan.zlibByteLength
-    );
-    this.#peakFilteredBytes = Math.max(
-      this.#peakFilteredBytes,
-      plan.expectedFilteredBytes
-    );
-    this.#peakRgbaBytes = Math.max(
-      this.#peakRgbaBytes,
-      plan.expectedRgbaBytes
-    );
+    // Compatibility adapter: custom callers may already own this eager copy.
+    // StaticSurfaceStore uses the internal leased-source symbol capability.
+    return this.#decodeSource(Object.freeze({
+      byteLength: png.byteLength,
+      copy: () => png
+    }), options, false);
+  }
 
+  /** @internal Exact leased-copy capability consumed by StaticSurfaceStore. */
+  public [LEASED_STATIC_PNG_DECODER](
+    source: Readonly<LeasedStaticPngSource>,
+    options: Readonly<StaticSurfaceDecodeOptions>
+  ): Promise<BrowserDecodedStaticSurface> | null {
+    if (this.#reserveTransient === null) return null;
+    return this.#decodeSource(source, options, true);
+  }
+
+  async #decodeSource(
+    source: Readonly<LeasedStaticPngSource>,
+    options: Readonly<StaticSurfaceDecodeOptions>,
+    requireExactOwnedCopy: boolean
+  ): Promise<BrowserDecodedStaticSurface> {
+    throwIfAborted(options.signal);
+    const resourceLeases: BrowserStaticDecoderResourceLease[] = [];
+    let plan: PngDecodePlan;
     let decoded: Readonly<{
       readonly bitmap: Readonly<CapturedStaticBitmap>;
       readonly path: StaticPngInflatePath;
     }>;
     try {
+      if (this.#reserveTransient !== null) {
+        resourceLeases.push(captureStaticDecoderResourceLease(
+          await this.#reserveResource(
+            "png-copy",
+            source.byteLength,
+            options.signal
+          )
+        ));
+      }
+      throwIfAborted(options.signal);
+      const png = source.copy();
+      if (
+        !(png instanceof Uint8Array) ||
+        png.byteLength !== source.byteLength ||
+        (
+          requireExactOwnedCopy &&
+          (
+            !(png.buffer instanceof ArrayBuffer) ||
+            png.byteOffset !== 0 ||
+            png.buffer.byteLength !== source.byteLength
+          )
+        )
+      ) {
+        throw new TypeError("static PNG copy does not match its exact lease");
+      }
+      plan = validatePngProfile({
+        png,
+        expectedWidth: options.expectedWidth,
+        expectedHeight: options.expectedHeight
+      });
+      this.#peakPngCopyBytes = Math.max(
+        this.#peakPngCopyBytes,
+        plan.byteRange.length
+      );
+      this.#peakZlibBytes = Math.max(
+        this.#peakZlibBytes,
+        plan.zlibByteLength
+      );
+      this.#peakFilteredBytes = Math.max(
+        this.#peakFilteredBytes,
+        plan.expectedFilteredBytes
+      );
+      this.#peakRgbaBytes = Math.max(
+        this.#peakRgbaBytes,
+        plan.expectedRgbaBytes
+      );
+      if (this.#reserveTransient !== null) {
+        resourceLeases.push(captureStaticDecoderResourceLease(
+          await this.#reserveResource(
+            "png-zlib",
+            plan.zlibByteLength,
+            options.signal
+          )
+        ));
+        resourceLeases.push(captureStaticDecoderResourceLease(
+          await this.#reserveResource(
+            "png-scratch",
+            staticDecoderScratchBytes(plan, this.#nativeInflater.supported),
+            options.signal
+          )
+        ));
+      }
       decoded = await awaitStrictBitmapDecode(
         (operationSignal) => this.#decodeBitmap(plan, operationSignal),
         options.signal,
@@ -199,6 +294,7 @@ implements StaticSurfaceDecoder<BrowserDecodedStaticSurface> {
     } catch (error) {
       this.#errors = checkedIncrement(this.#errors, "static decode errors");
       if (
+        error instanceof RuntimePlaybackError ||
         error instanceof FormatError ||
         error instanceof StaticSurfaceDecodeTimeoutError ||
         (error instanceof DOMException && error.name === "AbortError")
@@ -209,6 +305,8 @@ implements StaticSurfaceDecoder<BrowserDecodedStaticSurface> {
         "PNG_DEFLATE_INVALID",
         "validated static pixels could not create a browser surface"
       );
+    } finally {
+      releaseStaticDecoderResources(resourceLeases);
     }
     let closed = false;
     return Object.freeze({
@@ -310,6 +408,33 @@ implements StaticSurfaceDecoder<BrowserDecodedStaticSurface> {
     return Object.freeze({ bitmap, path });
   }
 
+  async #reserveResource(
+    category: BrowserStaticDecoderResourceCategory,
+    byteLength: number,
+    signal: AbortSignal
+  ): Promise<BrowserStaticDecoderResourceLease> {
+    const reserve = this.#reserveTransient;
+    if (reserve === null) {
+      throw new TypeError("static decoder resource admission is unavailable");
+    }
+    const pending = Promise.resolve(reserve(category, byteLength));
+    if (signal.aborted) {
+      void pending.then((late) => {
+        try { late.release(); } catch {}
+      }, () => undefined);
+      throw abortReason(signal);
+    }
+    return awaitStrictBitmapDecode(
+      () => pending,
+      signal,
+      this.#timeoutMs,
+      this.#timers,
+      (late) => {
+        try { late.release(); } catch {}
+      }
+    );
+  }
+
   #captureBitmap(
     value: unknown,
     expectedWidth: number,
@@ -408,6 +533,124 @@ async function createBitmapFromRgba(
     rgba.byteLength
   );
   return createImageBitmap(new ImageData(clamped, width, height));
+}
+
+function captureStaticDecoderResourceHost(
+  value: BrowserStaticDecoderResourceHost
+): (
+  category: BrowserStaticDecoderResourceCategory,
+  byteLength: number
+) => BrowserStaticDecoderResourceLease |
+  PromiseLike<BrowserStaticDecoderResourceLease> {
+  if (value === null || typeof value !== "object") {
+    throw new TypeError("static decoder resource host is malformed");
+  }
+  let reserve: unknown;
+  try {
+    reserve = Reflect.get(value, "reserve");
+  } catch {
+    throw new TypeError("static decoder resource host is inaccessible");
+  }
+  if (typeof reserve !== "function") {
+    throw new TypeError("static decoder resource host is malformed");
+  }
+  return (category, byteLength) => Reflect.apply(
+    reserve,
+    value,
+    [category, byteLength]
+  ) as BrowserStaticDecoderResourceLease |
+    PromiseLike<BrowserStaticDecoderResourceLease>;
+}
+
+function captureStaticDecoderResourceLease(
+  value: BrowserStaticDecoderResourceLease
+): BrowserStaticDecoderResourceLease {
+  if (value === null || typeof value !== "object") {
+    throw new TypeError("static decoder resource lease is malformed");
+  }
+  let release: unknown;
+  try {
+    release = Reflect.get(value, "release");
+  } catch {
+    throw new TypeError("static decoder resource lease is inaccessible");
+  }
+  if (typeof release !== "function") {
+    throw new TypeError("static decoder resource lease is malformed");
+  }
+  let released = false;
+  return Object.freeze({
+    release(): void {
+      if (released) return;
+      released = true;
+      Reflect.apply(release, value, []);
+    }
+  });
+}
+
+function releaseStaticDecoderResources(
+  leases: BrowserStaticDecoderResourceLease[]
+): void {
+  for (let index = leases.length - 1; index >= 0; index -= 1) {
+    try {
+      leases[index]!.release();
+    } catch {
+      // Accounting cleanup continues across a hostile release capability.
+    }
+  }
+  leases.length = 0;
+}
+
+function staticDecoderScratchBytes(
+  plan: Readonly<PngDecodePlan>,
+  native: boolean
+): number {
+  const filteredAndRgba = checkedResourceSum(
+    plan.expectedFilteredBytes,
+    plan.expectedRgbaBytes,
+    "static decoder filtered and RGBA bytes"
+  );
+  if (!native) return filteredAndRgba;
+  const doubleFiltered = checkedResourceProduct(
+    plan.expectedFilteredBytes,
+    2,
+    "static decoder double filtered bytes"
+  );
+  const nativeInflate = checkedResourceSum(
+    plan.zlibByteLength,
+    doubleFiltered,
+    "static decoder native inflate bytes"
+  );
+  return Math.max(nativeInflate, filteredAndRgba);
+}
+
+function checkedResourceSum(left: number, right: number, label: string): number {
+  if (
+    !Number.isSafeInteger(left) ||
+    left < 0 ||
+    !Number.isSafeInteger(right) ||
+    right < 0 ||
+    left > Number.MAX_SAFE_INTEGER - right
+  ) {
+    throw new RangeError(`${label} exceed the safe-integer range`);
+  }
+  return left + right;
+}
+
+function checkedResourceProduct(
+  left: number,
+  right: number,
+  label: string
+): number {
+  if (
+    !Number.isSafeInteger(left) ||
+    left < 0 ||
+    !Number.isSafeInteger(right) ||
+    right < 0 ||
+    (right !== 0 && left > Math.floor(Number.MAX_SAFE_INTEGER / right))
+  ) {
+    throw new RangeError(`${label} exceed the safe-integer range`);
+  }
+  return left * right;
 }
 
 function awaitStrictBitmapDecode<T>(

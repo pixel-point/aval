@@ -17,6 +17,10 @@ export interface RealtimeContentTickContext {
   readonly presentationOrdinal: bigint;
   readonly deadlineMs: number;
   readonly opportunityTimeMs: number;
+  /** Actual host-clock read at entry to the eligible callback, not the RAF timestamp argument. */
+  readonly callbackStartMs: number;
+  /** Null for manual tickOnce(); only scheduled RAF callbacks have an ordinal. */
+  readonly eligibleAnimationFrameOrdinal: number | null;
   readonly manual: boolean;
 }
 
@@ -133,6 +137,7 @@ export class RealtimeDriver {
     this.#assertUsable();
     this.#assertContentTickIdle();
     this.#assertFrameHostIdle();
+    this.#assertClockHostIdle();
     if (this.#running) return;
     this.#ensureClockInitialized();
     this.#running = true;
@@ -150,6 +155,7 @@ export class RealtimeDriver {
     this.#assertUsable();
     this.#assertContentTickIdle();
     this.#assertFrameHostIdle();
+    this.#assertClockHostIdle();
     if (this.#running) {
       throw new RangeError(
         "manual tick is unavailable while the realtime driver is running"
@@ -182,6 +188,62 @@ export class RealtimeDriver {
     this.#running = false;
     this.#advanceLifecycleGeneration();
     this.#invalidateFrameOwnership();
+  }
+
+  /** Visibility suspension preserves the exact authored presentation ordinal. */
+  public pauseForVisibility(): void {
+    this.pauseForPolicy();
+  }
+
+  /**
+   * Drops hidden wall time and optionally resumes the previously-running RAF
+   * owner. The next authored frame remains one normal frame in the future.
+   */
+  public resumeAfterVisibility(wasRunning: boolean): void {
+    this.#assertUsable();
+    this.#assertContentTickIdle();
+    this.#assertFrameHostIdle();
+    this.#assertClockHostIdle();
+    if (typeof wasRunning !== "boolean") {
+      throw new TypeError("visibility resume running state must be a boolean");
+    }
+    if (this.#initialized) {
+      const token: RealtimeClockInitializationToken = { reentered: false };
+      const expectedGeneration = this.#lifecycleGeneration;
+      this.#clockInitializationInFlight = token;
+      let resumeMs: number;
+      try {
+        resumeMs = this.#now();
+      } finally {
+        if (this.#clockInitializationInFlight === token) {
+          this.#clockInitializationInFlight = null;
+        }
+      }
+      if (token.reentered) {
+        throw new RangeError("realtime visibility resume reentered synchronously");
+      }
+      if (this.#disposed) throw new RealtimeDriverDisposedError();
+      if (this.#lifecycleGeneration !== expectedGeneration) {
+        throw new RangeError(
+          "realtime lifecycle changed during visibility resume"
+        );
+      }
+      validateClockValue(resumeMs, "visibility resume clock");
+      const nextDeadlineMs = resumeMs + this.#frameDurationMs;
+      validateClockValue(nextDeadlineMs, "visibility resume deadline");
+      const authoredOffsetMs = timestampForFrame(
+        this.#nextPresentationOrdinal,
+        this.#frameRate
+      ) / 1_000;
+      const originMs = nextDeadlineMs - authoredOffsetMs;
+      if (!Number.isFinite(originMs) || Math.abs(originMs) > Number.MAX_SAFE_INTEGER) {
+        throw new RangeError("visibility resume origin exceeds safe range");
+      }
+      this.#originMs = originMs;
+      this.#nextDeadlineMs = nextDeadlineMs;
+      this.#lastDisplayCallbackMs = null;
+    }
+    if (wasRunning) this.start();
   }
 
   /** Fatal playback recovery freezes and cancels the owned callback immediately. */
@@ -312,10 +374,14 @@ export class RealtimeDriver {
     const expectedGeneration = this.#lifecycleGeneration;
     this.#contentTickInFlight = token;
     try {
+      const callbackStartMs = this.#now();
+      validateClockValue(callbackStartMs, "content callback start clock");
       const result = this.#tryContentTick(Object.freeze({
         presentationOrdinal: ordinal,
         deadlineMs,
         opportunityTimeMs,
+        callbackStartMs,
+        eligibleAnimationFrameOrdinal: manual ? null : this.#displayCallbacks,
         manual
       }));
       this.#assertContentTickAvailable(token);
@@ -554,6 +620,13 @@ export class RealtimeDriver {
 
   #assertUsable(): void {
     if (this.#disposed) throw new RealtimeDriverDisposedError();
+  }
+
+  #assertClockHostIdle(): void {
+    const active = this.#clockInitializationInFlight;
+    if (active === null) return;
+    active.reentered = true;
+    throw new RangeError("realtime clock initialization reentered synchronously");
   }
 }
 

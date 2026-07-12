@@ -24,7 +24,7 @@ export interface CreateDecoderWorkerClientOptions
 
 /** Canonical bundler-visible URL for the packaged module-worker entry. */
 export function resolveDecoderWorkerEntryUrl(): URL {
-  return new URL("./entry.ts", import.meta.url);
+  return new URL("./entry.js", import.meta.url);
 }
 
 /**

@@ -42,11 +42,13 @@ interface IntegratedRecoveryCoordinatorOptions {
     candidate: IntegratedCandidateAttempt
   ) => void;
   readonly getReadyResult: () => Readonly<RuntimeReadinessResult> | null;
+  readonly getSelectedRendition: () => string | null;
   readonly registerRequest: (requestId: number) => Promise<void>;
   readonly stageReadyResult: (
     result: Readonly<RuntimeReadinessResult> | null
   ) => void;
   readonly reportFailure: (failure: Readonly<RuntimeFailure>) => void;
+  readonly releaseCandidateResidency: (rendition: string) => void;
 }
 
 /** Owns the single async static/recovery lane after installation. */
@@ -61,11 +63,13 @@ export class IntegratedRecoveryCoordinator {
     candidate: IntegratedCandidateAttempt
   ) => void;
   readonly #getReadyResult: () => Readonly<RuntimeReadinessResult> | null;
+  readonly #getSelectedRendition: () => string | null;
   readonly #registerRequest: (requestId: number) => Promise<void>;
   readonly #stageReadyResult: (
     result: Readonly<RuntimeReadinessResult> | null
   ) => void;
   readonly #reportFailure: (failure: Readonly<RuntimeFailure>) => void;
+  readonly #releaseCandidateResidency: (rendition: string) => void;
   readonly #operations = new StaticOperationQueue();
 
   #recovery: Promise<void> | null = null;
@@ -73,6 +77,8 @@ export class IntegratedRecoveryCoordinator {
     readonly state: string;
     readonly controller: AbortController;
   } | null = null;
+  #latestStaticRequestGeneration = 0;
+  #latestStaticPresentation: AbortController | null = null;
 
   public constructor(options: Readonly<IntegratedRecoveryCoordinatorOptions>) {
     this.#catalog = options.catalog;
@@ -83,9 +89,11 @@ export class IntegratedRecoveryCoordinator {
     this.#getActiveCandidate = options.getActiveCandidate;
     this.#detachActiveCandidate = options.detachActiveCandidate;
     this.#getReadyResult = options.getReadyResult;
+    this.#getSelectedRendition = options.getSelectedRendition;
     this.#registerRequest = options.registerRequest;
     this.#stageReadyResult = options.stageReadyResult;
     this.#reportFailure = options.reportFailure;
+    this.#releaseCandidateResidency = options.releaseCandidateResidency;
   }
 
   public get active(): boolean {
@@ -94,6 +102,10 @@ export class IntegratedRecoveryCoordinator {
 
   public get promise(): Promise<void> | null {
     return this.#recovery;
+  }
+
+  public get busy(): boolean {
+    return this.#recovery !== null || this.#operations.snapshot().pending > 0;
   }
 
   public start(failure: Readonly<RuntimeFailure>): void {
@@ -108,6 +120,24 @@ export class IntegratedRecoveryCoordinator {
   public requestStaticState(target: string): Promise<void> {
     return this.#operations.enqueue(({ signal }) =>
       this.#requestStatic(target, signal)
+    );
+  }
+
+  /** Hidden-time requests coalesce before spending decode/presentation work. */
+  public requestLatestStaticState(target: string): Promise<void> {
+    if (this.#latestStaticRequestGeneration >= Number.MAX_SAFE_INTEGER) {
+      return Promise.reject(new RangeError(
+        "latest static request generation exceeds safe range"
+      ));
+    }
+    this.#latestStaticRequestGeneration += 1;
+    const generation = this.#latestStaticRequestGeneration;
+    this.#latestStaticPresentation?.abort(new DOMException(
+      "hidden static request was superseded",
+      "AbortError"
+    ));
+    return this.#operations.enqueue(({ signal }) =>
+      this.#requestLatestStatic(target, generation, signal)
     );
   }
 
@@ -145,6 +175,7 @@ export class IntegratedRecoveryCoordinator {
   ): Promise<void> {
     this.#reportFailure(failure);
     const candidate = this.#getActiveCandidate();
+    const candidateRendition = this.#getSelectedRendition();
     let traceState: Readonly<IntegratedPlaybackTraceState> | null = null;
     if (candidate !== null) {
       try {
@@ -328,7 +359,11 @@ export class IntegratedRecoveryCoordinator {
     // backend. Retire it only after the newest strict static has crossed the
     // effect host's draw barrier and is visibly covering that backend.
     if (candidate !== null) {
-      await this.#retireCandidate(candidate, "animated-recovery-cleanup");
+      await this.#retireCandidate(
+        candidate,
+        "animated-recovery-cleanup",
+        candidateRendition
+      );
     }
   }
 
@@ -398,20 +433,55 @@ export class IntegratedRecoveryCoordinator {
     return request;
   }
 
+  async #requestLatestStatic(
+    target: string,
+    generation: number,
+    signal: AbortSignal
+  ): Promise<void> {
+    if (generation !== this.#latestStaticRequestGeneration) return;
+    const controller = new AbortController();
+    const forwardAbort = (): void => controller.abort(
+      integratedAbortReason(signal)
+    );
+    if (signal.aborted) forwardAbort();
+    else signal.addEventListener("abort", forwardAbort, { once: true });
+    this.#latestStaticPresentation = controller;
+    try {
+      await this.#requestStatic(target, controller.signal);
+    } catch (error) {
+      if (
+        generation !== this.#latestStaticRequestGeneration &&
+        controller.signal.aborted
+      ) return;
+      throw error;
+    } finally {
+      signal.removeEventListener("abort", forwardAbort);
+      if (this.#latestStaticPresentation === controller) {
+        this.#latestStaticPresentation = null;
+      }
+    }
+  }
+
   async #retireCandidateAfterStaticCover(): Promise<void> {
     const candidate = this.#getActiveCandidate();
     if (candidate === null) return;
-    await this.#retireCandidate(candidate, "static-request-candidate-cleanup");
+    await this.#retireCandidate(
+      candidate,
+      "static-request-candidate-cleanup",
+      this.#getSelectedRendition()
+    );
   }
 
   async #retireCandidate(
     candidate: IntegratedCandidateAttempt,
-    operation: string
+    operation: string,
+    rendition: string | null
   ): Promise<void> {
     if (this.#getActiveCandidate() !== candidate) return;
     this.#detachActiveCandidate(candidate);
     try {
       await candidate.dispose();
+      if (rendition !== null) this.#releaseCandidateResidency(rendition);
     } catch (error) {
       this.#reportFailure(normalizeRuntimeFailure(
         "readiness-failure",

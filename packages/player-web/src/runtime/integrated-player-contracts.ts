@@ -14,7 +14,8 @@ import type {
   RuntimeReadiness,
   RuntimeReadinessResult,
   RuntimeSchedulerSnapshot,
-  RuntimeTraceRecord
+  RuntimeTraceRecord,
+  RuntimeVisibilityState
 } from "./model.js";
 import type {
   RuntimeAvcRenditionCandidate,
@@ -23,6 +24,11 @@ import type {
 import type { RealtimeUnderflowEvent } from "./realtime-driver.js";
 import type { MotionPolicy } from "./motion-policy.js";
 import type { RuntimeCanvasResourceHost } from "./static-resource-plan.js";
+import type { BrowserContextRecoveryEventTarget } from "./browser-context-recovery.js";
+import type { RuntimeAssetSession } from "./runtime-asset-session.js";
+import type {
+  IntegratedPlayerParticipantBinding
+} from "./integrated-player-participant.js";
 
 type SuccessfulRenditionInspection = Extract<
   RuntimeAvcRenditionInspection,
@@ -47,6 +53,12 @@ export interface IntegratedStaticSurfaceStore {
   currentState(): string | null;
   coverCurrent(): void;
   revealAnimated(): void;
+  /** Optional M7 decoded-static reclamation; hard pins return no victim. */
+  reclaimOldest?(): Readonly<{
+    readonly staticFrame: string;
+    readonly byteLength: number;
+    readonly lastTouchSequence: number;
+  }> | null;
   /** Resolves after every aborted decoder/presentation callback has retired. */
   settled(): Promise<void>;
   dispose(): void;
@@ -98,6 +110,8 @@ export interface IntegratedCandidateAvailability {
 export interface IntegratedCandidateFactory {
   readonly availability: Readonly<IntegratedCandidateAvailability>;
   readonly resourceHost?: RuntimeCanvasResourceHost;
+  /** Narrow animated-canvas event capability; never exposes the GL context. */
+  readonly contextTarget?: BrowserContextRecoveryEventTarget;
   create(
     context: Readonly<IntegratedCandidateAttemptContext>
   ): IntegratedCandidateAttempt;
@@ -107,6 +121,8 @@ export interface IntegratedContentTickContext {
   /** Frame zero is drawn during activation; live content begins at one. */
   readonly presentationOrdinal: bigint;
   readonly rationalDeadlineUs: number | null;
+  readonly callbackStartMicroseconds?: number;
+  readonly eligibleAnimationFrameOrdinal?: number | null;
 }
 
 export interface IntegratedPlaybackTickContext
@@ -163,8 +179,7 @@ export interface IntegratedRealtimeDriverOptions {
   ) => void;
 }
 
-export interface IntegratedPlayerOptions {
-  readonly bytes: Uint8Array;
+interface IntegratedPlayerCommonOptions {
   readonly createStaticStore: (
     catalog: RuntimeAssetCatalog
   ) => IntegratedStaticSurfaceStore;
@@ -174,11 +189,29 @@ export interface IntegratedPlayerOptions {
   readonly hostMaxRuntimeBytes?: number;
   readonly motionPolicy?: MotionPolicy;
   readonly hostReducedMotion?: boolean;
+  /** Host-owned lifecycle seam; DOM visibility observation belongs to M8. */
+  readonly initialVisibility?: RuntimeVisibilityState;
+  /** Externally owned page-account/decoder-ticket composition. */
+  readonly participantBinding?: IntegratedPlayerParticipantBinding;
   readonly now?: () => number;
   readonly timers?: IntegratedTimerHost;
   /** Internal M5.5 clock ownership; public pause/autoplay remains M8. */
   readonly realtime?: Readonly<IntegratedRealtimeDriverOptions>;
 }
+
+export type IntegratedPlayerOptions = IntegratedPlayerCommonOptions & (
+  | {
+      readonly bytes: Uint8Array;
+      readonly assetSession?: never;
+      readonly assetSessionOwnership?: never;
+    }
+  | {
+      readonly bytes?: never;
+      readonly assetSession: RuntimeAssetSession;
+      /** Required capability boundary; external sessions remain host-owned. */
+      readonly assetSessionOwnership: "external" | "player";
+    }
+);
 
 export interface IntegratedPrepareOptions {
   readonly signal?: AbortSignal;

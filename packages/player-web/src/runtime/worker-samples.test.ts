@@ -7,7 +7,8 @@ import { DecodeTimeline } from "./decode-timeline.js";
 import {
   WorkerSampleFactory,
   type WorkerSampleCatalog,
-  type WorkerSampleFrameRequest
+  type WorkerSampleFrameRequest,
+  type WorkerSampleResourceHost
 } from "./worker-samples.js";
 
 const LIMITS = Object.freeze({
@@ -163,6 +164,128 @@ describe("WorkerSampleFactory", () => {
     expect(new Uint8Array(
       fixture.catalog.copySample("opaque", "body", 1)
     )).toEqual(expected[1]);
+  });
+
+  it("claims exact transfer bytes before copying and releases after ownership transfer", () => {
+    const fixture = createFixture();
+    const events: string[] = [];
+    let activeBytes = 0;
+    let releases = 0;
+    const catalog = {
+      ...catalogView(fixture.catalog),
+      copySample(rendition: string, unit: string, frameIndex: number) {
+        events.push("copy");
+        return fixture.catalog.copySample(rendition, unit, frameIndex);
+      }
+    };
+    const resourceHost: WorkerSampleResourceHost = {
+      claim(byteLength) {
+        events.push(`claim:${String(byteLength)}`);
+        activeBytes += byteLength;
+        let released = false;
+        return {
+          release() {
+            if (released) return;
+            released = true;
+            activeBytes -= byteLength;
+            releases += 1;
+          }
+        };
+      }
+    };
+    const factory = new WorkerSampleFactory({
+      catalog,
+      timeline: fixture.timeline,
+      rendition: "opaque",
+      limits: LIMITS,
+      resourceHost
+    });
+    const expectedBytes = fixture.catalog.records
+      .require("opaque", "body", 0).range.length +
+      fixture.catalog.records.require("opaque", "body", 1).range.length;
+
+    const batch = factory.createBatch({
+      frames: [frame("body", 0), frame("body", 1)],
+      pendingSamples: 0,
+      outstandingFrames: 0
+    });
+
+    expect(events).toEqual([
+      `claim:${String(expectedBytes)}`,
+      "copy",
+      "copy"
+    ]);
+    expect(activeBytes).toBe(expectedBytes);
+    expect(Object.keys(batch)).toEqual(["generation", "samples"]);
+    batch.release();
+    batch.release();
+    expect({ activeBytes, releases }).toEqual({ activeBytes: 0, releases: 1 });
+  });
+
+  it("rejects a transfer one byte over budget before any sample allocation", () => {
+    const fixture = createFixture();
+    const copySample = vi.fn(fixture.catalog.copySample.bind(fixture.catalog));
+    const expectedBytes = fixture.catalog.records
+      .require("opaque", "body", 0).range.length +
+      fixture.catalog.records.require("opaque", "body", 1).range.length;
+    const claims: number[] = [];
+    const factory = new WorkerSampleFactory({
+      catalog: { ...catalogView(fixture.catalog), copySample },
+      timeline: fixture.timeline,
+      rendition: "opaque",
+      limits: LIMITS,
+      resourceHost: {
+        claim(byteLength) {
+          claims.push(byteLength);
+          if (byteLength > expectedBytes - 1) {
+            throw new RangeError("injected one-byte-over transfer pressure");
+          }
+          return { release() {} };
+        }
+      }
+    });
+    const before = fixture.timeline.snapshot();
+
+    expect(() => factory.createBatch({
+      frames: [frame("body", 0), frame("body", 1)],
+      pendingSamples: 0,
+      outstandingFrames: 0
+    })).toThrow("one-byte-over transfer pressure");
+
+    expect(claims).toEqual([expectedBytes]);
+    expect(copySample).not.toHaveBeenCalled();
+    expect(fixture.timeline.snapshot()).toEqual(before);
+  });
+
+  it("releases a transfer claim when a later sample copy fails", () => {
+    const fixture = createFixture();
+    let activeClaims = 0;
+    const factory = new WorkerSampleFactory({
+      catalog: {
+        ...catalogView(fixture.catalog),
+        copySample(rendition, unit, frameIndex) {
+          if (frameIndex === 1) throw new Error("injected copy failure");
+          return fixture.catalog.copySample(rendition, unit, frameIndex);
+        }
+      },
+      timeline: fixture.timeline,
+      rendition: "opaque",
+      limits: LIMITS,
+      resourceHost: {
+        claim() {
+          activeClaims += 1;
+          return { release: () => { activeClaims -= 1; } };
+        }
+      }
+    });
+
+    expect(() => factory.createBatch({
+      frames: [frame("body", 0), frame("body", 1)],
+      pendingSamples: 0,
+      outstandingFrames: 0
+    })).toThrow("injected copy failure");
+    expect(activeClaims).toBe(0);
+    expect(fixture.timeline.snapshot()).toMatchObject({ nextOrdinal: 0 });
   });
 
   it("validates the complete batch before copying or advancing the timeline", () => {

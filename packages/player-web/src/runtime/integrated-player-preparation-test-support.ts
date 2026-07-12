@@ -19,12 +19,14 @@ import {
   type IntegratedPlayerSnapshot,
   type IntegratedRealtimeDriverOptions,
   type IntegratedStaticSurfaceStore,
-  type IntegratedTimerHost
+  type IntegratedTimerHost,
+  type RuntimeVisibilityState
 } from "./integrated-player.js";
 import type { MotionPolicy } from "./motion-policy.js";
+import type { BrowserContextRecoveryEventTarget } from "./browser-context-recovery.js";
 
 export type CandidateBehavior =
-  | { readonly kind: "success" }
+  | { readonly kind: "success"; readonly cleanupFailure?: boolean }
   | { readonly kind: "draw-failure" }
   | {
       readonly kind: "failure";
@@ -46,6 +48,8 @@ export interface PreparationHarnessOptions {
   };
   readonly motionPolicy?: MotionPolicy;
   readonly hostReducedMotion?: boolean;
+  readonly initialVisibility?: RuntimeVisibilityState;
+  readonly contextTarget?: BrowserContextRecoveryEventTarget;
   readonly realtime?: Readonly<IntegratedRealtimeDriverOptions>;
 }
 
@@ -60,7 +64,8 @@ export function createPreparationHarness(
   const factory = new FakeCandidateFactory(
     options.behaviors ?? [{ kind: "success" }],
     options.availability,
-    order
+    order,
+    options.contextTarget
   );
   const events: Array<{ readonly type: string }> = [];
   const failures: Readonly<RuntimeFailure>[] = [];
@@ -85,7 +90,10 @@ export function createPreparationHarness(
       : { motionPolicy: options.motionPolicy }),
     ...(options.hostReducedMotion === undefined
       ? {}
-      : { hostReducedMotion: options.hostReducedMotion })
+      : { hostReducedMotion: options.hostReducedMotion }),
+    ...(options.initialVisibility === undefined
+      ? {}
+      : { initialVisibility: options.initialVisibility })
   });
   return {
     player,
@@ -109,6 +117,14 @@ export type StaticBehavior =
   | {
       readonly kind: "gate-first-present";
       readonly gate: Deferred<void>;
+    }
+  | {
+      readonly kind: "gate-initial-install";
+      readonly gate: Deferred<void>;
+    }
+  | {
+      readonly kind: "gate-first-validation";
+      readonly gate: Deferred<void>;
     };
 
 export class FakeStaticStore implements IntegratedStaticSurfaceStore {
@@ -118,7 +134,9 @@ export class FakeStaticStore implements IntegratedStaticSurfaceStore {
   readonly #order: string[];
   #revealFailed = false;
   #presentations = 0;
+  #validations = 0;
   #coverAttempts = 0;
+  #nextPresentGate: Deferred<void> | null = null;
 
   public constructor(behavior: StaticBehavior, order: string[] = []) {
     this.#behavior = behavior;
@@ -130,6 +148,13 @@ export class FakeStaticStore implements IntegratedStaticSurfaceStore {
     readonly signal: AbortSignal;
   }): Promise<void> {
     this.calls.push(`install:${options.state}`);
+    if (
+      typeof this.#behavior === "object" &&
+      this.#behavior.kind === "gate-initial-install"
+    ) {
+      await this.#behavior.gate.promise;
+      throwIfAborted(options.signal);
+    }
     if (this.#behavior === "pending-initial") {
       await abortablePending(options.signal);
     }
@@ -139,6 +164,14 @@ export class FakeStaticStore implements IntegratedStaticSurfaceStore {
     readonly signal: AbortSignal;
   }): Promise<void> {
     this.calls.push("validate-all");
+    this.#validations += 1;
+    if (
+      typeof this.#behavior === "object" &&
+      this.#behavior.kind === "gate-first-validation" &&
+      this.#validations === 1
+    ) {
+      await this.#behavior.gate.promise;
+    }
     throwIfAborted(options.signal);
   }
 
@@ -148,6 +181,9 @@ export class FakeStaticStore implements IntegratedStaticSurfaceStore {
   ): Promise<void> {
     this.calls.push(`${options.cover === false ? "stage" : "present"}:${state}`);
     this.#presentations += 1;
+    const nextPresentGate = this.#nextPresentGate;
+    this.#nextPresentGate = null;
+    if (nextPresentGate !== null) await nextPresentGate.promise;
     if (
       (this.#behavior === "fail-stage" ||
         this.#behavior === "fail-stage-and-cover") &&
@@ -179,6 +215,10 @@ export class FakeStaticStore implements IntegratedStaticSurfaceStore {
       this.#revealFailed = true;
       throw new Error("injected reveal failure");
     }
+  }
+
+  public gateNextPresent(gate: Deferred<void>): void {
+    this.#nextPresentGate = gate;
   }
 
   public currentState(): string | null {
@@ -215,16 +255,19 @@ export class FakeCandidateFactory implements IntegratedCandidateFactory {
     workerAvailable: boolean;
     rendererAvailable: boolean;
   }>;
+  public readonly contextTarget?: BrowserContextRecoveryEventTarget;
   readonly #behaviors: CandidateBehavior[];
   readonly #order: string[];
 
   public constructor(
     behaviors: readonly CandidateBehavior[],
     availability: PreparationHarnessOptions["availability"] = undefined,
-    order: string[] = []
+    order: string[] = [],
+    contextTarget?: BrowserContextRecoveryEventTarget
   ) {
     this.#behaviors = [...behaviors];
     this.#order = order;
+    if (contextTarget !== undefined) this.contextTarget = contextTarget;
     this.availability = Object.freeze(availability ?? {
       workerAvailable: true,
       rendererAvailable: true
@@ -284,7 +327,10 @@ export class FakeCandidateFactory implements IntegratedCandidateFactory {
         this.calls.push(`dispose:${rendition}`);
         this.#order.push(`candidate:dispose:${rendition}`);
         this.activeAttempts -= 1;
-        if (behavior.kind === "failure" && behavior.cleanupFailure === true) {
+        if (
+          "cleanupFailure" in behavior &&
+          behavior.cleanupFailure === true
+        ) {
           throw new Error("injected cleanup failure");
         }
       }

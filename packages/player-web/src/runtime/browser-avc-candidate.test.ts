@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { IntegratedCandidateAttemptContext } from "./integrated-player-contracts.js";
 import { BrowserAvcCandidateRendererFactory } from "./browser-avc-candidate-factories.js";
+import { createBrowserAvcCandidateComposition } from "./browser-avc-candidate.js";
 import { BrowserAvcCandidateHub } from "./browser-avc-candidate-hub.js";
 import { BrowserAvcReadinessSession } from "./browser-avc-candidate-readiness.js";
 import { BrowserAvcPlaybackSession } from "./browser-avc-playback-session.js";
@@ -23,6 +24,38 @@ import type {
 } from "./frame-renderer.js";
 
 describe("browser AVC candidate composition", () => {
+  it("forwards only the planes' narrow context-event capability", () => {
+    const canvas = fakeCanvas();
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    const composition = createBrowserAvcCandidateComposition({
+      canvas,
+      presentationPlanes: {
+        createFrameBackend: () => new FakeBackend(),
+        ownsAnimatedCanvas: () => true,
+        currentCanvasBacking: () => Object.freeze({ width: 1, height: 1 }),
+        reserveCanvasResources: () => Object.freeze({ release() {} }),
+        animatedContextTarget: () => ({
+          addEventListener,
+          removeEventListener
+        })
+      }
+    });
+    const listener = (): void => undefined;
+
+    composition.factory.contextTarget?.addEventListener(
+      "webglcontextlost",
+      listener
+    );
+    composition.factory.contextTarget?.removeEventListener(
+      "webglcontextlost",
+      listener
+    );
+
+    expect(addEventListener).toHaveBeenCalledOnce();
+    expect(removeEventListener).toHaveBeenCalledOnce();
+  });
+
   it("routes renderer creation through shared presentation planes", () => {
     const canvas = fakeCanvas();
     const backend = new FakeBackend();

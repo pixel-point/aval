@@ -3,6 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { BrowserPresentationPlanes } from "./browser-presentation-planes.js";
 import { installRuntimeAssetCatalog } from "./asset-catalog.js";
 import { createOpaqueTestAsset } from "./asset-test-fixture.js";
+import { PageResourceManager } from "./page-resource-manager.js";
+import { createRuntimePageResourcePolicy } from "./page-resource-policy.js";
+import { PlayerResourceAccount } from "./player-resource-account.js";
+import { createPlayerCanvasBackingResourceHost } from "./player-resource-hosts.js";
+import type { RuntimeByteCategory, RuntimeByteLease } from "./model.js";
 import {
   CanvasOwningFakeBackend,
   FakePresentableBackend,
@@ -11,6 +16,211 @@ import {
 } from "./browser-presentation-planes.test-support.js";
 
 describe("BrowserPresentationPlanes", () => {
+  it("does not mutate initial canvases after an admitted transition is retired", async () => {
+    const animated = fakeCanvas();
+    const statics = fakeCanvas();
+    animated.canvas.width = 300;
+    animated.canvas.height = 150;
+    statics.canvas.width = 300;
+    statics.canvas.height = 150;
+    const manager = new PageResourceManager();
+    const account = new PlayerResourceAccount(manager);
+    const admissions: PendingCanvasAdmission[] = [];
+    const host = createPlayerCanvasBackingResourceHost(account, {
+      reserve(category, bytes) {
+        const gate = deferredValue<RuntimeByteLease>();
+        admissions.push({ category, bytes, gate });
+        return gate.promise;
+      }
+    });
+
+    const creation = BrowserPresentationPlanes.create({
+      animatedCanvas: animated.canvas,
+      staticCanvas: statics.canvas,
+      canvas: logicalCanvas(),
+      maxBackingBytes: 8 * 1024 * 1024,
+      setStaticVisible: () => undefined,
+      backingResources: host
+    });
+    await resolveCanvasAdmission(admissions, 0, account);
+    await vi.waitFor(() => { expect(admissions).toHaveLength(2); });
+    const final = admissions[1]!;
+    void final.gate.promise.then(() => {
+      queueMicrotask(() => { host.release(); });
+    });
+    final.gate.resolve(account.reserve(final.category, final.bytes));
+
+    await expect(creation).rejects.toMatchObject({ name: "AbortError" });
+    expect(animated.canvas).toMatchObject({ width: 300, height: 150 });
+    expect(statics.canvas).toMatchObject({ width: 300, height: 150 });
+    expect(manager.snapshot()).toMatchObject({
+      physicalBytes: 0,
+      byteLeaseCount: 0
+    });
+    account.dispose();
+  });
+
+  it("does not resize canvases after an admitted growth is retired", async () => {
+    const animated = fakeCanvas();
+    const statics = fakeCanvas();
+    const manager = new PageResourceManager();
+    const account = new PlayerResourceAccount(manager);
+    const admissions: PendingCanvasAdmission[] = [];
+    const host = createPlayerCanvasBackingResourceHost(account, {
+      reserve(category, bytes) {
+        const gate = deferredValue<RuntimeByteLease>();
+        admissions.push({ category, bytes, gate });
+        return gate.promise;
+      }
+    });
+    const creation = BrowserPresentationPlanes.create({
+      animatedCanvas: animated.canvas,
+      staticCanvas: statics.canvas,
+      canvas: logicalCanvas(),
+      maxBackingBytes: 8 * 1024 * 1024,
+      setStaticVisible: () => undefined,
+      backingResources: host
+    });
+    await resolveCanvasAdmission(admissions, 0, account);
+    await resolveCanvasAdmission(admissions, 1, account);
+    const planes = await creation;
+    expect(animated.canvas).toMatchObject({ width: 100, height: 50 });
+    expect(statics.canvas).toMatchObject({ width: 100, height: 50 });
+
+    const resize = planes.resizeWithAdmission({
+      cssWidth: 200,
+      cssHeight: 100,
+      devicePixelRatio: 1
+    });
+    await resolveCanvasAdmission(admissions, 2, account);
+    await vi.waitFor(() => { expect(admissions).toHaveLength(4); });
+    const final = admissions[3]!;
+    void final.gate.promise.then(() => {
+      queueMicrotask(() => { host.release(); });
+    });
+    final.gate.resolve(account.reserve(final.category, final.bytes));
+
+    await expect(resize).rejects.toMatchObject({ name: "AbortError" });
+    expect(animated.canvas).toMatchObject({ width: 100, height: 50 });
+    expect(statics.canvas).toMatchObject({ width: 100, height: 50 });
+    expect(manager.snapshot()).toMatchObject({
+      physicalBytes: 0,
+      byteLeaseCount: 0
+    });
+    planes.dispose();
+    account.dispose();
+  });
+
+  it("awaits asynchronous initial and resize admission before mutating canvases", async () => {
+    const directAnimated = fakeCanvas();
+    const directStatic = fakeCanvas();
+    directAnimated.canvas.width = 300;
+    directAnimated.canvas.height = 150;
+    directStatic.canvas.width = 300;
+    directStatic.canvas.height = 150;
+    const commits: number[] = [];
+    const rollbacks: number[] = [];
+    const host = Object.freeze({
+      asynchronous: true,
+      async beginTransition(input: Readonly<{
+        animatedAllocationBytes: number;
+        staticAllocationBytes: number;
+      }>) {
+        const bytes = input.animatedAllocationBytes + input.staticAllocationBytes;
+        await Promise.resolve();
+        return Object.freeze({
+          commit: () => { commits.push(bytes); },
+          rollback: () => { rollbacks.push(bytes); }
+        });
+      },
+      release() {}
+    });
+    expect(() => new BrowserPresentationPlanes({
+      animatedCanvas: directAnimated.canvas,
+      staticCanvas: directStatic.canvas,
+      canvas: logicalCanvas(),
+      maxBackingBytes: 8 * 1024 * 1024,
+      setStaticVisible: () => undefined,
+      backingResources: host
+    })).toThrow("requires BrowserPresentationPlanes.create");
+    expect(directAnimated.canvas).toMatchObject({ width: 300, height: 150 });
+    expect(directStatic.canvas).toMatchObject({ width: 300, height: 150 });
+
+    const animated = fakeCanvas();
+    const statics = fakeCanvas();
+    animated.canvas.width = 300;
+    animated.canvas.height = 150;
+    statics.canvas.width = 300;
+    statics.canvas.height = 150;
+    const creation = BrowserPresentationPlanes.create({
+      animatedCanvas: animated.canvas,
+      staticCanvas: statics.canvas,
+      canvas: logicalCanvas(),
+      maxBackingBytes: 8 * 1024 * 1024,
+      setStaticVisible: () => undefined,
+      backingResources: host
+    });
+    expect(animated.canvas).toMatchObject({ width: 300, height: 150 });
+    expect(statics.canvas).toMatchObject({ width: 300, height: 150 });
+    const planes = await creation;
+    expect(animated.canvas).toMatchObject({ width: 100, height: 50 });
+    expect(statics.canvas).toMatchObject({ width: 100, height: 50 });
+
+    await planes.resizeWithAdmission({
+      cssWidth: 200,
+      cssHeight: 100,
+      devicePixelRatio: 1
+    });
+    expect(animated.canvas).toMatchObject({ width: 200, height: 100 });
+    expect(statics.canvas).toMatchObject({ width: 200, height: 100 });
+    expect(commits).toHaveLength(2);
+    expect(rollbacks).toEqual([]);
+
+    expect(() => planes.resize({
+      cssWidth: 300,
+      cssHeight: 150,
+      devicePixelRatio: 1
+    })).toThrow("resizeWithAdmission");
+    expect(animated.canvas).toMatchObject({ width: 200, height: 100 });
+    expect(statics.canvas).toMatchObject({ width: 200, height: 100 });
+    expect(rollbacks).toEqual([]);
+    planes.dispose();
+  });
+
+  it("owns a narrow animated-context listener target through disposal", () => {
+    const animated = fakeCanvas();
+    const statics = fakeCanvas();
+    const planes = new BrowserPresentationPlanes({
+      animatedCanvas: animated.canvas,
+      staticCanvas: statics.canvas,
+      canvas: logicalCanvas(),
+      maxBackingBytes: 8 * 1024 * 1024,
+      setStaticVisible: () => undefined
+    });
+    const target = planes.animatedContextTarget();
+    let losses = 0;
+    const onLoss = (event: { preventDefault(): void }): void => {
+      event.preventDefault();
+      losses += 1;
+    };
+    const onRestore = (): void => undefined;
+    target.addEventListener("webglcontextlost", onLoss);
+    target.addEventListener("webglcontextrestored", onRestore);
+
+    const event = animated.dispatchContext("webglcontextlost");
+    expect(event.prevented).toBe(true);
+    expect(losses).toBe(1);
+    expect(planes.snapshot().contextListeners).toBe(2);
+    expect(animated.listenerCount()).toBe(2);
+
+    target.removeEventListener("webglcontextrestored", onRestore);
+    expect(planes.snapshot().contextListeners).toBe(1);
+    planes.dispose();
+    expect(animated.listenerCount()).toBe(0);
+    expect(() => target.addEventListener("webglcontextlost", onLoss))
+      .toThrowError(expect.objectContaining({ name: "AbortError" }));
+  });
+
   it("captures every constructor option and nested canvas field once", () => {
     const animated = fakeCanvas();
     const statics = fakeCanvas();
@@ -46,7 +256,8 @@ describe("BrowserPresentationPlanes", () => {
       maxBackingBytes: once("maxBackingBytes", 8 * 1024 * 1024),
       setStaticVisible: once("setStaticVisible", () => undefined),
       onClamp: once("onClamp", undefined),
-      createBackend: once("createBackend", undefined)
+      createBackend: once("createBackend", undefined),
+      backingResources: once("backingResources", undefined)
     });
 
     expect(() => new BrowserPresentationPlanes(
@@ -71,7 +282,8 @@ describe("BrowserPresentationPlanes", () => {
       maxBackingBytes: 1,
       setStaticVisible: 1,
       onClamp: 1,
-      createBackend: 1
+      createBackend: 1,
+      backingResources: 1
     });
     expect(animated.canvas).toMatchObject({ width: 100, height: 50 });
     expect(statics.canvas).toMatchObject({ width: 100, height: 50 });
@@ -125,6 +337,121 @@ describe("BrowserPresentationPlanes", () => {
     expect(animated.canvas).toMatchObject({ width: 100, height: 50 });
     expect(statics.canvas).toMatchObject({ width: 100, height: 50 });
     expect(planes.currentCanvasBacking()).toEqual({ width: 100, height: 50 });
+  });
+
+  it("reserves both rounded backing stores before the first owned dimensions", () => {
+    const animated = fakeCanvas();
+    const statics = fakeCanvas();
+    const events: string[] = [];
+    const planes = new BrowserPresentationPlanes({
+      animatedCanvas: animated.canvas,
+      staticCanvas: statics.canvas,
+      canvas: logicalCanvas(),
+      maxBackingBytes: 8 * 1024 * 1024,
+      setStaticVisible: () => undefined,
+      backingResources: {
+        beginTransition(input) {
+          expect(animated.canvas).toMatchObject({ width: 0, height: 0 });
+          expect(statics.canvas).toMatchObject({ width: 0, height: 0 });
+          expect(input).toEqual({
+            animatedAllocationBytes: 25_000,
+            staticAllocationBytes: 25_000
+          });
+          events.push("reserve");
+          return {
+            commit() {
+              expect(animated.canvas).toMatchObject({ width: 100, height: 50 });
+              expect(statics.canvas).toMatchObject({ width: 100, height: 50 });
+              events.push("commit");
+            },
+            rollback: () => events.push("rollback")
+          };
+        },
+        release() {
+          expect(animated.canvas).toMatchObject({ width: 0, height: 0 });
+          expect(statics.canvas).toMatchObject({ width: 0, height: 0 });
+          events.push("release");
+        }
+      }
+    });
+
+    expect(events).toEqual(["reserve", "commit"]);
+    planes.dispose();
+    expect(events).toEqual(["reserve", "commit", "release"]);
+  });
+
+  it("tracks exact account-backed canvas resize, rollback, and disposal", () => {
+    const animated = fakeCanvas();
+    const statics = fakeCanvas();
+    const manager = new PageResourceManager();
+    const account = new PlayerResourceAccount(manager);
+    const planes = new BrowserPresentationPlanes({
+      animatedCanvas: animated.canvas,
+      staticCanvas: statics.canvas,
+      canvas: logicalCanvas(),
+      maxBackingBytes: 8 * 1024 * 1024,
+      setStaticVisible: () => undefined,
+      backingResources: createPlayerCanvasBackingResourceHost(account)
+    });
+    expect(manager.snapshot().categories.filter(({ bytes }) => bytes > 0))
+      .toEqual([
+        { category: "animated-canvas-backing", bytes: 25_000 },
+        { category: "static-canvas-backing", bytes: 25_000 }
+      ]);
+
+    planes.resize({ cssWidth: 200, cssHeight: 100, devicePixelRatio: 1 });
+    expect(manager.snapshot().categories.filter(({ bytes }) => bytes > 0))
+      .toEqual([
+        { category: "animated-canvas-backing", bytes: 100_000 },
+        { category: "static-canvas-backing", bytes: 100_000 }
+      ]);
+    const committed = planes.snapshot().geometry;
+    statics.failNextWidthSet();
+    expect(() => planes.resize({
+      cssWidth: 300,
+      cssHeight: 150,
+      devicePixelRatio: 1
+    })).toThrow("static presentation geometry failed");
+    expect(planes.snapshot().geometry).toBe(committed);
+    expect(manager.snapshot().categories.filter(({ bytes }) => bytes > 0))
+      .toEqual([
+        { category: "animated-canvas-backing", bytes: 100_000 },
+        { category: "static-canvas-backing", bytes: 100_000 }
+      ]);
+
+    planes.dispose();
+    expect(manager.snapshot()).toMatchObject({
+      physicalBytes: 0,
+      byteLeaseCount: 0
+    });
+    account.dispose();
+  });
+
+  it("rolls back initial account admission before any owned backing is visible", () => {
+    const animated = fakeCanvas();
+    const statics = fakeCanvas();
+    const manager = new PageResourceManager(createRuntimePageResourcePolicy({
+      maximumPagePhysicalBytes: 49_999,
+      maximumPlayerLogicalBytes: 49_999
+    }));
+    const account = new PlayerResourceAccount(manager);
+
+    expect(() => new BrowserPresentationPlanes({
+      animatedCanvas: animated.canvas,
+      staticCanvas: statics.canvas,
+      canvas: logicalCanvas(),
+      maxBackingBytes: 8 * 1024 * 1024,
+      setStaticVisible: () => undefined,
+      backingResources: createPlayerCanvasBackingResourceHost(account)
+    })).toThrowError(expect.objectContaining({ code: "resource-rejection" }));
+
+    expect(animated.canvas).toMatchObject({ width: 0, height: 0 });
+    expect(statics.canvas).toMatchObject({ width: 0, height: 0 });
+    expect(manager.snapshot()).toMatchObject({
+      physicalBytes: 0,
+      byteLeaseCount: 0
+    });
+    account.dispose();
   });
 
   it("clamps before the first owned canvas allocation", () => {
@@ -679,3 +1006,31 @@ describe("BrowserPresentationPlanes", () => {
   });
 
 });
+
+interface PendingCanvasAdmission {
+  readonly category: RuntimeByteCategory;
+  readonly bytes: number;
+  readonly gate: ReturnType<typeof deferredValue<RuntimeByteLease>>;
+}
+
+async function resolveCanvasAdmission(
+  admissions: PendingCanvasAdmission[],
+  index: number,
+  account: PlayerResourceAccount
+): Promise<void> {
+  await vi.waitFor(() => { expect(admissions.length).toBeGreaterThan(index); });
+  const admission = admissions[index]!;
+  admission.gate.resolve(account.reserve(admission.category, admission.bytes));
+  await Promise.resolve();
+}
+
+function deferredValue<Value>(): {
+  readonly promise: Promise<Value>;
+  readonly resolve: (value: Value) => void;
+} {
+  let resolve!: (value: Value) => void;
+  return {
+    promise: new Promise<Value>((done) => { resolve = done; }),
+    resolve
+  };
+}

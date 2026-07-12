@@ -269,6 +269,17 @@ export function validateAvcCandidateFactoryOptions(
   ) {
     throw new TypeError("AVC candidate resource host is malformed");
   }
+  if (
+    options.resourceAuthority !== undefined &&
+    (
+      options.resourceAuthority === null ||
+      typeof options.resourceAuthority !== "object" ||
+      typeof options.resourceAuthority.reservePlan !== "function" ||
+      typeof options.resourceAuthority.requestDecoder !== "function"
+    )
+  ) {
+    throw new TypeError("AVC candidate resource authority is malformed");
+  }
 }
 
 export function abortReason(signal: AbortSignal): DOMException {

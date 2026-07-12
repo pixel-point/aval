@@ -46,7 +46,7 @@ describe("dedicated decoder worker boundary", () => {
       }
     });
     expect(observedUrl?.href).toBe(resolveDecoderWorkerEntryUrl().href);
-    expect(observedUrl?.pathname).toMatch(/decoder-worker\/entry\.ts$/u);
+    expect(observedUrl?.pathname).toMatch(/decoder-worker\/entry\.js$/u);
     expect(observedOptions).toEqual({
       type: "module",
       name: "rma-test-decoder"

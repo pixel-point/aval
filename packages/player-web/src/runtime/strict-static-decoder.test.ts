@@ -1,6 +1,7 @@
 import {
   FormatError,
   decodePngRgba,
+  validatePngProfile,
   type PngDecodePlan
 } from "@rendered-motion/format";
 import { describe, expect, it, vi } from "vitest";
@@ -8,8 +9,10 @@ import { describe, expect, it, vi } from "vitest";
 import { strictTestPng } from "./asset-test-fixture.js";
 import {
   BrowserStaticSurfaceDecoder,
-  StaticSurfaceDecodeTimeoutError
+  StaticSurfaceDecodeTimeoutError,
+  type BrowserStaticDecoderResourceHost
 } from "./strict-static-decoder.js";
+import { RuntimePlaybackError, normalizeRuntimeFailure } from "./errors.js";
 
 describe("strict browser static decoder", () => {
   it("accepts native output only after independent RGBA validation", async () => {
@@ -49,6 +52,80 @@ describe("strict browser static decoder", () => {
     surface.close();
     expect(bitmap.closeCalls()).toBe(1);
     expect(decoder.snapshot().bitmapCloses).toBe(1);
+  });
+
+  it("reserves exact PNG, zlib, and scratch ownership before decode allocations", async () => {
+    const png = strictTestPng(4, 3);
+    const plan = validatePngProfile({
+      png,
+      expectedWidth: 4,
+      expectedHeight: 3
+    });
+    const events: string[] = [];
+    const active = new Map<string, number>();
+    const resourceHost: BrowserStaticDecoderResourceHost = {
+      reserve(category, byteLength) {
+        events.push(`reserve:${category}:${String(byteLength)}`);
+        active.set(category, (active.get(category) ?? 0) + byteLength);
+        let released = false;
+        return {
+          release() {
+            if (released) return;
+            released = true;
+            events.push(`release:${category}`);
+            active.set(category, (active.get(category) ?? 0) - byteLength);
+          }
+        };
+      }
+    };
+    const decoder = new BrowserStaticSurfaceDecoder({
+      resourceHost,
+      nativeInflater: {
+        supported: true,
+        async inflate(_zlib, expected) {
+          events.push("inflate");
+          const filtered = filteredTransparentBlack(4, 3);
+          expect(filtered).toHaveLength(expected);
+          return filtered;
+        }
+      },
+      createBitmap: async () => fakeBitmap(4, 3).bitmap
+    });
+
+    const surface = await decoder.decode(png, decodeOptions());
+
+    expect(events.slice(0, 4)).toEqual([
+      `reserve:png-copy:${String(png.byteLength)}`,
+      `reserve:png-zlib:${String(plan.zlibByteLength)}`,
+      `reserve:png-scratch:${String(Math.max(
+        plan.zlibByteLength + plan.expectedFilteredBytes * 2,
+        plan.expectedFilteredBytes + plan.expectedRgbaBytes
+      ))}`,
+      "inflate"
+    ]);
+    expect([...active.values()].every((bytes) => bytes === 0)).toBe(true);
+    surface.close();
+  });
+
+  it("rolls back earlier static transient leases when later admission fails", async () => {
+    const releases: string[] = [];
+    const decoder = new BrowserStaticSurfaceDecoder({
+      resourceHost: {
+        reserve(category) {
+          if (category === "png-scratch") {
+            throw new RuntimePlaybackError(normalizeRuntimeFailure(
+              "resource-rejection"
+            ));
+          }
+          return { release: () => releases.push(category) };
+        }
+      },
+      nativeInflater: null
+    });
+
+    await expect(decoder.decode(strictTestPng(4, 3), decodeOptions()))
+      .rejects.toMatchObject({ code: "resource-rejection" });
+    expect(releases).toEqual(["png-zlib", "png-copy"]);
   });
 
   it("uses pure inflate only when the initial native capability is absent", async () => {

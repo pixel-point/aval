@@ -346,16 +346,20 @@ export async function prepareInteractionCache(
             "worker submitted and leased preparation frames"
           )
         });
-        generationTouched = true;
-        validateBatch(batch, draft.frames, generation);
-        cursor = draft.next;
-        expected.push(...batch.samples.map((sample, index) => Object.freeze({
-          sample,
-          layer: draft.frames[index]?.layer ?? null
-        })));
-        activeSubmit = input.worker.submit(batch.generation, batch.samples);
-        await awaitAbortable(activeSubmit, deadline.signal);
-        activeSubmit = null;
+        try {
+          generationTouched = true;
+          validateBatch(batch, draft.frames, generation);
+          cursor = draft.next;
+          expected.push(...batch.samples.map((sample, index) => Object.freeze({
+            sample,
+            layer: draft.frames[index]?.layer ?? null
+          })));
+          activeSubmit = input.worker.submit(batch.generation, batch.samples);
+          await awaitAbortable(activeSubmit, deadline.signal);
+          activeSubmit = null;
+        } finally {
+          batch.release?.();
+        }
         throwIfAborted(deadline.signal);
         assertActiveGeneration(input.worker, generation);
         counters.submittedFrames = checkedAdd(

@@ -36,6 +36,16 @@ export interface CreateWorkerSampleBatchInput {
 export interface DecoderWorkerSampleBatch {
   readonly generation: number;
   readonly samples: readonly Readonly<DecoderWorkerSample>[];
+  /** Release the main-thread transfer claim after submit transfers ownership. */
+  release(): void;
+}
+
+export interface WorkerSampleTransferLease {
+  release(): void;
+}
+
+export interface WorkerSampleResourceHost {
+  claim(byteLength: number): WorkerSampleTransferLease;
 }
 
 export interface WorkerSampleFactoryOptions {
@@ -43,6 +53,7 @@ export interface WorkerSampleFactoryOptions {
   readonly timeline: DecodeTimeline;
   readonly rendition: string;
   readonly limits: DecoderWorkerLimits;
+  readonly resourceHost?: WorkerSampleResourceHost;
 }
 
 interface ValidatedFrameRequest {
@@ -57,6 +68,8 @@ export class WorkerSampleFactory {
   readonly #timeline: DecodeTimeline;
   readonly #rendition: string;
   readonly #limits: Readonly<DecoderWorkerLimits>;
+  readonly #claimTransfer: ((byteLength: number) => WorkerSampleTransferLease) |
+    null;
 
   public constructor(options: WorkerSampleFactoryOptions) {
     validateWorkerLimits(options.limits);
@@ -76,6 +89,9 @@ export class WorkerSampleFactory {
     this.#catalog = options.catalog;
     this.#timeline = options.timeline;
     this.#rendition = options.rendition;
+    this.#claimTransfer = options.resourceHost === undefined
+      ? null
+      : captureResourceHost(options.resourceHost);
     this.#limits = Object.freeze({
       maxDecodeQueueSize: options.limits.maxDecodeQueueSize,
       maxPendingSamples: options.limits.maxPendingSamples,
@@ -91,6 +107,7 @@ export class WorkerSampleFactory {
 
     const validated: ValidatedFrameRequest[] = [];
     const timelineFrames: DecodeTimelineFrameRequest[] = [];
+    let transferBytes = 0;
     for (const request of input.frames) {
       validateFrameRequest(request);
       const unit = this.#catalog.units.require(request.unitId);
@@ -106,6 +123,10 @@ export class WorkerSampleFactory {
         request
       );
       validated.push(Object.freeze({ request, unit, accessUnit }));
+      transferBytes = checkedTransferSum(
+        transferBytes,
+        accessUnit.range.length
+      );
       timelineFrames.push(Object.freeze({
         unitId: request.unitId,
         unitFrame: request.unitFrame,
@@ -116,55 +137,134 @@ export class WorkerSampleFactory {
     // Planning validates the complete occurrence grammar and clock without
     // advancing any counter. Payload allocation starts only after this point.
     const timelinePlan = this.#timeline.planSampleBatch(timelineFrames);
+    const transferLease = this.#claimTransfer === null
+      ? NOOP_TRANSFER_LEASE
+      : captureTransferLease(this.#claimTransfer(transferBytes));
     const samples: DecoderWorkerSample[] = [];
     const buffers = new Set<ArrayBuffer>();
-    for (let index = 0; index < validated.length; index += 1) {
-      const frame = validated[index];
-      const metadata = timelinePlan.samples[index];
-      if (frame === undefined || metadata === undefined) {
-        throw new RangeError("worker sample batch metadata relation is sparse");
+    try {
+      for (let index = 0; index < validated.length; index += 1) {
+        const frame = validated[index];
+        const metadata = timelinePlan.samples[index];
+        if (frame === undefined || metadata === undefined) {
+          throw new RangeError("worker sample batch metadata relation is sparse");
+        }
+
+        const data = this.#catalog.copySample(
+          this.#rendition,
+          frame.request.unitId,
+          frame.request.unitFrame
+        );
+        if (!(data instanceof ArrayBuffer)) {
+          throw new RangeError("catalog sample copy must be an ArrayBuffer");
+        }
+        if (data.byteLength !== frame.accessUnit.range.length) {
+          throw new RangeError(
+            "catalog sample copy must have the exact record length"
+          );
+        }
+        if (buffers.has(data)) {
+          throw new RangeError(
+            "every worker sample must own a distinct ArrayBuffer"
+          );
+        }
+        buffers.add(data);
+
+        samples.push(Object.freeze({
+          ordinal: metadata.ordinal,
+          unitId: metadata.unitId,
+          unitInstance: metadata.unitInstance,
+          unitFrame: metadata.unitFrame,
+          unitFrameCount: metadata.unitFrameCount,
+          type: frame.accessUnit.record.key ? "key" : "delta",
+          timestamp: metadata.timestamp,
+          duration: metadata.duration,
+          data
+        }));
       }
 
-      const data = this.#catalog.copySample(
-        this.#rendition,
-        frame.request.unitId,
-        frame.request.unitFrame
-      );
-      if (!(data instanceof ArrayBuffer)) {
-        throw new RangeError("catalog sample copy must be an ArrayBuffer");
-      }
-      if (data.byteLength !== frame.accessUnit.range.length) {
-        throw new RangeError(
-          "catalog sample copy must have the exact record length"
-        );
-      }
-      if (buffers.has(data)) {
-        throw new RangeError(
-          "every worker sample must own a distinct ArrayBuffer"
-        );
-      }
-      buffers.add(data);
-
-      samples.push(Object.freeze({
-        ordinal: metadata.ordinal,
-        unitId: metadata.unitId,
-        unitInstance: metadata.unitInstance,
-        unitFrame: metadata.unitFrame,
-        unitFrameCount: metadata.unitFrameCount,
-        type: frame.accessUnit.record.key ? "key" : "delta",
-        timestamp: metadata.timestamp,
-        duration: metadata.duration,
-        data
-      }));
+      const batch = {
+        generation: timelinePlan.generation,
+        samples: Object.freeze(samples)
+      } as DecoderWorkerSampleBatch;
+      Object.defineProperty(batch, "release", {
+        enumerable: false,
+        configurable: false,
+        writable: false,
+        value: transferLease.release
+      });
+      Object.freeze(batch);
+      timelinePlan.commit();
+      return batch;
+    } catch (error) {
+      transferLease.release();
+      throw error;
     }
-
-    const batch = Object.freeze({
-      generation: timelinePlan.generation,
-      samples: Object.freeze(samples)
-    });
-    timelinePlan.commit();
-    return batch;
   }
+}
+
+const NOOP_TRANSFER_LEASE: WorkerSampleTransferLease = Object.freeze({
+  release(): void {}
+});
+
+function captureResourceHost(
+  value: WorkerSampleResourceHost
+): (byteLength: number) => WorkerSampleTransferLease {
+  if (value === null || typeof value !== "object") {
+    throw new TypeError("worker sample resource host is malformed");
+  }
+  let claim: unknown;
+  try {
+    claim = Reflect.get(value, "claim");
+  } catch {
+    throw new TypeError("worker sample resource host is inaccessible");
+  }
+  if (typeof claim !== "function") {
+    throw new TypeError("worker sample resource host is malformed");
+  }
+  return (byteLength) => Reflect.apply(
+    claim,
+    value,
+    [byteLength]
+  ) as WorkerSampleTransferLease;
+}
+
+function captureTransferLease(
+  value: WorkerSampleTransferLease
+): WorkerSampleTransferLease {
+  if (value === null || typeof value !== "object") {
+    throw new TypeError("worker sample transfer lease is malformed");
+  }
+  let release: unknown;
+  try {
+    release = Reflect.get(value, "release");
+  } catch {
+    throw new TypeError("worker sample transfer lease is inaccessible");
+  }
+  if (typeof release !== "function") {
+    throw new TypeError("worker sample transfer lease is malformed");
+  }
+  let released = false;
+  return Object.freeze({
+    release(): void {
+      if (released) return;
+      released = true;
+      Reflect.apply(release, value, []);
+    }
+  });
+}
+
+function checkedTransferSum(total: number, bytes: number): number {
+  if (
+    !Number.isSafeInteger(total) ||
+    total < 0 ||
+    !Number.isSafeInteger(bytes) ||
+    bytes <= 0 ||
+    total > Number.MAX_SAFE_INTEGER - bytes
+  ) {
+    throw new RangeError("worker sample transfer bytes exceed the safe range");
+  }
+  return total + bytes;
 }
 
 function validateWorkerLimits(limits: DecoderWorkerLimits): void {

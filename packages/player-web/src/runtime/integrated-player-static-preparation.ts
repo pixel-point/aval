@@ -43,9 +43,16 @@ interface IntegratedStaticPreparationOptions {
   readonly lifecycleSignal: AbortSignal;
   readonly now: () => number;
   readonly timers: IntegratedTimerHost;
+  readonly residency: Readonly<IntegratedStaticResidency>;
   readonly stageReadyResult: (
     result: Readonly<RuntimeReadinessResult>
   ) => void;
+}
+
+export interface IntegratedStaticResidency {
+  readonly requiresEnsure: boolean;
+  ensureStaticState(state: string, signal: AbortSignal): Promise<void>;
+  ensureAllStatics(signal: AbortSignal): Promise<void>;
 }
 
 /** Initial static guarantee and bounded preparation fallback owner. */
@@ -58,6 +65,7 @@ export class IntegratedStaticPreparation {
   readonly #lifecycleSignal: AbortSignal;
   readonly #now: () => number;
   readonly #timers: IntegratedTimerHost;
+  readonly #residency: Readonly<IntegratedStaticResidency>;
   readonly #stageReadyResult: (
     result: Readonly<RuntimeReadinessResult>
   ) => void;
@@ -79,6 +87,7 @@ export class IntegratedStaticPreparation {
     this.#lifecycleSignal = options.lifecycleSignal;
     this.#now = options.now;
     this.#timers = options.timers;
+    this.#residency = options.residency;
     this.#stageReadyResult = options.stageReadyResult;
   }
 
@@ -89,6 +98,12 @@ export class IntegratedStaticPreparation {
   public async ensure(signal: AbortSignal): Promise<void> {
     if (!this.#visualReady) {
       const initial = this.#catalog.manifest.initialState;
+      if (this.#residency.requiresEnsure) {
+        await raceIntegratedAbort(
+          this.#residency.ensureStaticState(initial, signal),
+          signal
+        );
+      }
       await raceIntegratedAbort(
         this.#staticStore.installInitial({ state: initial, signal }),
         signal
@@ -114,6 +129,12 @@ export class IntegratedStaticPreparation {
       this.#visualReady = true;
     }
     if (!this.#staticReady) {
+      if (this.#residency.requiresEnsure) {
+        await raceIntegratedAbort(
+          this.#residency.ensureAllStatics(signal),
+          signal
+        );
+      }
       await raceIntegratedAbort(
         this.#staticStore.validateAll({ signal }),
         signal

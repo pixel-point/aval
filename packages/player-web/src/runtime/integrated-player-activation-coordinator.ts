@@ -6,6 +6,7 @@ import type {
 import type { EffectHost } from "./effect-host.js";
 import {
   IntegratedPlaybackInvariantError,
+  PlaybackFallbackError,
   type IntegratedCandidateAttempt,
   type IntegratedStaticSurfaceStore
 } from "./integrated-player-contracts.js";
@@ -37,6 +38,7 @@ interface IntegratedPlayerActivationState {
     candidate: IntegratedCandidateAttempt | null
   ) => void;
   readonly getReadyResult: () => Readonly<RuntimeReadinessResult> | null;
+  readonly getSelectedRendition: () => string | null;
   readonly setReadyResult: (
     result: Readonly<RuntimeReadinessResult> | null
   ) => void;
@@ -55,6 +57,7 @@ interface IntegratedPlayerActivationCoordinatorOptions {
   readonly startRecovery: (failure: Readonly<RuntimeFailure>) => void;
   readonly settleRecovery: () => Promise<void>;
   readonly reportFailure: (failure: Readonly<RuntimeFailure>) => void;
+  readonly releaseCandidateResidency: (rendition: string) => void;
 }
 
 /**
@@ -74,6 +77,7 @@ export class IntegratedPlayerActivationCoordinator {
   readonly #startRecovery: (failure: Readonly<RuntimeFailure>) => void;
   readonly #settleRecovery: () => Promise<void>;
   readonly #reportFailure: (failure: Readonly<RuntimeFailure>) => void;
+  readonly #releaseCandidateResidency: (rendition: string) => void;
 
   public constructor(
     options: Readonly<IntegratedPlayerActivationCoordinatorOptions>
@@ -89,6 +93,7 @@ export class IntegratedPlayerActivationCoordinator {
     this.#startRecovery = options.startRecovery;
     this.#settleRecovery = options.settleRecovery;
     this.#reportFailure = options.reportFailure;
+    this.#releaseCandidateResidency = options.releaseCandidateResidency;
   }
 
   public commitAnimatedActivation(
@@ -204,6 +209,21 @@ export class IntegratedPlayerActivationCoordinator {
     return wasRunning;
   }
 
+  public pauseForVisibility(): boolean {
+    const realtime = this.#getRealtime();
+    const wasRunning = realtime?.snapshot().running ?? false;
+    try {
+      realtime?.pauseForVisibility();
+    } catch (error) {
+      this.#reportFailure(normalizeRuntimeFailure(
+        "readiness-failure",
+        error,
+        { operation: "visibility-realtime-pause" }
+      ));
+    }
+    return wasRunning;
+  }
+
   public resumeAfterCancelledReduction(wasRunning: boolean): void {
     if (
       this.#state.isDisposed() ||
@@ -241,25 +261,168 @@ export class IntegratedPlayerActivationCoordinator {
     }
   }
 
+  public resumeRealtimeAfterVisibilityReentry(wasRunning: boolean): void {
+    if (this.#state.isDisposed()) return;
+    try {
+      this.#getRealtime()?.resumeAfterVisibility(wasRunning);
+    } catch (error) {
+      this.#reportFailure(normalizeRuntimeFailure(
+        "readiness-failure",
+        error,
+        { operation: "visibility-reentry-realtime-resume" }
+      ));
+    }
+  }
+
   public coverReducedSurface(state: string): void {
+    this.#coverStagedSurface(state, "reduced-motion");
+  }
+
+  public coverVisibilitySurface(state: string): void {
+    this.#coverStagedSurface(state, "visibility");
+  }
+
+  public coverContextSurface(): string {
+    return this.#operationGate.run(() => {
+      const state = this.#staticStore.currentState();
+      if (state === null) {
+        throw new PlaybackFallbackError(
+          "context loss has no retained strict static surface"
+        );
+      }
+      this.#staticStore.coverCurrent();
+      return state;
+    });
+  }
+
+  #coverStagedSurface(state: string, operation: string): void {
     this.#operationGate.run(() => {
       const snapshot = this.#graph.snapshot();
       if (snapshot.requestedState !== state) {
         throw new IntegratedPlaybackInvariantError(
-          "staged reduced-motion surface became stale"
+          `staged ${operation} surface became stale`
         );
       }
       if (this.#staticStore.currentState() !== state) {
         throw new IntegratedPlaybackInvariantError(
-          "staged reduced-motion surface has the wrong state identity"
+          `staged ${operation} surface has the wrong state identity`
         );
       }
       this.#staticStore.coverCurrent();
     });
   }
 
-  public async commitReducedState(state: string): Promise<void> {
+  public async commitVisibilitySuspended(state: string): Promise<void> {
+    let rendition: string | null = null;
     const candidate = this.#operationGate.run(() => {
+      rendition = this.#state.getSelectedRendition();
+      const reports = (
+        this.#state.getReadyResult()?.report.candidates ?? []
+      ).map((report) => createRuntimeCandidateReport({
+        ...report,
+        outcome: report.outcome === "selected" ? "eligible" : report.outcome,
+        failure: report.outcome === "selected" ? null : report.failure
+      }));
+      const ready = Object.freeze({
+        mode: "static" as const,
+        reason: "visibility-suspended" as const,
+        report: createRuntimeReadinessReport({
+          readiness: "staticReady",
+          selectedRendition: null,
+          candidates: reports
+        })
+      });
+      const suspended = this.#graph.recoverStatic("visibility-suspended");
+      this.#state.setSelectedRendition(null);
+      this.#state.setReadyResult(ready);
+      this.#getMotion().stageReadyResult(ready);
+      this.#effects.applyRecovery(suspended, (presentation) => {
+        assertIntegratedStaticPresentation(presentation, state);
+      });
+      const active = this.#state.getActiveCandidate();
+      if (active !== null) {
+        this.#recordOperationBestEffort(
+          suspended,
+          active,
+          "visibility-suspension-trace"
+        );
+        this.#state.setActiveCandidate(null);
+      }
+      return active;
+    });
+    await this.#disposeCandidate(
+      candidate,
+      "visibility-suspension-candidate-cleanup",
+      rendition
+    );
+  }
+
+  public async commitContextSuspended(state: string | null): Promise<void> {
+    let rendition: string | null = null;
+    const candidate = this.#operationGate.run(() => {
+      rendition = this.#state.getSelectedRendition();
+      const active = this.#state.getActiveCandidate();
+      if (active === null) return null;
+      if (state === null) {
+        this.#state.setSelectedRendition(null);
+        this.#state.setReadyResult(null);
+        const failed = this.#graph.failStatic(
+          "context loss has no usable strict static surface"
+        );
+        const failedForHost = this.#effects.applyFailure(failed);
+        this.#recordOperationBestEffort(
+          failedForHost,
+          active,
+          "context-static-failure-trace"
+        );
+        this.#state.setActiveCandidate(null);
+        return active;
+      }
+      const reports = (
+        this.#state.getReadyResult()?.report.candidates ?? []
+      ).map((report) => createRuntimeCandidateReport({
+        ...report,
+        outcome: report.outcome === "selected" ? "eligible" : report.outcome,
+        failure: report.outcome === "selected" ? null : report.failure
+      }));
+      const ready = Object.freeze({
+        mode: "static" as const,
+        reason: "visibility-suspended" as const,
+        report: createRuntimeReadinessReport({
+          readiness: "staticReady",
+          selectedRendition: null,
+          candidates: reports
+        })
+      });
+      const suspended = this.#graph.recoverStatic(
+        "visibility-suspended",
+        { retainedVisualState: state }
+      );
+      this.#state.setSelectedRendition(null);
+      this.#state.setReadyResult(ready);
+      this.#getMotion().stageContextSuspended();
+      this.#effects.applyRecovery(suspended, (presentation) => {
+        assertIntegratedStaticPresentation(presentation, state);
+      });
+      this.#recordOperationBestEffort(
+        suspended,
+        active,
+        "context-suspension-trace"
+      );
+      this.#state.setActiveCandidate(null);
+      return active;
+    });
+    await this.#disposeCandidate(
+      candidate,
+      "context-suspension-cleanup",
+      rendition
+    );
+  }
+
+  public async commitReducedState(state: string): Promise<void> {
+    let rendition: string | null = null;
+    const candidate = this.#operationGate.run(() => {
+      rendition = this.#state.getSelectedRendition();
       const reports = (
         this.#state.getReadyResult()?.report.candidates ?? []
       ).map((report) => createRuntimeCandidateReport({
@@ -299,12 +462,60 @@ export class IntegratedPlayerActivationCoordinator {
     });
     await this.#disposeCandidate(
       candidate,
-      "reduced-motion-candidate-cleanup"
+      "reduced-motion-candidate-cleanup",
+      rendition
+    );
+  }
+
+  public async commitResourcePressureState(state: string): Promise<void> {
+    let rendition: string | null = null;
+    const candidate = this.#operationGate.run(() => {
+      rendition = this.#state.getSelectedRendition();
+      const reports = (
+        this.#state.getReadyResult()?.report.candidates ?? []
+      ).map((report) => createRuntimeCandidateReport({
+        ...report,
+        outcome: report.outcome === "selected" ? "eligible" : report.outcome,
+        failure: report.outcome === "selected" ? null : report.failure
+      }));
+      const ready = Object.freeze({
+        mode: "static" as const,
+        reason: "resource-budget" as const,
+        report: createRuntimeReadinessReport({
+          readiness: "staticReady",
+          selectedRendition: null,
+          candidates: reports
+        })
+      });
+      const fallback = this.#graph.recoverStatic("resource-budget");
+      this.#state.setSelectedRendition(null);
+      this.#state.setReadyResult(ready);
+      this.#getMotion().stageReadyResult(ready);
+      this.#effects.applyRecovery(fallback, (presentation) => {
+        assertIntegratedStaticPresentation(presentation, state);
+      });
+      const active = this.#state.getActiveCandidate();
+      if (active !== null) {
+        this.#recordOperationBestEffort(
+          fallback,
+          active,
+          "resource-pressure-trace"
+        );
+        this.#state.setActiveCandidate(null);
+      }
+      return active;
+    });
+    await this.#disposeCandidate(
+      candidate,
+      "resource-pressure-candidate-cleanup",
+      rendition
     );
   }
 
   public async failReduction(error: unknown): Promise<void> {
+    let rendition: string | null = null;
     const candidate = this.#operationGate.run(() => {
+      rendition = this.#state.getSelectedRendition();
       const retainedVisualState = this.#effects.visualState;
       const failure = normalizeRuntimeFailure(
         "renderer-failure",
@@ -382,7 +593,8 @@ export class IntegratedPlayerActivationCoordinator {
     });
     await this.#disposeCandidate(
       candidate,
-      "failed-reduction-candidate-cleanup"
+      "failed-reduction-candidate-cleanup",
+      rendition
     );
   }
 
@@ -435,11 +647,13 @@ export class IntegratedPlayerActivationCoordinator {
 
   async #disposeCandidate(
     candidate: IntegratedCandidateAttempt | null,
-    operation: string
+    operation: string,
+    rendition: string | null
   ): Promise<void> {
     if (candidate === null) return;
     try {
       await candidate.dispose();
+      if (rendition !== null) this.#releaseCandidateResidency(rendition);
     } catch (error) {
       this.#reportFailure(normalizeRuntimeFailure(
         "readiness-failure",

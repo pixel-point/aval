@@ -161,6 +161,13 @@ describe("RealtimeDriver", () => {
       presentationOrdinal: 2n
     });
     expect(contexts.map(({ manual }) => manual)).toEqual([true, true]);
+    expect(contexts.map(({ callbackStartMs, eligibleAnimationFrameOrdinal }) => ({
+      callbackStartMs,
+      eligibleAnimationFrameOrdinal
+    }))).toEqual([
+      { callbackStartMs: 0, eligibleAnimationFrameOrdinal: null },
+      { callbackStartMs: 0, eligibleAnimationFrameOrdinal: null }
+    ]);
     expect(source.requestCount).toBe(0);
     expect(driver.snapshot().running).toBe(false);
   });
@@ -263,6 +270,40 @@ describe("RealtimeDriver", () => {
     source.run(501);
     expect(ordinals).toEqual([1n]);
     source.run(533.334);
+    expect(ordinals).toEqual([1n, 2n]);
+  });
+
+  it("rebases a visibility pause without advancing or wall-time catch-up", () => {
+    const source = new FakeAnimationFrameSource();
+    const ordinals: bigint[] = [];
+    let now = 0;
+    const driver = new RealtimeDriver({
+      frameRate: { numerator: 30, denominator: 1 },
+      requestFrame: source.request,
+      cancelFrame: source.cancel,
+      now: () => now,
+      tryContentTick: (context) => {
+        ordinals.push(context.presentationOrdinal);
+        return { status: "advanced" };
+      }
+    });
+    driver.start();
+    source.run(40);
+    expect(driver.snapshot().nextPresentationOrdinal).toBe(2n);
+
+    const wasRunning = driver.snapshot().running;
+    driver.pauseForVisibility();
+    now = 10_000;
+    driver.resumeAfterVisibility(wasRunning);
+
+    expect(driver.snapshot()).toMatchObject({
+      running: true,
+      nextPresentationOrdinal: 2n,
+      nextDeadlineMs: 10_033.333
+    });
+    source.run(10_001);
+    expect(ordinals).toEqual([1n]);
+    source.run(10_034);
     expect(ordinals).toEqual([1n, 2n]);
   });
 

@@ -6,8 +6,10 @@ import type {
 
 import {
   RuntimePlaybackError,
+  isRuntimePlaybackError,
   normalizeRuntimeFailure,
-  type RuntimeFailure
+  type RuntimeFailure,
+  type RuntimeFailureCode
 } from "./errors.js";
 import {
   IntegratedPlaybackInvariantError,
@@ -18,15 +20,20 @@ import {
   type IntegratedPreparedActivation,
   type IntegratedPreparedContentTick,
   type IntegratedPlayerOptions,
+  type IntegratedRealtimeDriverOptions,
   type IntegratedStaticSurfaceStore,
   type IntegratedTimerHost
 } from "./integrated-player-contracts.js";
 import type { RuntimeMediaPresentation } from "./model.js";
 import { MOTION_POLICIES } from "./motion-policy.js";
+import {
+  captureIntegratedPlayerAssetSource,
+  type CapturedIntegratedPlayerAssetSource
+} from "./integrated-player-asset-session.js";
 
 export const DEFAULT_INTEGRATED_TIMERS: IntegratedTimerHost = Object.freeze({
   setTimeout(callback: () => void, milliseconds: number): number {
-    return globalThis.setTimeout(callback, milliseconds);
+    return globalThis.setTimeout(callback, milliseconds) as unknown as number;
   },
   clearTimeout(handle: number): void {
     globalThis.clearTimeout(handle);
@@ -34,15 +41,61 @@ export const DEFAULT_INTEGRATED_TIMERS: IntegratedTimerHost = Object.freeze({
 });
 export const DEFAULT_INTEGRATED_PREPARATION_TIMEOUT_MS = 5_000 as const;
 
+export function disposeInvalidIntegratedStaticStore(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  try {
+    const dispose = Reflect.get(value, "dispose");
+    if (typeof dispose === "function") dispose.call(value);
+  } catch {
+    // The original constructor validation/factory failure remains stable.
+  }
+}
+
+export function snapshotIntegratedRealtimeOptions(
+  source: Readonly<IntegratedRealtimeDriverOptions>
+): Readonly<IntegratedRealtimeDriverOptions> {
+  const { requestFrame, cancelFrame, now, onUnderflow } = source;
+  return Object.freeze({
+    requestFrame,
+    cancelFrame,
+    ...(now === undefined ? {} : { now }),
+    ...(onUnderflow === undefined ? {} : { onUnderflow })
+  });
+}
+
+export function normalizeIntegratedAnimatedFailure(
+  error: unknown,
+  fallbackCode: RuntimeFailureCode,
+  context: Readonly<IntegratedContentTickContext>
+): Readonly<RuntimeFailure> {
+  if (isRuntimePlaybackError(error)) return error.failure;
+  const ordinal = context.presentationOrdinal <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(context.presentationOrdinal)
+    : undefined;
+  return normalizeRuntimeFailure(
+    fallbackCode,
+    error,
+    ordinal === undefined
+      ? { operation: "content-tick" }
+      : { operation: "content-tick", ordinal }
+  );
+}
+
+export function integratedRealtimeDeadlineUs(deadlineMs: number): number {
+  const value = Math.round(deadlineMs * 1_000);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError("realtime deadline exceeds integer-microsecond range");
+  }
+  return value;
+}
+
 export function validateIntegratedPlayerOptions(
   options: IntegratedPlayerOptions
-): void {
+): Readonly<CapturedIntegratedPlayerAssetSource> {
   if (options === null || typeof options !== "object") {
     throw new TypeError("integrated player options must be an object");
   }
-  if (!(options.bytes instanceof Uint8Array)) {
-    throw new TypeError("integrated player bytes must be a Uint8Array");
-  }
+  const assetSource = captureIntegratedPlayerAssetSource(options);
   if (typeof options.createStaticStore !== "function") {
     throw new TypeError("integrated player requires a static-store factory");
   }
@@ -68,6 +121,17 @@ export function validateIntegratedPlayerOptions(
   ) {
     throw new TypeError("integrated player resource host is malformed");
   }
+  if (
+    options.candidateFactory.contextTarget !== undefined &&
+    (
+      options.candidateFactory.contextTarget === null ||
+      typeof options.candidateFactory.contextTarget !== "object" ||
+      typeof options.candidateFactory.contextTarget.addEventListener !== "function" ||
+      typeof options.candidateFactory.contextTarget.removeEventListener !== "function"
+    )
+  ) {
+    throw new TypeError("integrated player context target is malformed");
+  }
   if (options.now !== undefined && typeof options.now !== "function") {
     throw new TypeError("integrated player clock must be a function");
   }
@@ -82,6 +146,23 @@ export function validateIntegratedPlayerOptions(
     typeof options.hostReducedMotion !== "boolean"
   ) {
     throw new TypeError("integrated host reduced-motion value must be boolean");
+  }
+  if (
+    options.initialVisibility !== undefined &&
+    options.initialVisibility !== "visible" &&
+    options.initialVisibility !== "hidden"
+  ) {
+    throw new TypeError("integrated initial visibility is invalid");
+  }
+  if (
+    options.participantBinding !== undefined &&
+    (
+      options.participantBinding === null ||
+      typeof options.participantBinding !== "object" ||
+      typeof options.participantBinding.attach !== "function"
+    )
+  ) {
+    throw new TypeError("integrated participant binding is malformed");
   }
   if (
     options.eventSink !== undefined &&
@@ -121,6 +202,7 @@ export function validateIntegratedPlayerOptions(
       throw new TypeError("integrated realtime driver options are malformed");
     }
   }
+  return assetSource;
 }
 
 export function validateIntegratedStaticStore(
@@ -347,6 +429,25 @@ export function validateIntegratedContentTickContext(
   ) {
     throw new IntegratedPlaybackInvariantError(
       "content rational deadline must be a non-negative safe integer"
+    );
+  }
+  if (
+    context.callbackStartMicroseconds !== undefined &&
+    (!Number.isSafeInteger(context.callbackStartMicroseconds) ||
+      context.callbackStartMicroseconds < 0)
+  ) {
+    throw new IntegratedPlaybackInvariantError(
+      "content callback start must be a non-negative safe integer"
+    );
+  }
+  if (
+    context.eligibleAnimationFrameOrdinal !== undefined &&
+    context.eligibleAnimationFrameOrdinal !== null &&
+    (!Number.isSafeInteger(context.eligibleAnimationFrameOrdinal) ||
+      context.eligibleAnimationFrameOrdinal < 1)
+  ) {
+    throw new IntegratedPlaybackInvariantError(
+      "eligible animation-frame ordinal must be a positive safe integer"
     );
   }
 }

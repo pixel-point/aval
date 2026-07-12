@@ -10,10 +10,16 @@ import {
 import {
   RUNTIME_READINESS_LADDER,
   RUNTIME_READINESS_LEVELS,
+  RUNTIME_BLOB_RESIDENCY_STATES,
+  RUNTIME_BYTE_CATEGORIES,
+  RUNTIME_TRANSPORT_MODES,
   RUNTIME_TRACE_CAPACITY,
+  STATIC_REASON_CLASSIFICATIONS,
   STATIC_REASONS,
+  TRANSIENT_STATIC_REASONS,
   createRuntimeCandidateReport,
   createRuntimeReadinessReport,
+  isTransientStaticReason,
   summarizeStaticReason,
   translateGraphReadiness
 } from "./model.js";
@@ -83,11 +89,16 @@ describe("runtime model boundary", () => {
   it("exposes the exact bounded failure categories", () => {
     expect(RUNTIME_FAILURE_CODES).toEqual([
       "invalid-asset",
+      "load-failure",
+      "range-response-invalid",
+      "entity-changed",
+      "integrity-mismatch",
       "unsupported-profile",
       "resource-rejection",
       "readiness-failure",
       "worker-decode-failure",
       "renderer-failure",
+      "context-loss",
       "watchdog-timeout",
       "underflow",
       "abort",
@@ -107,7 +118,15 @@ describe("runtime model boundary", () => {
         width: 511,
         height: 257,
         alphaStatistic: "p99",
-        policyPhase: "enter-full"
+        policyPhase: "enter-full",
+        lifecyclePhase: "payload-range",
+        requestOrdinal: 9,
+        httpStatus: 206,
+        expectedBytes: 64,
+        observedBytes: 63,
+        declaredTotalBytes: 4_096,
+        playerBytes: 1_024,
+        pageBytes: 2_048
       }
     );
 
@@ -121,7 +140,15 @@ describe("runtime model boundary", () => {
       width: 511,
       height: 257,
       alphaStatistic: "p99",
-      policyPhase: "enter-full"
+      policyPhase: "enter-full",
+      lifecyclePhase: "payload-range",
+      requestOrdinal: 9,
+      httpStatus: 206,
+      expectedBytes: 64,
+      observedBytes: 63,
+      declaredTotalBytes: 4_096,
+      playerBytes: 1_024,
+      pageBytes: 2_048
     });
     expect(Object.isFrozen(failure.context)).toBe(true);
     expect(Object.isFrozen(failure)).toBe(true);
@@ -174,7 +201,7 @@ describe("runtime model boundary", () => {
     expect(Object.isFrozen(report)).toBe(true);
   });
 
-  it("uses the exact M6 static reasons and deterministic precedence", () => {
+  it("uses the exact M7 static reasons and deterministic precedence", () => {
     expect(STATIC_REASONS).toEqual([
       "reduced-motion",
       "no-avc-rendition",
@@ -184,9 +211,33 @@ describe("runtime model boundary", () => {
       "resource-budget",
       "readiness-failed",
       "preparation-timeout",
-      "animation-failure"
+      "animation-failure",
+      "visibility-suspended",
+      "decoder-queued"
     ]);
     expect(Object.isFrozen(STATIC_REASONS)).toBe(true);
+    expect(TRANSIENT_STATIC_REASONS).toEqual([
+      "visibility-suspended",
+      "decoder-queued"
+    ]);
+    expect(Object.isFrozen(TRANSIENT_STATIC_REASONS)).toBe(true);
+    expect(STATIC_REASON_CLASSIFICATIONS).toEqual({
+      "reduced-motion": "sticky",
+      "no-avc-rendition": "sticky",
+      "worker-unavailable": "sticky",
+      "renderer-unavailable": "sticky",
+      "codec-unsupported": "sticky",
+      "resource-budget": "sticky",
+      "readiness-failed": "sticky",
+      "preparation-timeout": "sticky",
+      "animation-failure": "sticky",
+      "visibility-suspended": "transient",
+      "decoder-queued": "transient"
+    });
+    expect(Object.isFrozen(STATIC_REASON_CLASSIFICATIONS)).toBe(true);
+    expect(isTransientStaticReason("visibility-suspended")).toBe(true);
+    expect(isTransientStaticReason("decoder-queued")).toBe(true);
+    expect(isTransientStaticReason("resource-budget")).toBe(false);
 
     const unsupported = normalizeRuntimeFailure("unsupported-profile");
     const resource = normalizeRuntimeFailure("resource-rejection");
@@ -241,5 +292,39 @@ describe("runtime model boundary", () => {
 
   it("freezes the trace capacity at 512", () => {
     expect(RUNTIME_TRACE_CAPACITY).toBe(512);
+  });
+
+  it("freezes the closed M7 transport, residency, and byte categories", () => {
+    expect(RUNTIME_TRANSPORT_MODES).toEqual(["range", "full"]);
+    expect(RUNTIME_BLOB_RESIDENCY_STATES).toEqual([
+      "absent",
+      "loading",
+      "verified"
+    ]);
+    expect(RUNTIME_BYTE_CATEGORIES).toEqual([
+      "asset-metadata",
+      "asset-full",
+      "response-body",
+      "quarantine",
+      "blob-assembly",
+      "verified-unit",
+      "verified-static",
+      "worker-transfer",
+      "decoder-output",
+      "persistent-animation",
+      "streaming-texture",
+      "frame-staging",
+      "png-copy",
+      "png-zlib",
+      "png-scratch",
+      "decoded-static-cache",
+      "current-static-surface",
+      "incoming-static-surface",
+      "animated-canvas-backing",
+      "static-canvas-backing"
+    ]);
+    expect(Object.isFrozen(RUNTIME_TRANSPORT_MODES)).toBe(true);
+    expect(Object.isFrozen(RUNTIME_BLOB_RESIDENCY_STATES)).toBe(true);
+    expect(Object.isFrozen(RUNTIME_BYTE_CATEGORIES)).toBe(true);
   });
 });

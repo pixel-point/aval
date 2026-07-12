@@ -31,8 +31,10 @@ interface IntegratedPlayerMotionOptions {
   readonly pauseForPolicy: () => boolean;
   readonly resumeAfterCancelledReduction: (wasRunning: boolean) => void;
   readonly resumeAfterReentry: (wasRunning: boolean) => void;
+  readonly resumeAfterVisibilityReentry: (wasRunning: boolean) => void;
   readonly coverReducedSurface: (state: string) => void;
   readonly commitReducedState: (state: string) => Promise<void>;
+  readonly commitResourcePressureState: (state: string) => Promise<void>;
   readonly failReduction: (error: unknown) => Promise<void>;
   readonly prepareFull: (
     signal: AbortSignal
@@ -56,8 +58,10 @@ export class IntegratedPlayerMotion {
   readonly #pauseForPolicy: () => boolean;
   readonly #resumeAfterCancelledReduction: (wasRunning: boolean) => void;
   readonly #resumeAfterReentry: (wasRunning: boolean) => void;
+  readonly #resumeAfterVisibilityReentry: (wasRunning: boolean) => void;
   readonly #coverReducedSurface: (state: string) => void;
   readonly #commitReducedState: (state: string) => Promise<void>;
+  readonly #commitResourcePressureState: (state: string) => Promise<void>;
   readonly #failReduction: (error: unknown) => Promise<void>;
   readonly #prepareFull: IntegratedPlayerMotionOptions["prepareFull"];
   readonly #rejectReentry: IntegratedPlayerMotionOptions["rejectReentry"];
@@ -68,6 +72,7 @@ export class IntegratedPlayerMotion {
   #tail: Promise<void> = Promise.resolve();
   #activeReentry: Readonly<MotionPolicyTransition> | null = null;
   #resumeRealtimeOnReentry = false;
+  #transitionsEnabled: boolean;
 
   public constructor(options: Readonly<IntegratedPlayerMotionOptions>) {
     this.#coordinator = new MotionPolicyCoordinator({
@@ -82,12 +87,16 @@ export class IntegratedPlayerMotion {
     this.#resumeAfterCancelledReduction =
       options.resumeAfterCancelledReduction;
     this.#resumeAfterReentry = options.resumeAfterReentry;
+    this.#resumeAfterVisibilityReentry =
+      options.resumeAfterVisibilityReentry;
     this.#coverReducedSurface = options.coverReducedSurface;
     this.#commitReducedState = options.commitReducedState;
+    this.#commitResourcePressureState = options.commitResourcePressureState;
     this.#failReduction = options.failReduction;
     this.#prepareFull = options.prepareFull;
     this.#rejectReentry = options.rejectReentry;
     this.#reportTransitionFailure = options.reportTransitionFailure;
+    this.#transitionsEnabled = true;
   }
 
   public snapshot(): Readonly<MotionPolicySnapshot> {
@@ -105,11 +114,16 @@ export class IntegratedPlayerMotion {
     if (actual === "unprepared") {
       if (result.mode === "animated") this.#coordinator.installAnimated();
       else this.#coordinator.installStatic(result.reason);
-      void this.#scheduleTransitions().catch((error: unknown) => {
-        this.#reportTransitionFailure(error, result.mode === "animated"
-          ? "enter-reduced"
-          : "enter-full");
-      });
+      if (
+        result.mode === "animated" ||
+        result.reason === "reduced-motion"
+      ) {
+        void this.#scheduleTransitions().catch((error: unknown) => {
+          this.#reportTransitionFailure(error, result.mode === "animated"
+            ? "enter-reduced"
+            : "enter-full");
+        });
+      }
       return;
     }
     if (result.mode === "static") {
@@ -119,6 +133,11 @@ export class IntegratedPlayerMotion {
           "reduced-motion commit requires an owned policy transition"
         );
       }
+      const snapshot = this.#coordinator.snapshot();
+      if (
+        snapshot.actualMode === "static" &&
+        snapshot.staticOrigin === result.reason
+      ) return;
       this.#coordinator.failToStatic(result.reason);
     }
   }
@@ -156,6 +175,50 @@ export class IntegratedPlayerMotion {
         "motion preparation aborted",
         "AbortError"
       ));
+    }
+  }
+
+  /** Visibility owns transition invalidation until its strict cover retires. */
+  public suspendForVisibility(wasRunning: boolean): void {
+    this.#transitionsEnabled = false;
+    this.#resumeRealtimeOnReentry = wasRunning;
+    this.abort();
+    this.#coordinator.cancelTransition();
+  }
+
+  /** Re-enables policy work and performs any transient body-zero re-entry. */
+  public resumeAfterVisibility(): Promise<Readonly<MotionPolicySnapshot>> {
+    this.#transitionsEnabled = true;
+    return this.#scheduleTransitions();
+  }
+
+  /** A retained FIFO decoder ticket became grantable for transient static. */
+  public retryTransientStatic(): Promise<Readonly<MotionPolicySnapshot>> {
+    return this.#scheduleTransitions();
+  }
+
+  /** Strict-static pressure fallback without mutating the host motion policy. */
+  public reclaimForResourcePressure(): Promise<boolean> {
+    const operation = this.#tail.then(() => this.#enterResourcePressure());
+    this.#tail = operation.then(
+      () => undefined,
+      () => undefined
+    );
+    return operation;
+  }
+
+  public stageContextSuspended(): void {
+    const actual = this.#coordinator.snapshot().actualMode;
+    if (actual === "unprepared") this.#coordinator.installStatic("context-loss");
+    else if (actual !== "disposed") this.#coordinator.failToStatic("context-loss");
+  }
+
+  public failContextRecovery(): void {
+    this.#transitionsEnabled = false;
+    this.abort();
+    const actual = this.#coordinator.snapshot().actualMode;
+    if (actual !== "unprepared" && actual !== "disposed") {
+      this.#coordinator.failToStatic("animation-failure");
     }
   }
 
@@ -261,6 +324,7 @@ export class IntegratedPlayerMotion {
 
   async #drainTransitions(): Promise<void> {
     while (!this.#isDisposed()) {
+      if (!this.#transitionsEnabled) return;
       const transition = this.#coordinator.nextTransition();
       if (transition === null) return;
       if (transition.kind === "enter-reduced") {
@@ -305,9 +369,37 @@ export class IntegratedPlayerMotion {
     }
   }
 
+  async #enterResourcePressure(): Promise<boolean> {
+    if (this.#isDisposed()) return false;
+    const snapshot = this.#coordinator.snapshot();
+    if (snapshot.actualMode === "static") return true;
+    if (snapshot.actualMode !== "animated") return false;
+    this.abort();
+    this.#coordinator.cancelTransition();
+    const wasRunning = this.#pauseForPolicy();
+    let covered = false;
+    try {
+      const state = await this.#staticPreparation.stageLatest(
+        new AbortController().signal
+      );
+      if (this.#isDisposed()) return false;
+      this.#coverReducedSurface(state);
+      covered = true;
+      this.#coordinator.failToStatic("resource-budget");
+      await this.#commitResourcePressureState(state);
+      return true;
+    } catch (error) {
+      if (!covered) this.#resumeAfterCancelledReduction(wasRunning);
+      throw error;
+    }
+  }
+
   async #enterFull(
     transition: Readonly<MotionPolicyTransition>
   ): Promise<void> {
+    const staticOrigin = this.#coordinator.snapshot().staticOrigin;
+    const visibilityReentry = staticOrigin === "visibility-suspended" ||
+      staticOrigin === "context-loss";
     this.#activeReentry = transition;
     try {
       const result = await this.#prepareFull(transition.signal);
@@ -316,7 +408,11 @@ export class IntegratedPlayerMotion {
         result?.mode === "animated" &&
         this.#coordinator.snapshot().actualMode === "animated"
       ) {
-        this.#resumeAfterReentry(this.#resumeRealtimeOnReentry);
+        if (visibilityReentry) {
+          this.#resumeAfterVisibilityReentry(this.#resumeRealtimeOnReentry);
+        } else {
+          this.#resumeAfterReentry(this.#resumeRealtimeOnReentry);
+        }
         this.#resumeRealtimeOnReentry = false;
         return;
       }

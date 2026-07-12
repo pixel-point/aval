@@ -1,5 +1,5 @@
 import type { RenditionV01 } from "@rendered-motion/format";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { installRuntimeAssetCatalog } from "./asset-catalog.js";
 import {
@@ -244,6 +244,40 @@ describe("deterministic AVC rendition selection", () => {
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.report)).toBe(true);
     expect(Object.isFrozen(result.inspection)).toBe(true);
+  });
+
+  it("inspects borrowed backing without allocating samples or mutating residency", () => {
+    const catalog = installRuntimeAssetCatalog(createOpaqueTestAsset());
+    const expected = catalog.records.values().map((entry) => ({
+      identity: `${entry.rendition}/${entry.unit}/${String(entry.localFrame)}`,
+      bytes: new Uint8Array(catalog.copySample(
+        entry.rendition,
+        entry.unit,
+        entry.localFrame
+      )).slice()
+    }));
+    const before = catalog.residencySnapshot();
+    const copySample = vi.spyOn(catalog, "copySample");
+    const candidate = createAvcRenditionCandidates(
+      catalog.manifest.renditions,
+      catalog.manifest.canvas
+    )[0]!;
+
+    const result = inspectAvcRenditionCandidate(catalog, candidate);
+
+    expect(result.ok).toBe(true);
+    expect(copySample).not.toHaveBeenCalled();
+    expect(catalog.residencySnapshot()).toEqual(before);
+    copySample.mockRestore();
+    expect(catalog.records.values().map((entry) => ({
+      identity: `${entry.rendition}/${entry.unit}/${String(entry.localFrame)}`,
+      bytes: new Uint8Array(catalog.copySample(
+        entry.rendition,
+        entry.unit,
+        entry.localFrame
+      ))
+    }))).toEqual(expected);
+    catalog.dispose();
   });
 
   it("normalizes strict inspector context into an immutable rejected report", () => {

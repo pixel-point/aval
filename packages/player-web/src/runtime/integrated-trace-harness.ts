@@ -24,12 +24,17 @@ interface IntegratedContentTraceInput {
   readonly result: Readonly<MotionGraphResult>;
   readonly prepared: Readonly<IntegratedPreparedContentTick>;
   readonly readbackTag: string | null;
+  readonly callbackStartMicroseconds: number;
+  readonly canvasSubmissionCompleteMicroseconds: number | null;
+  readonly eligibleAnimationFrameOrdinal: number | null;
   readonly readiness: RuntimeReadiness;
 }
 
 interface IntegratedUnderflowTraceInput {
   readonly context: Readonly<IntegratedContentTickContext>;
   readonly playback: Readonly<IntegratedPlaybackTraceState>;
+  readonly callbackStartMicroseconds: number;
+  readonly eligibleAnimationFrameOrdinal: number | null;
   readonly readiness: RuntimeReadiness;
 }
 
@@ -48,6 +53,9 @@ export class IntegratedTraceHarness {
       kind: operationKind(input.result),
       presentationOrdinal: null,
       rationalDeadlineUs: null,
+      callbackStartMicroseconds: null,
+      canvasSubmissionCompleteMicroseconds: null,
+      eligibleAnimationFrameOrdinal: null,
       graph: graphTrace(input.result),
       routeReady: null,
       selectedBoundary: input.playback.selectedBoundary,
@@ -68,6 +76,9 @@ export class IntegratedTraceHarness {
       kind: "content-tick",
       presentationOrdinal: input.context.presentationOrdinal,
       rationalDeadlineUs: input.context.rationalDeadlineUs,
+      callbackStartMicroseconds: input.callbackStartMicroseconds,
+      canvasSubmissionCompleteMicroseconds: input.canvasSubmissionCompleteMicroseconds,
+      eligibleAnimationFrameOrdinal: input.eligibleAnimationFrameOrdinal,
       graph: graphTrace(input.result),
       routeReady: input.prepared.routeReady,
       selectedBoundary: input.prepared.selectedBoundary,
@@ -88,6 +99,9 @@ export class IntegratedTraceHarness {
       kind: "content-tick",
       presentationOrdinal: input.context.presentationOrdinal,
       rationalDeadlineUs: input.context.rationalDeadlineUs,
+      callbackStartMicroseconds: input.callbackStartMicroseconds,
+      canvasSubmissionCompleteMicroseconds: null,
+      eligibleAnimationFrameOrdinal: input.eligibleAnimationFrameOrdinal,
       graph: null,
       routeReady: null,
       selectedBoundary: input.playback.selectedBoundary,

@@ -13,7 +13,10 @@ import type {
 import type { AvcCandidateTimerHost } from "./avc-candidate-factory.js";
 import type { CutPresentationSnapshot } from "./cut-presentation-coordinator.js";
 import type { ReversiblePresentationSnapshot } from "./reversible-presentation.js";
-import type { AvcCandidateFactory } from "./avc-candidate-factory.js";
+import type {
+  AvcCandidateFactory,
+  AvcCandidateResourceAuthority
+} from "./avc-candidate-factory.js";
 import type { BrowserFrameBackendOptions } from "./frame-renderer-browser.js";
 import type { BrowserProductionReadinessReport } from "./browser-production-readiness-evidence.js";
 import type { BrowserPresentationPlanes } from "./browser-presentation-planes.js";
@@ -115,12 +118,14 @@ export interface BrowserAvcCandidateCompositionOptions {
     | "currentCanvasBacking"
     | "reserveCanvasResources"
     | "ownsAnimatedCanvas"
-  >;
+  > & Partial<Pick<BrowserPresentationPlanes, "animatedContextTarget">>;
   readonly worker?: CreateDecoderWorkerClientOptions;
   readonly renderer?: Readonly<BrowserFrameBackendOptions>;
   readonly clock?: PathSchedulerClock;
   readonly timers?: AvcCandidateTimerHost;
   readonly diagnosticsSink?: (failure: Readonly<RuntimeFailure>) => void;
+  /** Optional M7 page-wide byte and decoder admission authority. */
+  readonly resourceAuthority?: AvcCandidateResourceAuthority;
   readonly testDependencies?: BrowserAvcCandidateTestDependencies;
 }
 

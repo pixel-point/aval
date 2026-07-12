@@ -1,102 +1,47 @@
+import { MotionGraphEngine, type MotionGraphResult } from "@rendered-motion/graph";
+import { RuntimeAssetCatalog } from "./asset-catalog.js";
+import { IntegratedPlayerAssetBinding } from "./integrated-player-asset-session.js";
+import { IntegratedPlayerParticipantController } from "./integrated-player-participant-controller.js";
+import { IntegratedPlayerDecoderReentry } from "./integrated-player-decoder-reentry.js";
+import type { IntegratedPlayerParticipantSnapshot } from "./integrated-player-participant.js";
+import { EffectHost } from "./effect-host.js";
+import { normalizeRuntimeFailure, type RuntimeFailure } from "./errors.js";
+import { IntegratedPlaybackInvariantError, PlaybackFallbackError,
+  type IntegratedCandidateAttempt, type IntegratedContentTickContext,
+  type IntegratedContentTickResult, type IntegratedPlaybackTraceState,
+  type IntegratedPlayerTrace, type IntegratedPlayerOptions,
+  type IntegratedRealtimeDriverOptions, type IntegratedPlayerSnapshot,
+  type IntegratedPrepareOptions, type IntegratedStaticSurfaceStore,
+  type IntegratedTimerHost } from "./integrated-player-contracts.js";
 import {
-  MotionGraphEngine,
-  type MotionGraphResult,
-  type MotionGraphTickOptions
-} from "@rendered-motion/graph";
-
-import {
-  RuntimeAssetCatalog
-} from "./asset-catalog.js";
-import {
-  EffectHost
-} from "./effect-host.js";
-import {
-  isRuntimePlaybackError,
-  normalizeRuntimeFailure,
-  type RuntimeFailure,
-  type RuntimeFailureCode
-} from "./errors.js";
-import {
-  IntegratedPlaybackInvariantError,
-  PlaybackFallbackError,
-  type IntegratedCandidateAttempt,
-  type IntegratedContentTickContext,
-  type IntegratedContentTickResult,
-  type IntegratedPlaybackTraceState,
-  type IntegratedPlayerTrace,
-  type IntegratedPlayerOptions,
-  type IntegratedRealtimeDriverOptions,
-  type IntegratedPlayerSnapshot,
-  type IntegratedPrepareOptions,
-  type IntegratedStaticSurfaceStore,
-  type IntegratedTimerHost
-} from "./integrated-player-contracts.js";
-import {
-  DEFAULT_INTEGRATED_TIMERS,
-  assertIntegratedPresentationIdentity as assertPresentationIdentity,
-  defaultIntegratedNow,
-  integratedAbortError as abortError,
-  integratedDisposedError as disposedError,
-  validateIntegratedContentTickContext as validateContentTickContext,
+  DEFAULT_INTEGRATED_TIMERS, defaultIntegratedNow,
+  disposeInvalidIntegratedStaticStore, snapshotIntegratedRealtimeOptions,
+  integratedRealtimeDeadlineUs as realtimeDeadlineUs,
+  integratedAbortError as abortError, integratedDisposedError as disposedError,
   validateIntegratedPlayerOptions as validateOptions,
   validateIntegratedPlaybackTraceState as validatePlaybackTraceState,
-  validateIntegratedPreparedContentTick as validatePreparedContentTick,
   validateIntegratedStaticStore as validateStaticStore
 } from "./integrated-player-support.js";
-import {
-  IntegratedAnimatedPreparation
-} from "./integrated-animated-preparation.js";
-import {
-  IntegratedPlayerActivationCoordinator
-} from "./integrated-player-activation-coordinator.js";
+import { IntegratedAnimatedPreparation } from "./integrated-animated-preparation.js";
+import { IntegratedPlayerActivationCoordinator } from "./integrated-player-activation-coordinator.js";
 import { IntegratedTraceHarness } from "./integrated-trace-harness.js";
 import { IntegratedRecoveryCoordinator } from "./integrated-player-recovery.js";
 import { IntegratedOperationGate } from "./integrated-operation-gate.js";
 import { IntegratedStaticPreparation } from "./integrated-player-static-preparation.js";
 import { IntegratedPlayerMotion } from "./integrated-player-motion.js";
-import {
-  type RuntimeReadinessResult
-} from "./model.js";
-import type {
-  MotionPolicy,
-  MotionPolicySnapshot
-} from "./motion-policy.js";
-import {
-  RealtimeDriver,
-  type RealtimeDriverSnapshot
-} from "./realtime-driver.js";
+import { IntegratedPlayerVisibility } from "./integrated-player-visibility.js";
+import { IntegratedPlayerContextBinding,
+  type IntegratedPlayerContextSnapshot } from "./integrated-player-context.js";
+import type { RuntimeReadinessResult, RuntimeVisibilitySnapshot,
+  RuntimeVisibilityState } from "./model.js";
+import type { MotionPolicy, MotionPolicySnapshot } from "./motion-policy.js";
+import { RealtimeDriver, type RealtimeDriverSnapshot } from "./realtime-driver.js";
 import { RequestPromises } from "./request-promises.js";
-import {
-  admitIntegratedPlayerResources
-} from "./integrated-player-resource-admission.js";
+import { admitIntegratedPlayerAssetSource } from "./integrated-player-resource-admission.js";
 import type { RuntimeCanvasResourceLease } from "./static-resource-plan.js";
-
-export {
-  IntegratedPlaybackInvariantError,
-  PlaybackFallbackError,
-  type IntegratedCandidateAttempt,
-  type IntegratedCandidateActivationOptions,
-  type IntegratedCandidateAvailability,
-  type IntegratedCandidateAttemptContext,
-  type IntegratedCandidateFactory,
-  type IntegratedCandidatePrepareOptions,
-  type IntegratedContentTickContext,
-  type IntegratedContentTickResult,
-  type IntegratedPlaybackSession,
-  type IntegratedPlaybackTickContext,
-  type IntegratedPlaybackTraceState,
-  type IntegratedPlayerOptions,
-  type IntegratedPlayerSnapshot,
-  type IntegratedPlayerTrace,
-  type IntegratedRealtimeDriverOptions,
-  type IntegratedPreparedActivation,
-  type IntegratedPreparedContentTick,
-  type IntegratedPrepareOptions,
-  type IntegratedPrepareResult,
-  type IntegratedStaticSurfaceStore,
-  type IntegratedTimerHost
-} from "./integrated-player-contracts.js";
-
+import { IntegratedContentTicker } from "./integrated-content-ticker.js";
+export * from "./integrated-player-contracts.js";
+export type { RuntimeVisibilitySnapshot, RuntimeVisibilityState } from "./model.js";
 /**
  * Internal playback facade. Concrete preparation, worker, renderer, cache,
  * and readiness owners are composed behind narrow collaborators; this class
@@ -104,6 +49,9 @@ export {
  */
 export class IntegratedPlayer {
   readonly #catalog: RuntimeAssetCatalog;
+  readonly #assetBinding: IntegratedPlayerAssetBinding;
+  readonly #participant: IntegratedPlayerParticipantController;
+  readonly #decoderReentry: IntegratedPlayerDecoderReentry;
   readonly #graph = new MotionGraphEngine();
   readonly #requests = new RequestPromises();
   readonly #effects: EffectHost;
@@ -119,10 +67,12 @@ export class IntegratedPlayer {
   readonly #activation: IntegratedPlayerActivationCoordinator;
   readonly #animatedPreparation: IntegratedAnimatedPreparation;
   readonly #motion: IntegratedPlayerMotion;
+  readonly #visibility: IntegratedPlayerVisibility;
+  readonly #context: IntegratedPlayerContextBinding | null;
   readonly #realtime: RealtimeDriver | null;
   readonly #operationGate = new IntegratedOperationGate();
+  readonly #contentTicker: IntegratedContentTicker;
   readonly #staticResourceLease: RuntimeCanvasResourceLease | null;
-
   #selectedRendition: string | null = null;
   #activeCandidate: IntegratedCandidateAttempt | null = null;
   #preparePromise: Promise<RuntimeReadinessResult> | null = null;
@@ -131,17 +81,17 @@ export class IntegratedPlayer {
   #disposePromise: Promise<void> | null = null;
   #terminalOwnerCallbackDepth = 0;
   #lastPresentationOrdinal = 0n;
+  #manuallyPaused = true;
   #disposed = false;
-
   public constructor(options: IntegratedPlayerOptions) {
-    validateOptions(options);
+    const assetSource = validateOptions(options);
     // Host option objects are capability boundaries. Snapshot every value the
     // constructor will need before acquiring catalog, canvas, or static-store
     // ownership so a hostile or time-varying getter cannot strand them.
-    const bytes = options.bytes;
     const createStaticStore = options.createStaticStore;
     const candidateFactory = options.candidateFactory;
     const candidateAvailability = candidateFactory.availability;
+    const contextTarget = candidateFactory.contextTarget;
     const availability = Object.freeze({
       workerAvailable: candidateAvailability.workerAvailable,
       rendererAvailable: candidateAvailability.rendererAvailable
@@ -151,23 +101,29 @@ export class IntegratedPlayer {
     const hostMaxRuntimeBytesOption = options.hostMaxRuntimeBytes;
     const motionPolicy = options.motionPolicy;
     const hostReducedMotion = options.hostReducedMotion;
+    const initialVisibility = options.initialVisibility;
+    const participantBinding = options.participantBinding;
     const now = options.now;
     const timers = options.timers;
     const realtimeSource = options.realtime;
     const realtime = realtimeSource === undefined
       ? undefined
       : snapshotIntegratedRealtimeOptions(realtimeSource);
-    const admission = admitIntegratedPlayerResources({
-      bytes,
+    const sourceAdmission = admitIntegratedPlayerAssetSource({
+      source: assetSource,
       candidateFactory,
       ...(hostMaxRuntimeBytesOption === undefined
         ? {}
         : { hostMaxRuntimeBytes: hostMaxRuntimeBytesOption })
     });
+    const admission = sourceAdmission.resources;
     this.#catalog = admission.catalog;
+    this.#assetBinding = sourceAdmission.binding;
     const hostMaxRuntimeBytes = admission.hostMaxRuntimeBytes;
     const staticResourceLease = admission.staticResourceLease;
     let staticStoreCandidate: unknown = null;
+    let contextCandidate: IntegratedPlayerContextBinding | null = null;
+    let participantCandidate: IntegratedPlayerParticipantController | null = null;
     try {
       this.#installResult = this.#graph.install(this.#catalog.graph);
       this.#effects = new EffectHost({
@@ -188,6 +144,12 @@ export class IntegratedPlayer {
       this.#diagnostics = diagnosticsSink ?? (() => undefined);
       this.#now = now ?? defaultIntegratedNow;
       this.#timers = timers ?? DEFAULT_INTEGRATED_TIMERS;
+      participantCandidate = new IntegratedPlayerParticipantController({
+        ...(participantBinding === undefined ? {} : { binding: participantBinding }),
+        initialVisibility: initialVisibility ?? "visible",
+        onDecoderGrant: () => this.#decoderReentry.granted()
+      });
+      this.#participant = participantCandidate;
       this.#staticPreparation = new IntegratedStaticPreparation({
         catalog: this.#catalog,
         graph: this.#graph,
@@ -197,6 +159,7 @@ export class IntegratedPlayer {
         lifecycleSignal: this.#lifecycleController.signal,
         now: this.#now,
         timers: this.#timers,
+        residency: this.#assetBinding,
         stageReadyResult: (result) => this.#stageStaticReadyResult(result)
       });
       this.#recovery = new IntegratedRecoveryCoordinator({
@@ -210,9 +173,12 @@ export class IntegratedPlayer {
           if (this.#activeCandidate === candidate) this.#activeCandidate = null;
         },
         getReadyResult: () => this.#readyResult,
+        getSelectedRendition: () => this.#selectedRendition,
         registerRequest: (requestId) => this.#requests.register(requestId),
         stageReadyResult: (result) => this.#stageStaticReadyResult(result),
-        reportFailure: (failure) => this.#reportFailure(failure)
+        reportFailure: (failure) => this.#reportFailure(failure),
+        releaseCandidateResidency: (rendition) =>
+          this.#releaseCandidateResidency(rendition)
       });
       this.#activation = new IntegratedPlayerActivationCoordinator({
         graph: this.#graph,
@@ -227,8 +193,10 @@ export class IntegratedPlayer {
             this.#activeCandidate = candidate;
           },
           getReadyResult: () => this.#readyResult,
+          getSelectedRendition: () => this.#selectedRendition,
           setReadyResult: (result) => {
             this.#readyResult = result;
+            if (result !== null) this.#participant.markReady(result);
           },
           setSelectedRendition: (renditionId) => {
             this.#selectedRendition = renditionId;
@@ -238,7 +206,9 @@ export class IntegratedPlayer {
         getRealtime: () => this.#realtime,
         startRecovery: (failure) => this.#startRecovery(failure),
         settleRecovery: () => this.#recovery.settled(),
-        reportFailure: (failure) => this.#reportFailure(failure)
+        reportFailure: (failure) => this.#reportFailure(failure),
+        releaseCandidateResidency: (rendition) =>
+          this.#releaseCandidateResidency(rendition)
       });
       this.#animatedPreparation = new IntegratedAnimatedPreparation({
         catalog: this.#catalog,
@@ -247,6 +217,7 @@ export class IntegratedPlayer {
         candidateFactory,
         availability,
         hostMaxRuntimeBytes,
+        residency: this.#assetBinding,
         isDisposed: () => this.#disposed,
         commitActivation: (commit) =>
           this.#activation.commitAnimatedActivation(commit),
@@ -270,10 +241,14 @@ export class IntegratedPlayer {
           this.#activation.resumeAfterCancelledReduction(wasRunning),
         resumeAfterReentry: (wasRunning) =>
           this.#activation.resumeRealtimeAfterReentry(wasRunning),
+        resumeAfterVisibilityReentry: (wasRunning) =>
+          this.#activation.resumeRealtimeAfterVisibilityReentry(wasRunning),
         coverReducedSurface: (state) =>
           this.#activation.coverReducedSurface(state),
         commitReducedState: (state) =>
           this.#activation.commitReducedState(state),
+        commitResourcePressureState: (state) =>
+          this.#activation.commitResourcePressureState(state),
         failReduction: (error) => this.#activation.failReduction(error),
         prepareFull: (signal) => this.#animatedPreparation.reenter({ signal }),
         rejectReentry: (error, result) =>
@@ -285,26 +260,94 @@ export class IntegratedPlayer {
             { operation: `motion-policy-${transition}` }
           ))
       });
+      this.#decoderReentry = new IntegratedPlayerDecoderReentry({
+        participant: this.#participant,
+        motion: () => this.#motion,
+        visibility: () => this.#visibility.snapshot().visibility,
+        ready: () => this.#readyResult,
+        disposed: () => this.#disposed,
+        report: (failure) => this.#reportFailure(failure)
+      });
+      this.#decoderReentry.syncEligibility();
+      this.#visibility = new IntegratedPlayerVisibility({
+        initialVisibility: initialVisibility ?? "visible",
+        staticPreparation: this.#staticPreparation,
+        motion: this.#motion,
+        isDisposed: () => this.#disposed,
+        isPrepared: () => this.#readyResult !== null,
+        getPresentationOrdinal: () => this.#lastPresentationOrdinal,
+        invalidateInitialPreparation: () =>
+          this.#invalidateInitialPreparation(),
+        abortAnimatedPreparation: () => this.#animatedPreparation.abort(),
+        pauseForVisibility: () => this.#activation.pauseForVisibility(),
+        resumeCancelledVisibility: (wasRunning) =>
+          this.#activation.resumeRealtimeAfterVisibilityReentry(wasRunning),
+        coverVisibilitySurface: (state) =>
+          this.#activation.coverVisibilitySurface(state),
+        commitVisibilitySuspended: (state) =>
+          this.#activation.commitVisibilitySuspended(state),
+        reportFailure: (error, operation) =>
+          this.#reportFailure(normalizeRuntimeFailure(
+            "readiness-failure",
+            error,
+            { operation }
+          )),
+        canResumeAnimated: () =>
+          this.#context?.canVisibilityResume() ?? true
+      });
       this.#realtime = realtime === undefined
         ? null
         : this.#createRealtimeDriver(realtime);
+      contextCandidate = contextTarget === undefined
+        ? null
+        : new IntegratedPlayerContextBinding({
+            target: contextTarget,
+            activation: this.#activation,
+            animatedPreparation: this.#animatedPreparation,
+            motion: this.#motion,
+            visibility: this.#visibility,
+            isDisposed: () => this.#disposed,
+            getActiveCandidate: () => this.#activeCandidate,
+            getReadyResult: () => this.#readyResult,
+            getPreparePromise: () => this.#preparePromise,
+            invalidateInitialPreparation: () =>
+              this.#invalidateInitialPreparation(),
+            reportFailure: (failure) => this.#reportFailure(failure)
+          });
+      this.#context = contextCandidate;
+      this.#contentTicker = new IntegratedContentTicker({
+        graph: this.#graph, effects: this.#effects, trace: this.#trace,
+        operationGate: this.#operationGate,
+        isDisposed: () => this.#disposed,
+        isBlocked: () => this.#context?.blocked === true,
+        isVisibilityActive: () =>
+          this.#visibility.snapshot().suspension === "active",
+        isRecoveryActive: () => this.#recovery.active,
+        hasRealtime: () => this.#realtime !== null,
+        getPresentationOrdinal: () => this.#lastPresentationOrdinal,
+        setPresentationOrdinal: (value) => { this.#lastPresentationOrdinal = value; },
+        getActiveCandidate: () => this.#activeCandidate,
+        touch: () => { this.#participant.touch(); },
+        startRecovery: (failure) => this.#startRecovery(failure),
+        now: this.#now
+      });
       this.#effects.publishMetadataReady();
     } catch (error) {
+      void contextCandidate?.dispose();
+      participantCandidate?.dispose();
       disposeInvalidIntegratedStaticStore(staticStoreCandidate);
       try {
         staticResourceLease?.release();
       } catch {
         // Resource-host cleanup cannot replace the constructor failure.
       }
-      this.#catalog.dispose();
+      void this.#assetBinding.dispose();
       throw error;
     }
   }
-
   public get catalog(): RuntimeAssetCatalog {
     return this.#catalog;
   }
-
   public snapshot(): Readonly<IntegratedPlayerSnapshot> {
     const mirror = this.#effects.snapshot();
     return Object.freeze({
@@ -317,57 +360,99 @@ export class IntegratedPlayer {
       disposed: this.#disposed
     });
   }
-
   public getTrace(): IntegratedPlayerTrace {
     return this.#trace.getTrace();
   }
-
   public motionSnapshot(): Readonly<MotionPolicySnapshot> {
     return this.#motion.snapshot();
   }
-
+  public visibilitySnapshot(): Readonly<RuntimeVisibilitySnapshot> {
+    return this.#visibility.snapshot();
+  }
+  public contextSnapshot(): Readonly<IntegratedPlayerContextSnapshot> | null {
+    return this.#context?.snapshot() ?? null;
+  }
+  public participantSnapshot(): Readonly<IntegratedPlayerParticipantSnapshot> | null {
+    return this.#participant.snapshot();
+  }
+  public setVisibility(
+    visibility: RuntimeVisibilityState
+  ): Promise<Readonly<RuntimeVisibilitySnapshot>> {
+    if (this.#disposed) return Promise.reject(disposedError());
+    this.#participant.setVisibility(visibility);
+    if (this.#recovery.busy) {
+      return this.#reconcileContextAfter(this.#recovery.settled().then(() => {
+        if (this.#disposed) throw disposedError();
+        return this.#operationGate.active
+          ? this.#operationGate.enqueue(() =>
+              this.#visibility.setVisibility(visibility)
+            )
+          : this.#visibility.setVisibility(visibility);
+      }));
+    }
+    if (this.#operationGate.active) {
+      return this.#reconcileContextAfter(this.#operationGate.enqueue(() =>
+        this.setVisibility(visibility)
+      ));
+    }
+    return this.#reconcileContextAfter(
+      this.#visibility.setVisibility(visibility)
+    );
+  }
   public setMotionPolicy(
     policy: MotionPolicy
   ): Promise<Readonly<MotionPolicySnapshot>> {
     if (this.#disposed) return Promise.reject(disposedError());
     if (this.#recovery.active) {
-      return this.#recovery.settled().then(() => {
+      return this.#reconcileContextAfter(this.#recovery.settled().then(() => {
         if (this.#disposed) throw disposedError();
         return this.#operationGate.active
           ? this.#operationGate.enqueue(() =>
               this.#setMotionPolicyNow(policy)
             )
           : this.#setMotionPolicyNow(policy);
-      });
+      }));
     }
     if (this.#operationGate.active) {
-      return this.#operationGate.enqueue(() => this.setMotionPolicy(policy));
+      return this.#reconcileContextAfter(
+        this.#operationGate.enqueue(() => this.setMotionPolicy(policy))
+      );
     }
-    return this.#setMotionPolicyNow(policy);
+    return this.#reconcileContextAfter(this.#setMotionPolicyNow(policy));
   }
-
   public setHostReducedMotion(
     reduced: boolean
   ): Promise<Readonly<MotionPolicySnapshot>> {
     if (this.#disposed) return Promise.reject(disposedError());
     if (this.#recovery.active) {
-      return this.#recovery.settled().then(() => {
+      return this.#reconcileContextAfter(this.#recovery.settled().then(() => {
         if (this.#disposed) throw disposedError();
         return this.#operationGate.active
           ? this.#operationGate.enqueue(() =>
               this.#setHostReducedMotionNow(reduced)
             )
           : this.#setHostReducedMotionNow(reduced);
-      });
+      }));
     }
     if (this.#operationGate.active) {
-      return this.#operationGate.enqueue(() =>
+      return this.#reconcileContextAfter(this.#operationGate.enqueue(() =>
         this.setHostReducedMotion(reduced)
-      );
+      ));
     }
-    return this.#setHostReducedMotionNow(reduced);
+    return this.#reconcileContextAfter(
+      this.#setHostReducedMotionNow(reduced)
+    );
   }
 
+  /** Commit a strict-static resource fallback without changing host policy. */
+  public reclaimForPagePressure(): Promise<boolean> {
+    if (this.#disposed) return Promise.reject(disposedError());
+    const operation = this.#motion.reclaimForResourcePressure();
+    return operation.then((covered) => {
+      this.#decoderReentry.syncEligibility();
+      return covered;
+    });
+  }
   /** Starts the player-owned M5.5 presentation clock after animated readiness. */
   public startRealtime(): void {
     if (this.#disposed) throw disposedError();
@@ -386,127 +471,26 @@ export class IntegratedPlayer {
         "realtime presentation requires interactive readiness"
       );
     }
+    if (this.#context?.blocked === true) {
+      throw new IntegratedPlaybackInvariantError(
+        "realtime presentation requires a restored rendering context"
+      );
+    }
+    if (this.#visibility.snapshot().suspension !== "active") {
+      throw new IntegratedPlaybackInvariantError(
+        "realtime presentation requires visible active ownership"
+      );
+    }
     this.#realtime.start();
   }
-
   public realtimeSnapshot(): Readonly<RealtimeDriverSnapshot> | null {
     return this.#realtime?.snapshot() ?? null;
   }
-
   /** Synchronous adapter used by both the realtime driver and proof harness. */
   public tryContentTick(
     context: IntegratedContentTickContext
   ): Readonly<IntegratedContentTickResult> {
-    if (this.#disposed) throw disposedError();
-    if (this.#operationGate.active) {
-      throw new IntegratedPlaybackInvariantError(
-        "content ticks cannot reenter an effect transaction"
-      );
-    }
-    if (this.#realtime !== null) {
-      throw new IntegratedPlaybackInvariantError(
-        "manual content ticks are unavailable with a player-owned realtime clock"
-      );
-    }
-    return this.#operationGate.run(() =>
-      this.#tryContentTickInternal(context)
-    );
-  }
-
-  #tryContentTickInternal(
-    context: IntegratedContentTickContext
-  ): Readonly<IntegratedContentTickResult> {
-    if (this.#disposed) throw disposedError();
-    validateContentTickContext(context);
-    if (this.#effects.readiness !== "interactiveReady") {
-      throw new IntegratedPlaybackInvariantError(
-        "content ticks require an interactive-ready candidate"
-      );
-    }
-    if (this.#recovery.active) {
-      return Object.freeze({ status: "stopped" });
-    }
-    if (context.presentationOrdinal !== this.#lastPresentationOrdinal + 1n) {
-      throw new IntegratedPlaybackInvariantError(
-        "content presentation ordinals must remain consecutive"
-      );
-    }
-    const candidate = this.#activeCandidate;
-    if (candidate === null) {
-      throw new IntegratedPlaybackInvariantError(
-        "interactive readiness has no active playback session"
-      );
-    }
-    const playback = candidate.playback;
-    let failureCode: RuntimeFailureCode = "worker-decode-failure";
-    try {
-      const prepared = playback.prepareContentTick(Object.freeze({
-        presentationOrdinal: context.presentationOrdinal,
-        rationalDeadlineUs: context.rationalDeadlineUs,
-        graphSnapshot: this.#graph.snapshot(),
-        previewTick: (options: Readonly<MotionGraphTickOptions>) =>
-          this.#graph.previewTick(options)
-      }));
-      if (prepared === null) {
-        const traceState = playback.traceState();
-        validatePlaybackTraceState(traceState);
-        this.#trace.recordUnderflow({
-          context,
-          playback: traceState,
-          readiness: this.#effects.readiness
-        });
-        return Object.freeze({ status: "underflow" });
-      }
-      validatePreparedContentTick(prepared);
-
-      failureCode = "readiness-failure";
-      const result = this.#graph.tick({
-        contentOrdinal: context.presentationOrdinal - 1n,
-        routeReady: prepared.routeReady
-      });
-      const presentation = result.presentation;
-      if (presentation === null) {
-        throw new IntegratedPlaybackInvariantError(
-          "animated graph tick produced no presentation"
-        );
-      }
-      assertPresentationIdentity(
-        presentation,
-        prepared.media,
-        context.presentationOrdinal
-      );
-
-      failureCode = "renderer-failure";
-      let readbackTag: string | null = null;
-      this.#effects.apply(result, (drawPresentation) => {
-        assertPresentationIdentity(
-          drawPresentation,
-          prepared.media,
-          context.presentationOrdinal
-        );
-        readbackTag = playback.drawContentTick(prepared, drawPresentation);
-        if (readbackTag !== null && typeof readbackTag !== "string") {
-          throw new IntegratedPlaybackInvariantError(
-            "playback readback tag must be a string or null"
-          );
-        }
-      });
-      failureCode = "readiness-failure";
-      playback.synchronizeGraph(result);
-      this.#lastPresentationOrdinal = context.presentationOrdinal;
-      this.#trace.recordContentTick({
-        context,
-        result,
-        prepared,
-        readbackTag,
-        readiness: this.#effects.readiness
-      });
-      return Object.freeze({ status: "advanced" });
-    } catch (error) {
-      const failure = normalizeAnimatedFailure(error, failureCode, context);
-      this.#startRecovery(failure);
-      return Object.freeze({ status: "stopped" });
-    }
+    return this.#contentTicker.try(context);
   }
 
   public prepare(
@@ -530,6 +514,7 @@ export class IntegratedPlayer {
     }
     if (this.#preparePromise !== null) return this.#preparePromise;
 
+    this.#participant.markPreparing();
     const operation = Promise.resolve().then(() =>
       this.#prepareLatestMotionMode(options)
     );
@@ -537,6 +522,7 @@ export class IntegratedPlayer {
     void operation.finally(() => {
       if (this.#preparePromise === operation && this.#readyResult === null) {
         this.#preparePromise = null;
+        this.#participant.markLoading();
       }
     }).catch(() => undefined);
     return operation;
@@ -549,7 +535,12 @@ export class IntegratedPlayer {
       if (this.#disposed) throw disposedError();
       const generation = this.#initialPreparationGeneration;
       try {
-        return this.#motion.shouldPrepareReduced()
+        if (this.#context?.blocked === true) {
+          return await this.#context.prepareStatic(options);
+        }
+        return this.#visibility.shouldPrepareHidden()
+          ? await this.#visibility.prepareHidden(options)
+          : this.#motion.shouldPrepareReduced()
           ? await this.#motion.prepareReduced(options)
           : await this.#animatedPreparation.run(options);
       } catch (error) {
@@ -579,7 +570,9 @@ export class IntegratedPlayer {
     const initialPreparation = this.#readyResult === null
       ? this.#preparePromise
       : null;
-    return this.#motion.setPolicy(policy).then(async () => {
+    const operation = this.#motion.setPolicy(policy);
+    this.#decoderReentry.syncEligibility();
+    return operation.then(async () => {
       if (initialPreparation !== null) await initialPreparation;
       return this.#motion.snapshot();
     });
@@ -591,7 +584,9 @@ export class IntegratedPlayer {
     const initialPreparation = this.#readyResult === null
       ? this.#preparePromise
       : null;
-    return this.#motion.setHostReducedMotion(reduced).then(async () => {
+    const operation = this.#motion.setHostReducedMotion(reduced);
+    this.#decoderReentry.syncEligibility();
+    return operation.then(async () => {
       if (initialPreparation !== null) await initialPreparation;
       return this.#motion.snapshot();
     });
@@ -604,10 +599,110 @@ export class IntegratedPlayer {
     return this.#operationGate.run(() => this.#requestStateNow(target));
   }
 
+  /** Route one authored host event through the sole installed graph. */
+  public send(event: string): boolean {
+    if (typeof event !== "string") return false;
+    if (this.#disposed || this.#operationGate.active) return false;
+    this.#participant.touch();
+    if (this.#effects.readiness === "staticReady") {
+      const visualState = this.#effects.visualState;
+      if (visualState === null) return false;
+      const edge = this.#catalog.graph.definition.edges.find((candidate) =>
+        candidate.from === visualState &&
+        candidate.trigger?.type === "event" &&
+        candidate.trigger.name === event
+      );
+      if (edge === undefined) return false;
+      const operation = this.#visibility.snapshot().visibility === "hidden"
+        ? this.#recovery.requestLatestStaticState(edge.to)
+        : this.#recovery.requestStaticState(edge.to);
+      void operation.catch(() => undefined);
+      return true;
+    }
+    return this.#operationGate.run(() => this.#sendNow(event));
+  }
+
+  /** Whether the currently animated graph has a direct ready route. */
+  public readyFor(target: string): boolean {
+    if (
+      this.#disposed ||
+      typeof target !== "string" ||
+      this.#effects.readiness !== "interactiveReady"
+    ) return false;
+    const snapshot = this.#graph.snapshot();
+    const source = snapshot.requestedState ?? snapshot.visualState;
+    if (source === null) return false;
+    if (source === target) return true;
+    return this.#catalog.graph.definition.edges.some((edge) =>
+      edge.from === source && edge.to === target
+    );
+  }
+
+  /** Public M8 clock seam; logical presentation time is retained. */
+  public pauseRealtime(): void {
+    if (this.#disposed) throw disposedError();
+    this.#manuallyPaused = true;
+    if (this.#realtime?.snapshot().running === true) {
+      this.#realtime.pauseForVisibility();
+    }
+  }
+
+  /** Resume only when animated, visible ownership is currently usable. */
+  public async resumeRealtime(): Promise<void> {
+    if (this.#disposed) throw disposedError();
+    this.#manuallyPaused = false;
+    await this.settled();
+    if (
+      this.#realtime === null ||
+      this.#effects.readiness !== "interactiveReady" ||
+      this.#visibility.snapshot().suspension !== "active" ||
+      this.#context?.blocked === true
+    ) return;
+    const snapshot = this.#realtime.snapshot();
+    if (snapshot.running) return;
+    if (snapshot.nextDeadlineMs === null) this.#realtime.start();
+    else this.#realtime.resumeAfterVisibility(true);
+  }
+
+  #sendNow(event: string): boolean {
+    const result = this.#graph.send(event);
+    if (result.accepted !== true) return false;
+    const playback = this.#activeCandidate?.playback ?? null;
+    if (this.#recovery.active) {
+      this.#effects.applyRecoveryIntent(result);
+      this.#recovery.supersedeRecoveryPresentation(
+        result.snapshot.requestedState
+      );
+      return true;
+    }
+    try {
+      playback?.synchronizeGraph(result);
+    } catch (error) {
+      this.#effects.apply(result);
+      this.#startRecovery(normalizeRuntimeFailure(
+        "readiness-failure",
+        error,
+        { operation: "send-synchronization" }
+      ));
+      return true;
+    }
+    this.#effects.apply(result);
+    this.#visibility.supersedePresentation(result.snapshot.requestedState);
+    if (playback === null && this.#readyResult === null) {
+      this.#staticPreparation.supersedePresentation(
+        result.snapshot.requestedState
+      );
+    }
+    return true;
+  }
+
   #requestStateNow(target: string): Promise<void> {
     if (this.#disposed) return Promise.reject(disposedError());
+    this.#participant.touch();
     if (this.#effects.readiness === "staticReady") {
-      return this.#recovery.requestStaticState(target);
+      return this.#visibility.snapshot().visibility === "hidden"
+        ? this.#recovery.requestLatestStaticState(target)
+        : this.#recovery.requestStaticState(target);
     }
     const result = this.#graph.request(target);
     const request = result.requestId === undefined
@@ -636,6 +731,9 @@ export class IntegratedPlayer {
       return request;
     }
     this.#effects.apply(result);
+    this.#visibility.supersedePresentation(
+      result.snapshot.requestedState
+    );
     if (playback === null && this.#readyResult === null) {
       this.#staticPreparation.supersedePresentation(
         result.snapshot.requestedState
@@ -664,6 +762,8 @@ export class IntegratedPlayer {
   /** Await all recovery/static presentation work currently owned by the player. */
   public async settled(): Promise<void> {
     await this.#recovery.settled();
+    await this.#context?.settled();
+    await this.#visibility.settled();
     await this.#motion.settled();
   }
 
@@ -695,6 +795,8 @@ export class IntegratedPlayer {
     // Capture the serialized motion tail after invalidating its transition.
     // Await it only after aborting the media/recovery producers below: a
     // reduced-to-full re-entry can otherwise be waiting on their work.
+    const contextDisposal = this.#context?.dispose() ?? Promise.resolve();
+    const visibilityDisposal = this.#visibility.dispose();
     const motionDisposal = this.#motion.dispose();
     try {
       this.#realtime?.dispose();
@@ -710,6 +812,8 @@ export class IntegratedPlayer {
     const recoveryDisposal = this.#recovery.dispose();
     await this.#preparePromise?.catch(() => undefined);
     await recoveryDisposal;
+    await contextDisposal;
+    await visibilityDisposal;
     await motionDisposal;
 
     let traceState: Readonly<IntegratedPlaybackTraceState> | null = null;
@@ -728,11 +832,15 @@ export class IntegratedPlayer {
     }
 
     const candidates = new Set<IntegratedCandidateAttempt>();
+    const selectedRendition = this.#selectedRendition;
     if (this.#activeCandidate !== null) candidates.add(this.#activeCandidate);
     this.#activeCandidate = null;
     for (const candidate of candidates) {
       try {
         await this.#invokeTerminalOwner(() => candidate.dispose());
+        if (selectedRendition !== null) {
+          this.#releaseCandidateResidency(selectedRendition);
+        }
       } catch (error) {
         this.#reportFailure(normalizeRuntimeFailure(
           "readiness-failure",
@@ -793,7 +901,16 @@ export class IntegratedPlayer {
         ));
       }
       try {
-        this.#catalog.dispose();
+        this.#participant.dispose();
+      } catch {
+        this.#reportFailure(normalizeRuntimeFailure(
+          "disposed",
+          undefined,
+          { operation: "participant-detachment" }
+        ));
+      }
+      try {
+        await this.#assetBinding.dispose();
       } catch (error) {
         this.#reportFailure(normalizeRuntimeFailure(
           "disposed",
@@ -812,7 +929,12 @@ export class IntegratedPlayer {
       this.#terminalOwnerCallbackDepth -= 1;
     }
   }
-
+  #reconcileContextAfter<T>(operation: Promise<T>): Promise<T> {
+    return operation.then((result) => {
+      this.#context?.reconcile();
+      return result;
+    });
+  }
   #createRealtimeDriver(
     options: Readonly<IntegratedRealtimeDriverOptions>
   ): RealtimeDriver {
@@ -821,12 +943,14 @@ export class IntegratedPlayer {
       requestFrame: options.requestFrame,
       cancelFrame: options.cancelFrame,
       now: options.now ?? this.#now,
-      tryContentTick: (context) => this.#operationGate.run(() =>
-        this.#tryContentTickInternal({
-          presentationOrdinal: context.presentationOrdinal,
-          rationalDeadlineUs: realtimeDeadlineUs(context.deadlineMs)
-        })
-      ),
+      tryContentTick: (context) => this.#contentTicker.tryRealtime({
+        presentationOrdinal: context.presentationOrdinal,
+        rationalDeadlineUs: realtimeDeadlineUs(context.deadlineMs),
+        callbackStartMicroseconds: realtimeDeadlineUs(context.callbackStartMs),
+        ...(context.eligibleAnimationFrameOrdinal === null
+          ? {}
+          : { eligibleAnimationFrameOrdinal: context.eligibleAnimationFrameOrdinal })
+      }),
       ...(options.onUnderflow === undefined
         ? {}
         : { onUnderflow: options.onUnderflow })
@@ -851,58 +975,23 @@ export class IntegratedPlayer {
   ): void {
     this.#selectedRendition = null;
     this.#readyResult = result;
-    if (result !== null) this.#motion.stageReadyResult(result);
+    if (result !== null) {
+      this.#motion.stageReadyResult(result);
+      this.#participant.markReady(result);
+      this.#decoderReentry.readyChanged();
+    }
   }
 
-}
-
-function disposeInvalidIntegratedStaticStore(value: unknown): void {
-  if (value === null || typeof value !== "object") return;
-  try {
-    const dispose = Reflect.get(value, "dispose");
-    if (typeof dispose === "function") dispose.call(value);
-  } catch {
-    // The original constructor validation/factory failure remains stable.
+  #releaseCandidateResidency(rendition: string): void {
+    try {
+      this.#assetBinding.releaseFailedCandidate(rendition);
+    } catch (error) {
+      this.#reportFailure(normalizeRuntimeFailure(
+        "resource-rejection",
+        error,
+        { rendition, operation: "retired-candidate-eviction" }
+      ));
+    }
   }
-}
 
-function snapshotIntegratedRealtimeOptions(
-  source: Readonly<IntegratedRealtimeDriverOptions>
-): Readonly<IntegratedRealtimeDriverOptions> {
-  const requestFrame = source.requestFrame;
-  const cancelFrame = source.cancelFrame;
-  const now = source.now;
-  const onUnderflow = source.onUnderflow;
-  return Object.freeze({
-    requestFrame,
-    cancelFrame,
-    ...(now === undefined ? {} : { now }),
-    ...(onUnderflow === undefined ? {} : { onUnderflow })
-  });
-}
-
-function normalizeAnimatedFailure(
-  error: unknown,
-  fallbackCode: RuntimeFailureCode,
-  context: Readonly<IntegratedContentTickContext>
-): Readonly<RuntimeFailure> {
-  if (isRuntimePlaybackError(error)) return error.failure;
-  const ordinal = context.presentationOrdinal <= BigInt(Number.MAX_SAFE_INTEGER)
-    ? Number(context.presentationOrdinal)
-    : undefined;
-  return normalizeRuntimeFailure(
-    fallbackCode,
-    error,
-    ordinal === undefined
-      ? { operation: "content-tick" }
-      : { operation: "content-tick", ordinal }
-  );
-}
-
-function realtimeDeadlineUs(deadlineMs: number): number {
-  const value = Math.round(deadlineMs * 1_000);
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new RangeError("realtime deadline exceeds integer-microsecond range");
-  }
-  return value;
 }

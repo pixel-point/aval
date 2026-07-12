@@ -31,9 +31,18 @@ import type {
   ReadinessRunnerResult
 } from "./readiness-runner.js";
 import type { RuntimeResourcePlan } from "./resource-plan.js";
+import type { RuntimeResourceAllocationSnapshot } from "./resource-plan.js";
+import type {
+  RuntimeCategoryBytesSnapshot,
+  RuntimeDecoderTicket
+} from "./model.js";
 import type { DecodeTimeline } from "./decode-timeline.js";
-import type { WorkerSampleFactory } from "./worker-samples.js";
+import type {
+  WorkerSampleFactory,
+  WorkerSampleTransferLease
+} from "./worker-samples.js";
 import type { RuntimeCanvasResourceHost } from "./static-resource-plan.js";
+import type { BrowserContextRecoveryEventTarget } from "./browser-context-recovery.js";
 
 export type Awaitable<T> = T | PromiseLike<T>;
 
@@ -127,11 +136,36 @@ export type AvcCandidateCachePreparer = (
   options?: Readonly<PrepareInteractionCacheOptions>
 ) => Promise<Readonly<InteractionCachePreparationReport>>;
 
+export interface AvcCandidateResourcePlanLeaseSnapshot {
+  readonly released: boolean;
+  readonly totalBytes: number;
+  readonly categories: readonly Readonly<RuntimeCategoryBytesSnapshot>[];
+}
+
+export interface AvcCandidateResourcePlanLease {
+  snapshot(): Readonly<AvcCandidateResourcePlanLeaseSnapshot>;
+  assertAllocation(
+    allocation: Readonly<RuntimeResourceAllocationSnapshot>
+  ): void;
+  claimWorkerTransfer(byteLength: number): WorkerSampleTransferLease;
+  release(): void;
+}
+
+/** Narrow page authority: byte peak admission plus decoder permission only. */
+export interface AvcCandidateResourceAuthority {
+  reservePlan(
+    allocation: Readonly<RuntimeResourceAllocationSnapshot>
+  ): AvcCandidateResourcePlanLease | PromiseLike<AvcCandidateResourcePlanLease>;
+  requestDecoder(): RuntimeDecoderTicket;
+}
+
 export interface AvcCandidateFactoryOptions {
   readonly workerFactory: AvcCandidateWorkerFactory;
   readonly rendererFactory: AvcCandidateRendererFactory;
   readonly readinessFactory: AvcCandidateReadinessFactory;
   readonly resourceHost?: RuntimeCanvasResourceHost;
+  readonly contextTarget?: BrowserContextRecoveryEventTarget;
+  readonly resourceAuthority?: AvcCandidateResourceAuthority;
   readonly clock?: PathSchedulerClock;
   readonly timers?: AvcCandidateTimerHost;
   /** Test seam; production defaults to the task-10 preparation owner. */

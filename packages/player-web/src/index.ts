@@ -6,6 +6,13 @@ export {
   type RationalFrameRate,
   type VirtualFramePosition
 } from "./runtime/rational-time.js";
+export type {
+  BindingSourceV01,
+  BindingV01,
+  CanvasV01,
+  CompiledManifestV01
+} from "@rendered-motion/format";
+export { IDENTIFIER_PATTERN } from "@rendered-motion/format";
 export {
   createEncodedLoopUnit,
   validateEncodedLoopUnit,
@@ -224,6 +231,10 @@ export {
   type RuntimeFailureContext
 } from "./runtime/errors.js";
 export {
+  parseExternalIntegrity,
+  type NormalizedExternalIntegrity
+} from "./runtime/external-integrity.js";
+export {
   DecodeTimeline,
   type DecodeSampleMetadata,
   type DecodeTimelineBatchPlan,
@@ -258,6 +269,8 @@ export {
   WorkerSampleFactory,
   type CreateWorkerSampleBatchInput,
   type DecoderWorkerSampleBatch,
+  type WorkerSampleResourceHost,
+  type WorkerSampleTransferLease,
   type WorkerSampleCatalog,
   type WorkerSampleFactoryOptions,
   type WorkerSampleFrameRequest
@@ -367,6 +380,9 @@ export {
   StaticSurfaceUnavailableError,
   asStaticSurfaceCatalog,
   type BrowserDecodedStaticSurface,
+  type BrowserStaticDecoderResourceCategory,
+  type BrowserStaticDecoderResourceHost,
+  type BrowserStaticDecoderResourceLease,
   type BrowserStaticSurfaceDecoderOptions,
   type BrowserStaticSurfaceDecoderSnapshot,
   type BrowserStaticSurfaceTimerHost,
@@ -376,12 +392,19 @@ export {
   type StaticSurfaceDecodeOptions,
   type StaticSurfaceDecoder,
   type StaticSurfacePresentationReport,
+  type StaticSurfaceStoreOptions,
+  type StaticSurfaceStoreResourceHost,
+  type StaticSurfaceStoreResourceLease,
   type StaticSurfaceStoreSnapshot,
+  type StaticSurfaceStoreSurfaceRole,
   type StaticSurfaceValidationReport,
   type StaticPngInflatePath
 } from "./runtime/static-surfaces.js";
 export {
   BrowserPresentationPlanes,
+  type BrowserCanvasBackingResourceHost,
+  type BrowserCanvasBackingResourceInput,
+  type BrowserCanvasBackingResourceTransition,
   type BrowserPresentationPlanesOptions,
   type BrowserPresentationPlanesSnapshot,
   type BrowserPresentationResizeInput,
@@ -550,6 +573,21 @@ export {
   type RealtimeUnderflowEvent
 } from "./runtime/realtime-driver.js";
 export {
+  BrowserContextRecovery,
+  type BrowserContextRebuildInput,
+  type BrowserContextRecoveryEvent,
+  type BrowserContextRecoveryEventTarget,
+  type BrowserContextRecoveryOptions,
+  type BrowserContextRecoverySnapshot,
+  type BrowserContextRecoveryState,
+  type BrowserContextRetirementInput
+} from "./runtime/browser-context-recovery.js";
+export {
+  IntegratedPlayerContext,
+  type IntegratedPlayerContextOptions,
+  type IntegratedPlayerContextSnapshot
+} from "./runtime/integrated-player-context.js";
+export {
   MOTION_POLICIES,
   MotionPolicyCoordinator,
   type ActualMotionMode,
@@ -562,6 +600,82 @@ export {
   type MotionPolicyTransition,
   type MotionPolicyTransitionKind
 } from "./runtime/motion-policy.js";
+export {
+  VisibilityPolicyCoordinator,
+  type VisibilityPolicyCoordinatorOptions,
+  type VisibilityPolicyTransition,
+  type VisibilityPolicyTransitionKind
+} from "./runtime/visibility-policy.js";
+export {
+  DEFAULT_MAXIMUM_DECODER_LEASES,
+  DEFAULT_MAXIMUM_PAGE_PHYSICAL_BYTES,
+  DEFAULT_MAXIMUM_PLAYER_LOGICAL_BYTES,
+  createRuntimePageResourcePolicy
+} from "./runtime/page-resource-policy.js";
+export {
+  PageResourceManager,
+  type RuntimePageResourceCounterContribution,
+  type RuntimePageResourceCounterContributor,
+  type RuntimeParticipantRegistration,
+  type RuntimeParticipantStatusUpdate
+} from "./runtime/page-resource-manager.js";
+export {
+  PlayerResourceAccount,
+  type PlayerResourceAccountSnapshot,
+  type RuntimeLeasedAllocation
+} from "./runtime/player-resource-account.js";
+export {
+  PageDecoderLeases,
+  type PageDecoderLeasesSnapshot
+} from "./runtime/page-decoder-leases.js";
+export {
+  PageReclamationCoordinator,
+  type PageReclamationSnapshot,
+  type RuntimeReclamationParticipant,
+  type RuntimeReclamationReservationInput
+} from "./runtime/page-reclamation.js";
+export {
+  openRuntimeAsset,
+  openRuntimeAssetBytes,
+  type OpenRuntimeAssetBytesOptions,
+  type OpenRuntimeAssetOptions,
+  type RuntimeAssetEnsureOptions,
+  type RuntimeAssetSession,
+  type RuntimeAssetSessionResources,
+  type RuntimeAssetSessionSnapshot,
+  type RuntimeStaticPngValidationInput,
+  type RuntimeStaticPngValidator
+} from "./runtime/runtime-asset-session.js";
+export {
+  createPlayerRuntimeAssetSessionResources
+} from "./runtime/runtime-asset-resources.js";
+export {
+  createPlayerWebRuntimeResources,
+  type PlayerWebRuntimeResources
+} from "./runtime/player-web-runtime-resources.js";
+export {
+  PlayerWebPageRuntime,
+  type PlayerWebOpenAssetBytesOptions,
+  type PlayerWebOpenAssetOptions,
+  type PlayerWebOwnedPlayer,
+  type PlayerWebPageRuntimeOptions,
+  type PlayerWebPageRuntimeSnapshot,
+  type PlayerWebParticipantRegistration,
+  type PlayerWebReclamationParticipant,
+  type PlayerWebRuntimeParticipant,
+  type PlayerWebRuntimeParticipantSnapshot,
+  type PlayerWebStaticSurfaceReclaimer
+} from "./runtime/player-web-page-runtime.js";
+export {
+  RUNTIME_SESSION_CLEANUP_PHASES,
+  RuntimeSessionLifecycle,
+  type RuntimeSessionCleanup,
+  type RuntimeSessionCleanupPhase,
+  type RuntimeSessionGenerationContext,
+  type RuntimeSessionLifecycleSnapshot,
+  type RuntimeSessionLifecycleState,
+  type RuntimeSessionPendingWait
+} from "./runtime/runtime-session-lifecycle.js";
 export {
   MAX_PRESENTATION_BACKING_DIMENSION,
   PRESENTATION_FIT_MODES,
@@ -577,25 +691,69 @@ export {
 export {
   RUNTIME_READINESS_LADDER,
   RUNTIME_READINESS_LEVELS,
+  RUNTIME_BLOB_RESIDENCY_STATES,
+  RUNTIME_BYTE_CATEGORIES,
+  RUNTIME_TRANSPORT_MODES,
   RUNTIME_TRACE_CAPACITY,
+  STATIC_REASON_CLASSIFICATIONS,
   STATIC_REASONS,
+  TRANSIENT_STATIC_REASONS,
   createRuntimeCandidateReport,
   createRuntimeReadinessReport,
+  isTransientStaticReason,
   summarizeStaticReason,
   translateGraphReadiness,
   type GraphReadinessTranslation,
+  type RuntimeAssetRequest,
+  type RuntimeAssetResidencySnapshot,
+  type RuntimeBlobResidencySnapshot,
+  type RuntimeBlobResidencyState,
+  type RuntimeByteCategory,
+  type RuntimeByteLease,
+  type RuntimeByteLeaseId,
+  type RuntimeByteLeaseSnapshot,
   type RuntimeCandidateReport,
+  type RuntimeCategoryBytesSnapshot,
+  type RuntimeContextRecoveryPhase,
+  type RuntimeContextRecoverySnapshot,
+  type RuntimeDecoderLease,
+  type RuntimeDecoderLeaseId,
+  type RuntimeDecoderLeaseSnapshot,
+  type RuntimeDecoderTicket,
+  type RuntimeDecoderTicketId,
+  type RuntimeDecoderTicketSnapshot,
+  type RuntimeDecoderTicketState,
   type RuntimeFrameKey,
   type RuntimeGraphTrace,
   type RuntimeMediaCursor,
   type RuntimeMediaPresentation,
+  type RuntimeLoaderDiagnosticSnapshot,
+  type RuntimeLoaderPhase,
+  type RuntimeLoaderPolicy,
+  type RuntimePageResourcePolicy,
+  type RuntimePageResourcePolicyInput,
+  type RuntimePageResourceSnapshot,
+  type RuntimeParticipantId,
+  type RuntimeParticipantPhase,
+  type RuntimeParticipantState,
+  type RuntimeParticipantVisibility,
   type RuntimeReadiness,
   type RuntimeReadinessReport,
   type RuntimeReadinessResult,
+  type RuntimeReclamationReason,
+  type RuntimeReclamationRequest,
+  type RuntimeReclamationResult,
+  type RuntimeReclamationToken,
+  type RuntimeResourceDiagnosticSnapshot,
   type RuntimeSchedulerSnapshot,
   type RuntimeTraceCounters,
   type RuntimeTraceRecord,
+  type RuntimeTransportMode,
+  type RuntimeSuspensionState,
+  type RuntimeVisibilitySnapshot,
+  type RuntimeVisibilityState,
   type StaticReason,
+  type StaticReasonClassification,
   type StaticReasonSummaryInput
 } from "./runtime/model.js";
 export {
@@ -633,6 +791,9 @@ export {
   type AvcCandidateCachePreparer,
   type AvcCandidateFactoryOptions,
   type AvcCandidatePreparedMedia,
+  type AvcCandidateResourceAuthority,
+  type AvcCandidateResourcePlanLease,
+  type AvcCandidateResourcePlanLeaseSnapshot,
   type AvcCandidateReadinessFactory,
   type AvcCandidateReadinessSession,
   type AvcCandidateReadinessSessionInput,

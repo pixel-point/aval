@@ -28,6 +28,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
         cancelFrame: frames.cancel,
         now: () => 0
       },
+      now: () => 0,
       timers: new IdleTimers()
     });
 
@@ -48,6 +49,13 @@ describe("IntegratedPlayer realtime clock ownership", () => {
       presentationOrdinal: 1n,
       rationalDeadlineUs: 33_333
     });
+    expect(player.getTrace().filter(({ kind }) => kind === "content-tick")).toMatchObject([{
+      presentationOrdinal: 1n,
+      rationalDeadlineUs: 33_333,
+      callbackStartMicroseconds: 0,
+      canvasSubmissionCompleteMicroseconds: 0,
+      eligibleAnimationFrameOrdinal: 1
+    }]);
     expect(player.realtimeSnapshot()).toMatchObject({
       running: true,
       advancedTicks: 1,
@@ -63,6 +71,53 @@ describe("IntegratedPlayer realtime clock ownership", () => {
       disposed: true
     });
   });
+
+  it.each(["throw", "reenter"] as const)(
+    "keeps a submitted frame committed when the post-draw timing clock tries to %s",
+    async (hostility) => {
+      const frames = new ManualFrames();
+      const factory = new RealtimeCandidateFactory();
+      const diagnostics: string[] = [];
+      let player: IntegratedPlayer;
+      let hostileObservation = false;
+      const observationalClock = (): number => {
+        if (factory.session.draws > 0 && !hostileObservation) {
+          hostileObservation = true;
+          if (hostility === "throw") throw new Error("hostile observational clock");
+          player.startRealtime();
+        }
+        return 0;
+      };
+      player = new IntegratedPlayer({
+        bytes: createIntegratedOpaqueTestAsset(),
+        createStaticStore: () => new ImmediateStaticStore(),
+        candidateFactory: factory,
+        diagnosticsSink: (failure) => diagnostics.push(failure.code),
+        realtime: {
+          requestFrame: frames.request,
+          cancelFrame: frames.cancel,
+          now: observationalClock
+        },
+        now: observationalClock,
+        timers: new IdleTimers()
+      });
+      await player.prepare();
+      player.startRealtime();
+
+      expect(() => frames.run(34)).not.toThrow();
+
+      expect(hostileObservation).toBe(true);
+      expect(factory.session.draws).toBe(1);
+      expect(player.snapshot()).toMatchObject({ readiness: "interactiveReady", visualState: "idle" });
+      expect(player.realtimeSnapshot()).toMatchObject({ advancedTicks: 1, nextPresentationOrdinal: 2n });
+      expect(player.getTrace().filter(({ kind }) => kind === "content-tick")).toMatchObject([{
+        presentationOrdinal: 1n,
+        canvasSubmissionCompleteMicroseconds: null
+      }]);
+      expect(diagnostics).toEqual([]);
+      await player.dispose();
+    }
+  );
 
   it("isolates a throwing underflow observer and retries the same ordinal", async () => {
     const frames = new ManualFrames();

@@ -14,6 +14,15 @@ import {
   createBrowserOpaqueCandidateComposition
 } from "./browser-avc-candidate.js";
 import { createIntegratedResumePresentation } from "./integrated-player-support.js";
+import { PageResourceManager } from "./page-resource-manager.js";
+import { PageDecoderLeases } from "./page-decoder-leases.js";
+import { createRuntimePageResourcePolicy } from "./page-resource-policy.js";
+import { PlayerResourceAccount } from "./player-resource-account.js";
+import { createPlayerCandidateResourceAuthority } from "./player-resource-hosts.js";
+import type {
+  RuntimeDecoderLease,
+  RuntimeDecoderTicket
+} from "./model.js";
 import type {
   RuntimeCanvasResourceHost,
   RuntimeCanvasResourceLease
@@ -180,6 +189,165 @@ describe("AvcCandidateFactory", () => {
 
     await low.dispose();
     tracker.expectZeroLeaks();
+  });
+
+  it("admits the plan and decoder before worker construction and releases permission last", async () => {
+    const contexts = createContexts();
+    const tracker = new LeakTracker();
+    const base = createDependencies(tracker).options;
+    const manager = new PageResourceManager();
+    const decoders = new PageDecoderLeases(manager);
+    const account = new PlayerResourceAccount(manager);
+    const real = createPlayerCandidateResourceAuthority(account, decoders);
+    const events: string[] = [];
+    const resourceAuthority = {
+      reservePlan(allocation: Parameters<typeof real.reservePlan>[0]) {
+        events.push("plan:reserve");
+        return real.reservePlan(allocation);
+      },
+      requestDecoder(): RuntimeDecoderTicket {
+        events.push("decoder:request");
+        const ticket = real.requestDecoder();
+        return Object.freeze({
+          snapshot: ticket.snapshot.bind(ticket),
+          async wait(): Promise<RuntimeDecoderLease> {
+            const lease = await ticket.wait();
+            events.push("decoder:granted");
+            return Object.freeze({
+              snapshot: lease.snapshot.bind(lease),
+              release() {
+                events.push("decoder:release");
+                lease.release();
+              }
+            }) as unknown as RuntimeDecoderLease;
+          },
+          cancel: ticket.cancel.bind(ticket)
+        }) as unknown as RuntimeDecoderTicket;
+      }
+    };
+    const factory = new AvcCandidateFactory({
+      ...base,
+      resourceAuthority,
+      workerFactory: {
+        ...base.workerFactory,
+        create(context) {
+          events.push("worker:create");
+          const worker = base.workerFactory.create(context);
+          return new Proxy(worker, {
+            get(target, property, receiver) {
+              if (property === "dispose") {
+                return async () => {
+                  events.push("worker:dispose:start");
+                  await target.dispose();
+                  events.push("worker:dispose:end");
+                };
+              }
+              const value = Reflect.get(target, property, receiver) as unknown;
+              return typeof value === "function" ? value.bind(target) : value;
+            }
+          });
+        }
+      }
+    });
+    const attempt = factory.create(contexts.high);
+
+    await attempt.prepare(operationOptions());
+
+    expect(events.slice(0, 4)).toEqual([
+      "plan:reserve",
+      "decoder:request",
+      "decoder:granted",
+      "worker:create"
+    ]);
+    expect(manager.snapshot()).toMatchObject({
+      decoderLeaseCount: 1,
+      decoderQueueLength: 0
+    });
+    expect(manager.snapshot().physicalBytes).toBeGreaterThan(0);
+
+    await attempt.dispose();
+    expect(events.indexOf("worker:dispose:end"))
+      .toBeLessThan(events.indexOf("decoder:release"));
+    expect(manager.snapshot()).toMatchObject({
+      physicalBytes: 0,
+      byteLeaseCount: 0,
+      decoderLeaseCount: 0,
+      decoderQueueLength: 0
+    });
+    tracker.expectZeroLeaks();
+    account.dispose();
+    decoders.dispose();
+  });
+
+  it("cancels a queued decoder ticket on abort without constructing a worker", async () => {
+    const contexts = createContexts();
+    const tracker = new LeakTracker();
+    const manager = new PageResourceManager(createRuntimePageResourcePolicy({
+      maximumDecoderLeases: 1
+    }));
+    const decoders = new PageDecoderLeases(manager);
+    const blocker = new PlayerResourceAccount(manager);
+    const account = new PlayerResourceAccount(manager);
+    const blockingLease = await decoders.request(
+      blocker.participantId,
+      blocker.snapshot().participant!.generation
+    ).wait();
+    const attempt = new AvcCandidateFactory({
+      ...createDependencies(tracker).options,
+      resourceAuthority: createPlayerCandidateResourceAuthority(account, decoders)
+    }).create(contexts.high);
+    const controller = new AbortController();
+    const preparation = attempt.prepare({
+      signal: controller.signal,
+      deadlineMs: 1_000
+    });
+    await waitFor(() => manager.snapshot().decoderQueueLength === 1);
+
+    expect(tracker.workerAlive).toBe(0);
+    expect(tracker.order).not.toContain("worker:create:opaque-high");
+    controller.abort(new DOMException("test abort", "AbortError"));
+    await expect(preparation).rejects.toMatchObject({ name: "AbortError" });
+    expect(manager.snapshot()).toMatchObject({
+      decoderLeaseCount: 1,
+      decoderQueueLength: 0,
+      physicalBytes: 0,
+      byteLeaseCount: 0
+    });
+    tracker.expectZeroLeaks();
+
+    blockingLease.release();
+    blocker.dispose();
+    account.dispose();
+    decoders.dispose();
+  });
+
+  it("rolls back a rejected page plan before decoder or worker allocation", async () => {
+    const contexts = createContexts();
+    const tracker = new LeakTracker();
+    const manager = new PageResourceManager(createRuntimePageResourcePolicy({
+      maximumPagePhysicalBytes: 1,
+      maximumPlayerLogicalBytes: 1
+    }));
+    const decoders = new PageDecoderLeases(manager);
+    const account = new PlayerResourceAccount(manager);
+    const attempt = new AvcCandidateFactory({
+      ...createDependencies(tracker).options,
+      resourceAuthority: createPlayerCandidateResourceAuthority(account, decoders)
+    }).create(contexts.high);
+
+    await expect(attempt.prepare(operationOptions())).rejects.toMatchObject({
+      code: "resource-rejection"
+    });
+    expect(tracker.workerAlive).toBe(0);
+    expect(manager.snapshot()).toMatchObject({
+      physicalBytes: 0,
+      byteLeaseCount: 0,
+      decoderLeaseCount: 0,
+      decoderQueueLength: 0
+    });
+    tracker.expectZeroLeaks();
+    account.dispose();
+    decoders.dispose();
   });
 
   it("rejects an over-budget candidate before allocating textures", async () => {

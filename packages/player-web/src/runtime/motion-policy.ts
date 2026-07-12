@@ -1,4 +1,8 @@
-import { STATIC_REASONS, type StaticReason } from "./model.js";
+import {
+  STATIC_REASONS,
+  isTransientStaticReason,
+  type StaticReason
+} from "./model.js";
 
 export const MOTION_POLICIES = Object.freeze([
   "auto",
@@ -14,7 +18,7 @@ export type ActualMotionMode =
   | "static"
   | "disposed";
 export type MotionPolicyTransitionKind = "enter-reduced" | "enter-full";
-export type MotionStaticOrigin = StaticReason | "png-failure";
+export type MotionStaticOrigin = StaticReason | "png-failure" | "context-loss";
 export type MotionFailureStaticOrigin = Exclude<
   MotionStaticOrigin,
   "reduced-motion"
@@ -145,7 +149,7 @@ export class MotionPolicyCoordinator {
       kind = "enter-reduced";
     } else if (
       this.#actualMode === "static" &&
-      this.#staticOrigin === "reduced-motion" &&
+      isReenterableStaticOrigin(this.#staticOrigin) &&
       desired === "full"
     ) {
       kind = "enter-full";
@@ -193,7 +197,7 @@ export class MotionPolicyCoordinator {
       transition.kind !== "enter-full" ||
       transition.signal.aborted ||
       this.#actualMode !== "static" ||
-      this.#staticOrigin !== "reduced-motion" ||
+      !isReenterableStaticOrigin(this.#staticOrigin) ||
       this.#desiredMode() !== "full"
     ) {
       return false;
@@ -222,6 +226,14 @@ export class MotionPolicyCoordinator {
     this.#advanceGeneration();
     this.#actualMode = "static";
     this.#staticOrigin = checked;
+  }
+
+  /** Invalidates owned policy work before an external lifecycle takes over. */
+  public cancelTransition(): void {
+    this.#assertUsable();
+    if (this.#transition === null) return;
+    this.#abortTransition();
+    this.#advanceGeneration();
   }
 
   public dispose(): void {
@@ -267,7 +279,7 @@ export class MotionPolicyCoordinator {
   #isStickyFailure(): boolean {
     return this.#actualMode === "static" &&
       this.#staticOrigin !== null &&
-      this.#staticOrigin !== "reduced-motion";
+      !isReenterableStaticOrigin(this.#staticOrigin);
   }
 
   #assertUnprepared(operation: string): void {
@@ -298,8 +310,24 @@ function validateHostReducedMotion(reduced: boolean): boolean {
 }
 
 function validateStaticOrigin(origin: MotionStaticOrigin): MotionStaticOrigin {
-  if (origin !== "png-failure" && !STATIC_REASONS.includes(origin)) {
+  if (
+    origin !== "png-failure" &&
+    origin !== "context-loss" &&
+    !STATIC_REASONS.includes(origin)
+  ) {
     throw new RangeError("motion static origin is invalid");
   }
   return origin;
+}
+
+function isReenterableStaticOrigin(
+  origin: MotionStaticOrigin | null
+): boolean {
+  return origin === "reduced-motion" || (
+    origin === "context-loss"
+  ) || (
+    origin !== null &&
+    origin !== "png-failure" &&
+    isTransientStaticReason(origin)
+  );
 }

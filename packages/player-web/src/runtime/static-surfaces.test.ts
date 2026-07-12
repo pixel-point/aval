@@ -1,8 +1,12 @@
 import type { CompiledManifestV01 } from "@rendered-motion/format";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { strictTestPng } from "./asset-test-fixture.js";
 import { FakeCatalog, fakeBitmap } from "./static-surfaces.test-support.js";
+import { PageResourceManager } from "./page-resource-manager.js";
+import { createRuntimePageResourcePolicy } from "./page-resource-policy.js";
+import { PlayerResourceAccount } from "./player-resource-account.js";
+import { createPlayerStaticSurfaceResourceHost } from "./player-resource-hosts.js";
 
 import {
   BrowserStaticSurfaceDecoder,
@@ -12,10 +16,318 @@ import {
   type DecodedStaticSurface,
   type StaticPresentationPlane,
   type StaticSurfaceCatalogView,
-  type StaticSurfaceDecoder
+  type StaticSurfaceDecoder,
+  type StaticSurfaceStoreOptions,
+  type StaticSurfaceStoreResourceHost,
+  type StaticSurfaceStoreResourceLease,
+  type StaticSurfaceStoreSurfaceRole
 } from "./static-surfaces.js";
 
 describe("bounded static surface store", () => {
+  it("retains validated optional surfaces with an opt-in resource host", async () => {
+    const resources = new FakeStaticResourceHost();
+    const fixture = createFixture({
+      resourceHost: resources,
+      retainOptionalSurfaces: true
+    });
+    await fixture.store.installInitial();
+    await fixture.store.validateAll();
+    const callsBeforeHit = fixture.decoder.calls.length;
+    const copiesBeforeHit = fixture.catalog.copies.length;
+
+    const hover = await fixture.store.presentState("hover");
+
+    expect(hover.redecoded).toBe(false);
+    expect(fixture.decoder.calls).toHaveLength(callsBeforeHit);
+    expect(fixture.catalog.copies).toHaveLength(copiesBeforeHit);
+    expect(resources.snapshot()).toMatchObject({
+      reservations: 3,
+      releases: 0,
+      active: 3,
+      roles: { current: 1, incoming: 0, optional: 2 }
+    });
+    expect(fixture.store.snapshot()).toMatchObject({
+      retainedSurfaces: 3,
+      decodedSurfaces: 3,
+      redecodedSurfaces: 0,
+      leaseReservations: 3,
+      leaseReleases: 0,
+      cache: {
+        retainedSurfaces: 3,
+        hits: 1,
+        evictions: 0
+      }
+    });
+  });
+
+  it("reclaims deterministic optional LRU, hard-pins current, and re-decodes from verified PNG", async () => {
+    const resources = new FakeStaticResourceHost();
+    const fixture = createFixture({
+      resourceHost: resources,
+      retainOptionalSurfaces: true
+    });
+    await fixture.store.installInitial();
+    await fixture.store.validateAll();
+    const copiesBefore = fixture.catalog.copies.length;
+
+    expect(fixture.store.reclaimOldest()).toMatchObject({
+      staticFrame: "done"
+    });
+    expect(fixture.store.snapshot().currentStaticFrame).toBe("shared");
+    expect(resources.snapshot()).toMatchObject({ active: 2, releases: 1 });
+    const report = await fixture.store.presentState("done");
+
+    expect(report.redecoded).toBe(true);
+    expect(fixture.catalog.copies).toHaveLength(copiesBefore + 1);
+    expect(fixture.catalog.copies.at(-1)).toBe("done");
+    expect(fixture.store.snapshot()).toMatchObject({
+      currentStaticFrame: "done",
+      redecodedSurfaces: 1,
+      cache: { evictions: 1 }
+    });
+  });
+
+  it("reserves an incoming hard pin before decode and preserves current on pressure/failure", async () => {
+    const resources = new FakeStaticResourceHost();
+    const fixture = createFixture({
+      resourceHost: resources,
+      retainOptionalSurfaces: true
+    });
+    await fixture.store.installInitial();
+    await fixture.store.validateAll();
+    const current = fixture.decoder.surfaces[0]!;
+    const gate = deferred<void>();
+    fixture.decoder.gates.set("done", gate.promise);
+    fixture.store.reclaimOldest();
+    const operation = fixture.store.presentState("done");
+    await Promise.resolve();
+
+    expect(resources.snapshot().roles.incoming).toBe(1);
+    expect(current.closeCalls).toBe(0);
+    expect(fixture.store.reclaimOldest()?.staticFrame).toBe("hover");
+    expect(fixture.store.reclaimOldest()).toBeNull();
+    fixture.decoder.fail.add("done");
+    gate.resolve(undefined);
+
+    await expect(operation).rejects.toThrow("injected decode failure");
+    expect(fixture.store.snapshot().currentStaticFrame).toBe("shared");
+    expect(current.closeCalls).toBe(0);
+    expect(resources.snapshot()).toMatchObject({
+      active: 1,
+      roles: { current: 1, incoming: 0, optional: 0 }
+    });
+  });
+
+  it("rejects resource pressure before copying PNG bytes or calling the decoder", async () => {
+    const resources = new FakeStaticResourceHost();
+    const fixture = createFixture({
+      resourceHost: resources,
+      retainOptionalSurfaces: true
+    });
+    await fixture.store.installInitial();
+    const calls = fixture.decoder.calls.length;
+    const copies = fixture.catalog.copies.length;
+    resources.failReservations = true;
+
+    await expect(fixture.store.presentState("hover"))
+      .rejects.toThrow("injected static resource pressure");
+
+    expect(fixture.decoder.calls).toHaveLength(calls);
+    expect(fixture.catalog.copies).toHaveLength(copies);
+    expect(fixture.store.snapshot().currentStaticFrame).toBe("shared");
+    expect(resources.snapshot()).toMatchObject({ active: 1, reservations: 1 });
+  });
+
+  it("releases an async admission when abort-listener registration attaches then throws", async () => {
+    const pending = deferred<StaticSurfaceStoreResourceLease>();
+    let releases = 0;
+    const fixture = createFixture({
+      resourceHost: {
+        reserveDecodedSurface: () => pending.promise,
+        nextTouchSequence: () => 1
+      },
+      retainOptionalSurfaces: true
+    });
+    const nativeAdd = AbortSignal.prototype.addEventListener;
+    const add = vi.spyOn(AbortSignal.prototype, "addEventListener")
+      .mockImplementation(function (
+        this: AbortSignal,
+        ...args: Parameters<AbortSignal["addEventListener"]>
+      ): void {
+        Reflect.apply(nativeAdd, this, args);
+        throw new Error("attached then failed");
+      });
+
+    const operation = fixture.store.installInitial();
+    await expect(operation).rejects.toThrow("attached then failed");
+    add.mockRestore();
+    pending.resolve({
+      setRole: () => undefined,
+      release: () => { releases += 1; }
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(releases).toBe(1);
+    expect(fixture.catalog.copies).toEqual([]);
+    expect(fixture.decoder.calls).toEqual([]);
+  });
+
+  it("removes a caller abort listener when registration attaches then throws", () => {
+    const fixture = createFixture();
+    let retained: EventListenerOrEventListenerObject | null = null;
+    let removals = 0;
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener(
+        _type: string,
+        listener: EventListenerOrEventListenerObject
+      ): void {
+        retained = listener;
+        throw new Error("attached caller listener then failed");
+      },
+      removeEventListener(
+        _type: string,
+        listener: EventListenerOrEventListenerObject
+      ): void {
+        removals += 1;
+        if (retained === listener) retained = null;
+      }
+    } as unknown as AbortSignal;
+
+    expect(() => fixture.store.installInitial({ signal }))
+      .toThrow("attached caller listener then failed");
+    expect(removals).toBe(1);
+    expect(retained).toBeNull();
+    expect(fixture.catalog.copies).toEqual([]);
+    expect(fixture.decoder.calls).toEqual([]);
+  });
+
+  it("does not retain a controller when caller listener removal throws", async () => {
+    const fixture = createFixture();
+    const nativeAbort = AbortController.prototype.abort;
+    const abort = vi.spyOn(AbortController.prototype, "abort")
+      .mockImplementation(function (
+        this: AbortController,
+        ...args: Parameters<AbortController["abort"]>
+      ): void {
+        Reflect.apply(nativeAbort, this, args);
+      });
+    let retained: EventListenerOrEventListenerObject | null = null;
+    let removals = 0;
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener(
+        _type: string,
+        listener: EventListenerOrEventListenerObject
+      ): void {
+        retained = listener;
+      },
+      removeEventListener(
+        _type: string,
+        listener: EventListenerOrEventListenerObject
+      ): void {
+        removals += 1;
+        if (retained === listener) retained = null;
+        throw new Error("caller listener removal failed");
+      }
+    } as unknown as AbortSignal;
+
+    await expect(fixture.store.installInitial({ signal })).resolves.toMatchObject({
+      staticFrame: "shared"
+    });
+    expect(removals).toBe(1);
+    expect(retained).toBeNull();
+
+    fixture.store.dispose();
+    expect(abort).not.toHaveBeenCalled();
+    abort.mockRestore();
+  });
+
+  it("keeps the current cover when a later account-backed incoming surface is rejected", async () => {
+    const manager = new PageResourceManager(createRuntimePageResourcePolicy({
+      maximumPagePhysicalBytes: 48,
+      maximumPlayerLogicalBytes: 48
+    }));
+    const account = new PlayerResourceAccount(manager);
+    const fixture = createFixture({
+      resourceHost: createPlayerStaticSurfaceResourceHost(account),
+      retainOptionalSurfaces: true
+    });
+    await fixture.store.installInitial();
+    const current = fixture.store.currentState();
+    const copies = fixture.catalog.copies.length;
+
+    await expect(fixture.store.presentState("hover"))
+      .rejects.toMatchObject({ code: "resource-rejection" });
+
+    expect(fixture.store.currentState()).toBe(current);
+    expect(fixture.store.snapshot().currentStaticFrame).toBe("shared");
+    expect(fixture.catalog.copies).toHaveLength(copies);
+    expect(manager.snapshot()).toMatchObject({
+      physicalBytes: 48,
+      byteLeaseCount: 1
+    });
+    fixture.store.dispose();
+    expect(manager.snapshot().physicalBytes).toBe(0);
+    account.dispose();
+  });
+
+  it("never reclaims current or incoming surfaces during an atomic cached draw", async () => {
+    const resources = new FakeStaticResourceHost();
+    const fixture = createFixture({
+      resourceHost: resources,
+      retainOptionalSurfaces: true
+    });
+    await fixture.store.installInitial();
+    await fixture.store.validateAll();
+    const reclaimed: Array<string | null> = [];
+    fixture.plane.observePresent = () => {
+      reclaimed.push(fixture.store.reclaimOldest()?.staticFrame ?? null);
+      reclaimed.push(fixture.store.reclaimOldest()?.staticFrame ?? null);
+      fixture.plane.observePresent = null;
+    };
+
+    await fixture.store.presentState("hover");
+
+    expect(reclaimed).toEqual(["done", null]);
+    expect(fixture.store.snapshot()).toMatchObject({
+      currentStaticFrame: "hover",
+      retainedSurfaces: 2,
+      cache: { currentStaticFrame: "hover", incomingStaticFrame: null }
+    });
+  });
+
+  it("closes every cached surface and releases every lease at disposal", async () => {
+    const resources = new FakeStaticResourceHost();
+    const fixture = createFixture({
+      resourceHost: resources,
+      retainOptionalSurfaces: true
+    });
+    await fixture.store.installInitial();
+    await fixture.store.validateAll();
+
+    fixture.store.dispose();
+    fixture.store.dispose();
+
+    expect(resources.snapshot()).toMatchObject({
+      reservations: 3,
+      releases: 3,
+      active: 0,
+      roles: { current: 0, incoming: 0, optional: 0 }
+    });
+    expect(fixture.store.snapshot()).toMatchObject({
+      state: "disposed",
+      retainedSurfaces: 0,
+      closedSurfaces: 3,
+      leaseReservations: 3,
+      leaseReleases: 3,
+      cache: { retainedSurfaces: 0, closes: 3, releases: 3 }
+    });
+  });
+
   it("installs visual-ready, validates unique statics sequentially, and deduplicates shared IDs", async () => {
     const fixture = createFixture();
     const initial = await fixture.store.installInitial();
@@ -420,12 +732,63 @@ describe("bounded static surface store", () => {
   });
 });
 
-function createFixture() {
+function createFixture(options?: Readonly<StaticSurfaceStoreOptions>) {
   const catalog = new FakeCatalog();
   const decoder = new FakeDecoder();
   const plane = new FakePlane();
-  const store = new StaticSurfaceStore(catalog, decoder, plane);
+  const store = new StaticSurfaceStore(catalog, decoder, plane, options);
   return { catalog, decoder, plane, store };
+}
+
+class FakeStaticResourceHost implements StaticSurfaceStoreResourceHost {
+  public failReservations = false;
+  #touch = 0;
+  #reservations = 0;
+  #releases = 0;
+  readonly #roles = new Map<number, StaticSurfaceStoreSurfaceRole>();
+
+  public nextTouchSequence(): number {
+    this.#touch += 1;
+    return this.#touch;
+  }
+
+  public reserveDecodedSurface(): StaticSurfaceStoreResourceLease {
+    if (this.failReservations) {
+      throw new Error("injected static resource pressure");
+    }
+    this.#reservations += 1;
+    const id = this.#reservations;
+    this.#roles.set(id, "incoming");
+    let released = false;
+    return {
+      setRole: (role) => {
+        if (released) throw new Error("lease released");
+        this.#roles.set(id, role);
+      },
+      release: () => {
+        if (released) return;
+        released = true;
+        this.#roles.delete(id);
+        this.#releases += 1;
+      }
+    };
+  }
+
+  public snapshot(): {
+    readonly reservations: number;
+    readonly releases: number;
+    readonly active: number;
+    readonly roles: Readonly<Record<StaticSurfaceStoreSurfaceRole, number>>;
+  } {
+    const roles = { current: 0, incoming: 0, optional: 0 };
+    for (const role of this.#roles.values()) roles[role] += 1;
+    return {
+      reservations: this.#reservations,
+      releases: this.#releases,
+      active: this.#roles.size,
+      roles
+    };
+  }
 }
 class FakeSurface implements DecodedStaticSurface {
   public closeCalls = 0;

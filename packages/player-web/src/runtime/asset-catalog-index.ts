@@ -3,13 +3,14 @@ import type {
   ByteRange,
   EdgeV01,
   PortV01,
+  ParsedFrontIndex,
   RenditionV01,
   StateV01,
   StaticBlobRange,
   StaticFrameV01,
   ValidatedStaticPngProfile,
   UnitV01,
-  ValidatedAssetLayout
+  UnitBlobRange
 } from "@rendered-motion/format";
 
 import {
@@ -44,6 +45,9 @@ export interface RuntimeCatalogAccessUnit {
   readonly localFrame: number;
   readonly ordinal: number;
   readonly record: Readonly<AccessUnitRecord>;
+  readonly blobKey?: string;
+  readonly blobRange?: Readonly<UnitBlobRange>;
+  readonly relativeRange?: Readonly<ByteRange>;
   readonly range: Readonly<ByteRange>;
 }
 
@@ -65,7 +69,16 @@ export interface RuntimeCatalogRecordIndex {
 export interface RuntimeCatalogStaticFrame {
   readonly frame: Readonly<StaticFrameV01>;
   readonly range: Readonly<StaticBlobRange>;
+  readonly blobKey?: string;
   readonly png: Readonly<ValidatedStaticPngProfile>;
+}
+
+export interface CatalogMapBuildInput {
+  readonly frontIndex: Readonly<ParsedFrontIndex>;
+  readonly declaredFileLength: number;
+  readonly resolveStaticPng: (
+    staticFrame: string
+  ) => Readonly<ValidatedStaticPngProfile>;
 }
 
 export interface CatalogMaps {
@@ -79,10 +92,24 @@ export interface CatalogMaps {
 }
 
 export function buildCatalogMaps(
-  layout: Readonly<ValidatedAssetLayout>,
-  byteLength: number
+  input: Readonly<CatalogMapBuildInput>
 ): CatalogMaps {
-  const manifest = layout.frontIndex.manifest;
+  if (typeof input !== "object" || input === null) {
+    throw indexError("asset catalog map input is invalid");
+  }
+  const frontIndex = input.frontIndex;
+  const byteLength = input.declaredFileLength;
+  if (
+    typeof frontIndex !== "object" ||
+    frontIndex === null ||
+    !Number.isSafeInteger(byteLength) ||
+    byteLength < 1 ||
+    frontIndex.header?.declaredFileLength !== byteLength ||
+    typeof input.resolveStaticPng !== "function"
+  ) {
+    throw indexError("asset catalog front-index geometry is invalid");
+  }
+  const manifest = frontIndex.manifest;
   const renditions = indexById<RenditionV01>(
     manifest.renditions,
     "rendition"
@@ -93,6 +120,7 @@ export function buildCatalogMaps(
   const ports = new Map<string, Readonly<RuntimeCatalogPortEntry>>();
   const records = new Map<string, Readonly<RuntimeCatalogAccessUnit>>();
   const staticFrames = new Map<string, Readonly<RuntimeCatalogStaticFrame>>();
+  const unitBlobs = indexUnitBlobs(frontIndex, byteLength);
 
   for (const unit of manifest.units) {
     if (unit.kind !== "body") continue;
@@ -106,8 +134,8 @@ export function buildCatalogMaps(
     }
   }
 
-  for (let ordinal = 0; ordinal < layout.frontIndex.records.length; ordinal += 1) {
-    const record = layout.frontIndex.records[ordinal];
+  for (let ordinal = 0; ordinal < frontIndex.records.length; ordinal += 1) {
+    const record = frontIndex.records[ordinal];
     if (record === undefined) {
       throw indexError("validated asset record array is sparse");
     }
@@ -121,8 +149,30 @@ export function buildCatalogMaps(
       record.payloadLength,
       byteLength
     );
+    const blob = unitBlobs.get(unitBlobIdentity(rendition.id, unit.id));
+    if (blob === undefined) {
+      throw indexError("validated asset record has no containing unit blob");
+    }
+    const blobEnd = checkedCatalogRangeEnd(
+      blob.offset,
+      blob.length,
+      byteLength
+    );
+    const recordEnd = record.payloadOffset + record.payloadLength;
+    if (
+      ordinal < blob.sampleStart ||
+      ordinal >= blob.sampleStart + blob.sampleCount ||
+      record.payloadOffset < blob.offset ||
+      recordEnd > blobEnd
+    ) {
+      throw indexError("validated asset record exceeds its unit blob");
+    }
     const range = Object.freeze({
       offset: record.payloadOffset,
+      length: record.payloadLength
+    });
+    const relativeRange = Object.freeze({
+      offset: record.payloadOffset - blob.offset,
       length: record.payloadLength
     });
     insertUnique(
@@ -134,6 +184,9 @@ export function buildCatalogMaps(
         localFrame: record.frameIndex,
         ordinal,
         record,
+        blobKey: runtimeUnitBlobKey(rendition.id, unit.id),
+        blobRange: blob,
+        relativeRange,
         range
       }),
       "validated asset contains a duplicate access-unit identity"
@@ -144,23 +197,34 @@ export function buildCatalogMaps(
     manifest.staticFrames,
     "static frame"
   );
-  for (let index = 0; index < layout.frontIndex.staticBlobs.length; index += 1) {
-    const range = layout.frontIndex.staticBlobs[index];
-    const png = layout.staticPngProfiles[index];
-    if (range === undefined || png === undefined) {
-      throw indexError("validated static PNG profile relation is missing");
+  for (let index = 0; index < frontIndex.staticBlobs.length; index += 1) {
+    const range = frontIndex.staticBlobs[index];
+    if (range === undefined) {
+      throw indexError("validated static PNG range relation is missing");
     }
     const frame = staticDescriptorById.get(range.staticFrame);
     if (frame === undefined) {
       throw indexError("validated static range relation is missing");
     }
     checkedCatalogRangeEnd(range.offset, range.length, byteLength);
+    const staticFrame = frame.id;
+    const entry: RuntimeCatalogStaticFrame = {
+      frame,
+      range,
+      blobKey: runtimeStaticBlobKey(staticFrame),
+      get png(): Readonly<ValidatedStaticPngProfile> {
+        return input.resolveStaticPng(staticFrame);
+      }
+    };
     insertUnique(
       staticFrames,
       frame.id,
-      Object.freeze({ frame, range, png }),
+      Object.freeze(entry),
       "validated asset contains a duplicate static range"
     );
+  }
+  if (staticFrames.size !== manifest.staticFrames.length) {
+    throw indexError("validated static ranges do not cover every descriptor");
   }
 
   return Object.freeze({
@@ -172,6 +236,41 @@ export function buildCatalogMaps(
     records,
     staticFrames
   });
+}
+
+export function runtimeUnitBlobKey(rendition: string, unit: string): string {
+  return `unit:${rendition}:${unit}`;
+}
+
+export function runtimeStaticBlobKey(staticFrame: string): string {
+  return `static:${staticFrame}`;
+}
+
+function indexUnitBlobs(
+  frontIndex: Readonly<ParsedFrontIndex>,
+  declaredFileLength: number
+): ReadonlyMap<string, Readonly<UnitBlobRange>> {
+  const result = new Map<string, Readonly<UnitBlobRange>>();
+  for (const blob of frontIndex.unitBlobs) {
+    checkedCatalogRangeEnd(blob.offset, blob.length, declaredFileLength);
+    if (
+      !Number.isSafeInteger(blob.sampleStart) ||
+      !Number.isSafeInteger(blob.sampleCount) ||
+      blob.sampleStart < 0 ||
+      blob.sampleCount < 1 ||
+      blob.sampleStart > frontIndex.records.length ||
+      blob.sampleCount > frontIndex.records.length - blob.sampleStart
+    ) {
+      throw indexError("validated unit blob sample span is invalid");
+    }
+    insertUnique(
+      result,
+      unitBlobIdentity(blob.rendition, blob.unit),
+      blob,
+      "validated asset contains a duplicate unit blob"
+    );
+  }
+  return result;
 }
 
 export function createCatalogIdIndex<TValue>(
@@ -312,6 +411,10 @@ function insertUnique<TValue>(
 
 function portIdentity(unit: string, port: string): string {
   return `${unit}/${port}`;
+}
+
+function unitBlobIdentity(rendition: string, unit: string): string {
+  return runtimeUnitBlobKey(rendition, unit);
 }
 
 function recordIdentity(

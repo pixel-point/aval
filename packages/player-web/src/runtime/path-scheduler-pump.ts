@@ -126,10 +126,14 @@ export async function pumpPathScheduler(
           pendingSamples: metrics.pendingSamples,
           outstandingFrames: outstanding
         });
-        const outputs = input.output.schedule(plans, batch.samples);
-        input.recordSubmitted(outputs);
-        submittedFrames += batch.samples.length;
-        await input.worker.submit(batch.generation, batch.samples);
+        try {
+          const outputs = input.output.schedule(plans, batch.samples);
+          input.recordSubmitted(outputs);
+          submittedFrames += batch.samples.length;
+          await input.worker.submit(batch.generation, batch.samples);
+        } finally {
+          batch.release?.();
+        }
         continue;
       }
     }

@@ -5,11 +5,16 @@ export const MAX_RUNTIME_DIAGNOSTIC_TEXT_LENGTH = 128 as const;
 
 export const RUNTIME_FAILURE_CODES = Object.freeze([
   "invalid-asset",
+  "load-failure",
+  "range-response-invalid",
+  "entity-changed",
+  "integrity-mismatch",
   "unsupported-profile",
   "resource-rejection",
   "readiness-failure",
   "worker-decode-failure",
   "renderer-failure",
+  "context-loss",
   "watchdog-timeout",
   "underflow",
   "abort",
@@ -36,6 +41,7 @@ export interface RuntimeFailureContext {
   readonly sourcePath?: string;
   readonly alphaStatistic?: string;
   readonly policyPhase?: string;
+  readonly lifecyclePhase?: string;
   readonly offset?: number;
   readonly width?: number;
   readonly height?: number;
@@ -43,6 +49,13 @@ export interface RuntimeFailureContext {
   readonly ordinal?: number;
   readonly localFrame?: number;
   readonly rank?: number;
+  readonly requestOrdinal?: number;
+  readonly httpStatus?: number;
+  readonly expectedBytes?: number;
+  readonly observedBytes?: number;
+  readonly declaredTotalBytes?: number;
+  readonly playerBytes?: number;
+  readonly pageBytes?: number;
 }
 
 export interface RuntimeFailure {
@@ -54,11 +67,16 @@ export interface RuntimeFailure {
 const DEFAULT_FAILURE_MESSAGES: Readonly<Record<RuntimeFailureCode, string>> =
   Object.freeze({
     "invalid-asset": "installed animation asset is invalid",
+    "load-failure": "animation asset loading failed",
+    "range-response-invalid": "animation range response is invalid",
+    "entity-changed": "animation asset entity changed during loading",
+    "integrity-mismatch": "animation asset integrity did not match",
     "unsupported-profile": "AVC animation profile is unsupported",
     "resource-rejection": "animation resource budget was rejected",
     "readiness-failure": "animation readiness failed",
     "worker-decode-failure": "animation decoder worker failed",
     "renderer-failure": "animation renderer failed",
+    "context-loss": "animation rendering context was lost",
     "watchdog-timeout": "animation watchdog expired",
     underflow: "animation presentation underflowed",
     abort: "animation operation was aborted",
@@ -173,6 +191,7 @@ function normalizeContext(
       sourcePath?: string;
       alphaStatistic?: string;
       policyPhase?: string;
+      lifecyclePhase?: string;
       offset?: number;
       width?: number;
       height?: number;
@@ -180,6 +199,13 @@ function normalizeContext(
       ordinal?: number;
       localFrame?: number;
       rank?: number;
+      requestOrdinal?: number;
+      httpStatus?: number;
+      expectedBytes?: number;
+      observedBytes?: number;
+      declaredTotalBytes?: number;
+      playerBytes?: number;
+      pageBytes?: number;
     } = {};
 
     copyText(context, normalized, "rendition");
@@ -195,6 +221,7 @@ function normalizeContext(
     copyText(context, normalized, "sourcePath");
     copyText(context, normalized, "alphaStatistic");
     copyText(context, normalized, "policyPhase");
+    copyText(context, normalized, "lifecyclePhase");
     copyInteger(context, normalized, "offset");
     copyInteger(context, normalized, "width");
     copyInteger(context, normalized, "height");
@@ -202,6 +229,13 @@ function normalizeContext(
     copyInteger(context, normalized, "ordinal");
     copyInteger(context, normalized, "localFrame");
     copyInteger(context, normalized, "rank");
+    copyInteger(context, normalized, "requestOrdinal");
+    copyInteger(context, normalized, "httpStatus");
+    copyInteger(context, normalized, "expectedBytes");
+    copyInteger(context, normalized, "observedBytes");
+    copyInteger(context, normalized, "declaredTotalBytes");
+    copyInteger(context, normalized, "playerBytes");
+    copyInteger(context, normalized, "pageBytes");
 
     return Object.freeze(normalized);
   } catch {
@@ -228,7 +262,14 @@ type IntegerContextKey =
   | "generation"
   | "ordinal"
   | "localFrame"
-  | "rank";
+  | "rank"
+  | "requestOrdinal"
+  | "httpStatus"
+  | "expectedBytes"
+  | "observedBytes"
+  | "declaredTotalBytes"
+  | "playerBytes"
+  | "pageBytes";
 
 function copyText(
   source: Readonly<RuntimeFailureContext>,

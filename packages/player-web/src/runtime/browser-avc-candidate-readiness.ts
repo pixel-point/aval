@@ -652,24 +652,28 @@ class BrowserReadinessProbe {
         pendingSamples: metrics.pendingSamples,
         outstandingFrames: metrics.submittedFrames + metrics.leasedFrames
       });
-      for (const sample of batch.samples) {
-        recorder.submit({
-          outputOrdinal: sample.ordinal,
-          media: {
-            path,
-            unit: sample.unitId,
-            unitInstance: sample.unitInstance,
-            localFrame: sample.unitFrame
-          },
-          idealDeadlineMs: idealReadinessDeadlineMs(
-            origin,
-            sequenceIndex + 1,
-            this.#input.context.catalog.manifest.frameRate
-          )
-        });
-        sequenceIndex += 1;
+      try {
+        for (const sample of batch.samples) {
+          recorder.submit({
+            outputOrdinal: sample.ordinal,
+            media: {
+              path,
+              unit: sample.unitId,
+              unitInstance: sample.unitInstance,
+              localFrame: sample.unitFrame
+            },
+            idealDeadlineMs: idealReadinessDeadlineMs(
+              origin,
+              sequenceIndex + 1,
+              this.#input.context.catalog.manifest.frameRate
+            )
+          });
+          sequenceIndex += 1;
+        }
+        await this.#input.worker.submit(generation, batch.samples);
+      } finally {
+        batch.release?.();
       }
-      await this.#input.worker.submit(generation, batch.samples);
       await this.#input.worker.waitForFrames(batch.samples.length, {
         signal: this.#input.signal,
         timeoutMs: remainingMs(this.#input)

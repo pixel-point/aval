@@ -89,6 +89,34 @@ describe("IntegratedPlayer motion-policy preparation", () => {
     });
   });
 
+  it("falls back for page pressure without mutating the host motion policy", async () => {
+    const harness = createHarness({ motionPolicy: "auto" });
+    await harness.player.prepare();
+
+    await expect(harness.player.reclaimForPagePressure()).resolves.toBe(true);
+
+    expect(harness.staticStore.calls).toEqual(expect.arrayContaining([
+      "stage:idle",
+      "cover-current"
+    ]));
+    expect(harness.factory.calls.filter((call) =>
+      call === "dispose:opaque-high"
+    )).toHaveLength(1);
+    expect(harness.player.snapshot()).toMatchObject({
+      readiness: "staticReady",
+      selectedRendition: null,
+      requestedState: "idle",
+      visualState: "idle"
+    });
+    expect(harness.player.motionSnapshot()).toMatchObject({
+      policy: "auto",
+      desiredMode: "full",
+      actualMode: "static",
+      staticOrigin: "resource-budget",
+      stickyFailure: true
+    });
+  });
+
   it("still disposes the reduced candidate when trace capture fails", async () => {
     const harness = createHarness();
     await harness.player.prepare();

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "0.1",
+  "fixture": "reference-packed.rma",
+  "scenarios": [
+    {
+      "id": "exact-range",
+      "behavior": "Honor one canonical Range request with 206, Content-Range, identity encoding, exact length, and the pinned strong ETag."
+    },
+    {
+      "id": "ignored-initial-range",
+      "behavior": "Ignore the first Range request and return one bounded identity-encoded 200 full entity."
+    },
+    {
+      "id": "no-validator",
+      "behavior": "Return a valid initial 206 without a strong ETag, causing exactly one range-free bounded full restart."
+    },
+    {
+      "id": "weak-etag",
+      "behavior": "Return a syntactically valid weak ETag on the initial range, which is not usable for entity pinning."
+    },
+    {
+      "id": "changed-etag",
+      "behavior": "Pin the reference strong ETag, then return a different strong ETag for a payload request."
+    },
+    {
+      "id": "wrong-total",
+      "behavior": "Return a 206 whose Content-Range total differs from the declared canonical file length."
+    },
+    {
+      "id": "truncated-body",
+      "behavior": "End an otherwise valid response one byte before its exact declared range length."
+    },
+    {
+      "id": "oversized-body",
+      "behavior": "Emit one byte beyond the exact active response-body cap."
+    },
+    {
+      "id": "compressed-body",
+      "behavior": "Return Content-Encoding gzip for bytes that would otherwise match the fixture."
+    },
+    {
+      "id": "stalled-body",
+      "behavior": "Emit a valid first chunk, then leave the body pending beyond the idle watchdog."
+    },
+    {
+      "id": "corrupt-unit",
+      "behavior": "Flip one deterministic byte inside the first selected-rendition unit while retaining all HTTP metadata."
+    },
+    {
+      "id": "corrupt-static",
+      "behavior": "Flip one deterministic byte inside the initial static PNG while retaining all HTTP metadata."
+    },
+    {
+      "id": "nonzero-padding",
+      "behavior": "Change the first normally requested selected-rendition or static alignment-padding byte from zero to one."
+    },
+    {
+      "id": "valid-external-integrity",
+      "behavior": "Return exactly one range-free bounded 200 whose whole-file digest matches provenance."
+    },
+    {
+      "id": "invalid-external-integrity",
+      "behavior": "Return exactly one range-free bounded 200 while the host supplies a mismatching whole-file digest."
+    }
+  ]
+}

@@ -67,6 +67,7 @@ interface IntegratedAnimatedPreparationOptions {
   readonly candidateFactory: IntegratedCandidateFactory;
   readonly availability: Readonly<IntegratedCandidateAvailability>;
   readonly hostMaxRuntimeBytes: number | null;
+  readonly residency: Readonly<IntegratedCandidateResidency>;
   readonly isDisposed: () => boolean;
   readonly commitActivation: (
     commit: Readonly<IntegratedAnimatedActivationCommit>
@@ -81,6 +82,12 @@ interface IntegratedAnimatedPreparationOptions {
   readonly reportFailure: (failure: Readonly<RuntimeFailure>) => void;
 }
 
+export interface IntegratedCandidateResidency {
+  readonly requiresEnsure: boolean;
+  ensureCandidate(rendition: string, signal: AbortSignal): Promise<void>;
+  releaseFailedCandidate(rendition: string): number;
+}
+
 /**
  * Owns one bounded animated-preparation transaction. Active playback state,
  * host effects, recovery, and request settlement remain player authorities.
@@ -92,6 +99,7 @@ export class IntegratedAnimatedPreparation {
   readonly #candidateFactory: IntegratedCandidateFactory;
   readonly #availability: Readonly<IntegratedCandidateAvailability>;
   readonly #hostMaxRuntimeBytes: number | null;
+  readonly #residency: Readonly<IntegratedCandidateResidency>;
   readonly #isDisposed: () => boolean;
   readonly #commitActivation: (
     commit: Readonly<IntegratedAnimatedActivationCommit>
@@ -117,6 +125,7 @@ export class IntegratedAnimatedPreparation {
     this.#candidateFactory = options.candidateFactory;
     this.#availability = options.availability;
     this.#hostMaxRuntimeBytes = options.hostMaxRuntimeBytes;
+    this.#residency = options.residency;
     this.#isDisposed = options.isDisposed;
     this.#commitActivation = options.commitActivation;
     this.#commitReentryActivation = options.commitReentryActivation;
@@ -184,6 +193,37 @@ export class IntegratedAnimatedPreparation {
 
       for (const candidate of candidates) {
         throwIfIntegratedAborted(control.controller.signal);
+        try {
+          if (this.#residency.requiresEnsure) {
+            await raceIntegratedAbort(
+              this.#residency.ensureCandidate(
+                candidate.rendition.id,
+                control.controller.signal
+              ),
+              control.controller.signal
+            );
+          }
+        } catch (error) {
+          if (control.controller.signal.aborted) {
+            this.#releaseFailedResidency(candidate.rendition.id);
+            throw integratedAbortReason(control.controller.signal);
+          }
+          const failure = normalizeIntegratedCandidateFailure(
+            error,
+            candidate.rendition.id,
+            candidate.rank
+          );
+          failures.push(failure);
+          reports.push(createRuntimeCandidateReport({
+            rendition: candidate.rendition.id,
+            rank: candidate.rank,
+            outcome: "rejected",
+            failure
+          }));
+          this.#reportFailure(failure);
+          this.#releaseFailedResidency(candidate.rendition.id);
+          continue;
+        }
         const inspected = inspectAvcRenditionCandidate(
           this.#catalog,
           candidate
@@ -193,6 +233,7 @@ export class IntegratedAnimatedPreparation {
           if (inspected.report.failure !== null) {
             failures.push(inspected.report.failure);
           }
+          this.#releaseFailedResidency(candidate.rendition.id);
           continue;
         }
 
@@ -301,6 +342,7 @@ export class IntegratedAnimatedPreparation {
           if (this.#graph.snapshot().readiness === "animated") {
             if (this.#attempt === attempt) this.#attempt = null;
             const recovered = await this.#recoverActivation(failure);
+            this.#releaseFailedResidency(candidate.rendition.id);
             if (aborted) throw integratedAbortReason(control.controller.signal);
             if (recovered?.mode !== "static") {
               throw new IntegratedPlaybackInvariantError(
@@ -312,9 +354,11 @@ export class IntegratedAnimatedPreparation {
 
           if (attempt !== null) this.#rollbackActivation(attempt);
           let cleanupFailure: Readonly<RuntimeFailure> | null = null;
+          let attemptRetired = attempt === null;
           if (attempt !== null) {
             try {
               await attempt.dispose();
+              attemptRetired = true;
             } catch (disposeError) {
               cleanupFailure = normalizeRuntimeFailure(
                 "readiness-failure",
@@ -330,6 +374,9 @@ export class IntegratedAnimatedPreparation {
             }
           }
           if (this.#attempt === attempt) this.#attempt = null;
+          if (attemptRetired) {
+            this.#releaseFailedResidency(candidate.rendition.id);
+          }
           if (aborted) throw integratedAbortReason(control.controller.signal);
           failures.push(failure);
           reports.push(createRuntimeCandidateReport({
@@ -341,6 +388,16 @@ export class IntegratedAnimatedPreparation {
           this.#reportFailure(failure);
           if (cleanupFailure !== null) {
             throw new RuntimePlaybackError(cleanupFailure);
+          }
+          if (isDecoderQueuedFailure(failure)) {
+            if (purpose === "reentry") {
+              return createReentryFailureResult("decoder-queued", reports);
+            }
+            return await this.#staticPreparation.finish(
+              "decoder-queued",
+              reports,
+              control.controller.signal
+            );
           }
         }
       }
@@ -427,6 +484,18 @@ export class IntegratedAnimatedPreparation {
       if (this.#control === control) this.#control = null;
     }
   }
+
+  #releaseFailedResidency(rendition: string): void {
+    try {
+      this.#residency.releaseFailedCandidate(rendition);
+    } catch (error) {
+      this.#reportFailure(normalizeRuntimeFailure(
+        "resource-rejection",
+        error,
+        { rendition, operation: "failed-candidate-eviction" }
+      ));
+    }
+  }
 }
 
 function createReentryFailureResult(
@@ -459,4 +528,9 @@ function sameActivationState(
     current.followOnEdgeId === prepared.followOnEdgeId &&
     current.direction === prepared.direction &&
     sameGraphPresentation(current.presentation, prepared.presentation);
+}
+
+function isDecoderQueuedFailure(failure: Readonly<RuntimeFailure>): boolean {
+  return failure.code === "resource-rejection" &&
+    failure.context.operation === "decoder-queued";
 }

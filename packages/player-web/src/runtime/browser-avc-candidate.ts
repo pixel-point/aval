@@ -78,6 +78,7 @@ export function createBrowserAvcCandidateComposition(
       : { createFrameBackend: options.testDependencies.createFrameBackend })
   });
   const readinessFactory = new BrowserAvcCandidateReadinessFactory({ hub });
+  const contextTarget = options.presentationPlanes?.animatedContextTarget?.();
   const factory = new AvcCandidateFactory({
     workerFactory,
     rendererFactory,
@@ -85,6 +86,10 @@ export function createBrowserAvcCandidateComposition(
     ...(options.presentationPlanes === undefined
       ? {}
       : { resourceHost: options.presentationPlanes }),
+    ...(contextTarget === undefined ? {} : { contextTarget }),
+    ...(options.resourceAuthority === undefined
+      ? {}
+      : { resourceAuthority: options.resourceAuthority }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.timers === undefined ? {} : { timers: options.timers })
   });
@@ -114,6 +119,10 @@ function validateOptions(
       typeof options.presentationPlanes.currentCanvasBacking !== "function" ||
       typeof options.presentationPlanes.reserveCanvasResources !== "function" ||
       typeof options.presentationPlanes.ownsAnimatedCanvas !== "function" ||
+      (
+        options.presentationPlanes.animatedContextTarget !== undefined &&
+        typeof options.presentationPlanes.animatedContextTarget !== "function"
+      ) ||
       !options.presentationPlanes.ownsAnimatedCanvas(options.canvas)
     )
   ) {
@@ -123,4 +132,15 @@ function validateOptions(
     options.diagnosticsSink !== undefined &&
     typeof options.diagnosticsSink !== "function"
   ) throw new TypeError("browser diagnostics sink must be a function");
+  if (
+    options.resourceAuthority !== undefined &&
+    (
+      options.resourceAuthority === null ||
+      typeof options.resourceAuthority !== "object" ||
+      typeof options.resourceAuthority.reservePlan !== "function" ||
+      typeof options.resourceAuthority.requestDecoder !== "function"
+    )
+  ) {
+    throw new TypeError("browser candidate resource authority is malformed");
+  }
 }

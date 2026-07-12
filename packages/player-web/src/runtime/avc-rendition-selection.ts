@@ -1,13 +1,13 @@
 import {
   FormatError,
   deriveAvcRenditionGeometry,
-  inspectAvcAnnexBRendition,
   type AvcRenditionGeometry,
   type AvcRenditionInspection,
   type RenditionV01
 } from "@rendered-motion/format";
 
 import type { RuntimeAssetCatalog } from "./asset-catalog.js";
+import { inspectRuntimeCatalogAvcRendition } from "./borrowed-avc-inspection.js";
 import {
   RuntimePlaybackError,
   normalizeRuntimeFailure,
@@ -130,8 +130,8 @@ export function createAvcRenditionCandidates(
 export const createOpaqueRenditionCandidates = createAvcRenditionCandidates;
 
 /**
- * Assemble fresh catalog-owned sample copies and invoke the sole public AVC
- * inspector across every unit before any worker is created.
+ * Invoke the sole AVC inspector through the catalog's private synchronous
+ * borrow authority before any worker or transfer-owned sample is created.
  */
 export function inspectAvcRenditionCandidate(
   catalog: RuntimeAssetCatalog,
@@ -162,33 +162,10 @@ export function inspectAvcRenditionCandidate(
       );
     }
 
-    const units = catalog.manifest.units.map((unit) => {
-      const accessUnits = Array.from(
-        { length: unit.frameCount },
-        (_, localFrame) => {
-          const entry = catalog.records.require(
-            installed.id,
-            unit.id,
-            localFrame
-          );
-          return Object.freeze({
-            bytes: new Uint8Array(catalog.copySample(
-              installed.id,
-              unit.id,
-              localFrame
-            )),
-            key: entry.record.key
-          });
-        }
-      );
-      return Object.freeze({
-        id: unit.id,
-        accessUnits: Object.freeze(accessUnits)
-      });
-    });
-
-    const inspection = inspectAvcAnnexBRendition({
-      profile: Object.freeze({
+    const inspection = inspectRuntimeCatalogAvcRendition(
+      catalog,
+      installed.id,
+      Object.freeze({
         codedWidth: installed.codedWidth,
         codedHeight: installed.codedHeight,
         expectedDecodedStorageRect: geometry.decodedStorageRect,
@@ -200,9 +177,8 @@ export function inspectAvcRenditionCandidate(
         peakBitrate: installed.bitrate.peak,
         cpbBufferBits: installed.bitrate.peak,
         requireBt709LimitedRange: true
-      }),
-      units: Object.freeze(units)
-    });
+      })
+    );
     const report = createRuntimeCandidateReport({
       rendition: installed.id,
       rank: candidate.rank,

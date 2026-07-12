@@ -442,7 +442,11 @@ class BrowserInitialPrefix {
       pendingSamples: metrics.pendingSamples,
       outstandingFrames: metrics.submittedFrames + metrics.leasedFrames
     });
-    await this.#candidate.worker.submit(this.#generation, batch.samples);
+    try {
+      await this.#candidate.worker.submit(this.#generation, batch.samples);
+    } finally {
+      batch.release?.();
+    }
     await this.#candidate.worker.waitForFrames(1, {
       signal,
       timeoutMs: BROWSER_RUNTIME_MEDIA_TIMEOUT_MS
