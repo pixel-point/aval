@@ -25,6 +25,26 @@ export interface CanonicalJsonObject {
   readonly [key: string]: CanonicalJsonValue;
 }
 
+export interface CanonicalJsonWriteLimits {
+  readonly maxBytes: number;
+  readonly maxDepth: number;
+  readonly maxNodes: number;
+  readonly maxStringBytes: number;
+}
+
+type CanonicalJsonWriterBudgets = Pick<
+  FormatBudgets,
+  "maxManifestBytes" | "maxJsonDepth" | "maxJsonNodes" | "maxJsonStringBytes"
+>;
+
+const MAX_CANONICAL_WRITE_LIMITS = Object.freeze({
+  maxBytes: 32 * 1024 * 1024,
+  maxDepth: 128,
+  maxNodes: 1_000_000,
+  maxStringBytes: 32 * 1024 * 1024
+});
+const WRITER_PAGE_BYTES = 64 * 1024;
+
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 function fail(
@@ -433,18 +453,28 @@ interface EncodedKey {
 }
 
 class CanonicalJsonWriter {
-  readonly #budgets: FormatBudgets;
-  readonly #bytes: number[] = [];
+  readonly #budgets: CanonicalJsonWriterBudgets;
+  readonly #pages: Uint8Array[] = [];
   readonly #active = new Set<object>();
+  #current = new Uint8Array(WRITER_PAGE_BYTES);
+  #currentLength = 0;
+  #byteLength = 0;
   #nodes = 0;
 
-  public constructor(budgets: FormatBudgets) {
+  public constructor(budgets: CanonicalJsonWriterBudgets) {
     this.#budgets = budgets;
   }
 
   public serialize(value: unknown): Uint8Array {
     this.#writeValue(value, 1);
-    return Uint8Array.from(this.#bytes);
+    const output = new Uint8Array(this.#byteLength);
+    let offset = 0;
+    for (const page of this.#pages) {
+      output.set(page, offset);
+      offset += page.byteLength;
+    }
+    output.set(this.#current.subarray(0, this.#currentLength), offset);
+    return output;
   }
 
   #writeValue(value: unknown, depth: number): void {
@@ -556,7 +586,7 @@ class CanonicalJsonWriter {
       }
       const bytes = encodeBoundedKey(key, this.#budgets.maxJsonStringBytes);
       const remainingManifestBytes =
-        this.#budgets.maxManifestBytes - this.#bytes.length;
+        this.#budgets.maxManifestBytes - this.#byteLength;
       if (retainedKeyBytes > remainingManifestBytes - bytes.byteLength) {
         return fail("BUDGET_EXCEEDED", "Manifest byte budget exceeded");
       }
@@ -630,23 +660,34 @@ class CanonicalJsonWriter {
     const encoded: number[] = [];
     pushUtf8Scalar(encoded, codePoint);
     this.#reserve(encoded.length);
-    this.#bytes.push(...encoded);
+    for (const byte of encoded) this.#appendByte(byte);
   }
 
   #pushAscii(value: string): void {
     this.#reserve(value.length);
     for (let index = 0; index < value.length; index += 1) {
-      this.#bytes.push(value.charCodeAt(index));
+      this.#appendByte(value.charCodeAt(index));
     }
   }
 
   #pushByte(value: number): void {
     this.#reserve(1);
-    this.#bytes.push(value);
+    this.#appendByte(value);
+  }
+
+  #appendByte(value: number): void {
+    if (this.#currentLength === this.#current.byteLength) {
+      this.#pages.push(this.#current);
+      this.#current = new Uint8Array(WRITER_PAGE_BYTES);
+      this.#currentLength = 0;
+    }
+    this.#current[this.#currentLength] = value;
+    this.#currentLength += 1;
+    this.#byteLength += 1;
   }
 
   #reserve(length: number): void {
-    if (this.#bytes.length > this.#budgets.maxManifestBytes - length) {
+    if (this.#byteLength > this.#budgets.maxManifestBytes - length) {
       return fail("BUDGET_EXCEEDED", "Manifest byte budget exceeded");
     }
   }
@@ -677,6 +718,52 @@ export function serializeCanonicalJson(
     if (isFormatError(error)) throw error;
     throw new FormatError("INPUT_INVALID", "Could not serialize canonical JSON");
   }
+}
+
+/**
+ * Serialize trusted high-cardinality JSON with the same canonical owner while
+ * retaining explicit hard upper limits independent from on-wire budgets.
+ */
+export function serializeCanonicalJsonWithLimits(
+  value: unknown,
+  limits: CanonicalJsonWriteLimits
+): Uint8Array {
+  try {
+    const budgets = resolveCanonicalJsonWriteLimits(limits);
+    return new CanonicalJsonWriter(budgets).serialize(value);
+  } catch (error) {
+    if (isFormatError(error)) throw error;
+    throw new FormatError("INPUT_INVALID", "Could not serialize canonical JSON");
+  }
+}
+
+function resolveCanonicalJsonWriteLimits(
+  limits: CanonicalJsonWriteLimits
+): CanonicalJsonWriterBudgets {
+  if (typeof limits !== "object" || limits === null) {
+    return fail("INPUT_INVALID", "Canonical JSON write limits are required");
+  }
+  for (const key of Object.keys(MAX_CANONICAL_WRITE_LIMITS) as (
+    keyof CanonicalJsonWriteLimits
+  )[]) {
+    const value = limits[key];
+    const maximum = MAX_CANONICAL_WRITE_LIMITS[key];
+    if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+      return fail(
+        "INPUT_INVALID",
+        `${key} must be an integer from 1 through ${String(maximum)}`
+      );
+    }
+  }
+  if (limits.maxStringBytes > limits.maxBytes) {
+    return fail("INPUT_INVALID", "maxStringBytes may not exceed maxBytes");
+  }
+  return Object.freeze({
+    maxManifestBytes: limits.maxBytes,
+    maxJsonDepth: limits.maxDepth,
+    maxJsonNodes: limits.maxNodes,
+    maxJsonStringBytes: limits.maxStringBytes
+  });
 }
 
 /**
@@ -716,5 +803,29 @@ export function parseCanonicalJson(
   } catch (error) {
     if (isFormatError(error)) throw error;
     throw new FormatError("JSON_INVALID", "Could not parse canonical JSON");
+  }
+}
+
+/**
+ * Parse bounded strict UTF-8 JSON while allowing insignificant whitespace and
+ * object-key order. Numbers remain safe integers and duplicate/dangerous keys
+ * retain the canonical parser's rejection behavior.
+ */
+export function parseStrictJson(
+  bytes: Uint8Array,
+  options?: FormatOptions
+): CanonicalJsonValue {
+  try {
+    if (!(bytes instanceof Uint8Array)) {
+      return fail("INPUT_INVALID", "Strict JSON input must be a Uint8Array");
+    }
+    const budgets = resolveFormatBudgets(options);
+    if (bytes.byteLength > budgets.maxManifestBytes) {
+      return fail("BUDGET_EXCEEDED", "JSON byte budget exceeded", 0);
+    }
+    return freezeParsed(new CanonicalJsonParser(bytes, budgets).parse());
+  } catch (error) {
+    if (isFormatError(error)) throw error;
+    throw new FormatError("JSON_INVALID", "Could not parse strict JSON");
   }
 }

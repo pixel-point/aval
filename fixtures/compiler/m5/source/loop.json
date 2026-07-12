@@ -1,0 +1,50 @@
+{
+  "projectVersion": "0.1",
+  "profile": "avc-annexb-opaque-v0",
+  "canvas": {
+    "width": 32,
+    "height": 32,
+    "fit": "contain",
+    "pixelAspect": [1, 1],
+    "colorSpace": "srgb"
+  },
+  "frameRate": { "numerator": 30, "denominator": 1 },
+  "sources": [
+    {
+      "id": "frames",
+      "type": "png-sequence",
+      "directory": "loop",
+      "prefix": "frame-",
+      "digits": 4,
+      "suffix": ".png",
+      "firstNumber": 0,
+      "frameCount": 2
+    }
+  ],
+  "renditions": [
+    {
+      "id": "opaque.1x",
+      "codedWidth": 32,
+      "codedHeight": 32,
+      "bitrate": { "average": 2000000, "peak": 3000000 }
+    }
+  ],
+  "units": [
+    {
+      "id": "body.default",
+      "kind": "body",
+      "source": "frames",
+      "range": [0, 2],
+      "playback": "loop",
+      "ports": [
+        { "id": "default", "entryFrame": 0, "portalFrames": [1] }
+      ]
+    }
+  ],
+  "initialState": "default",
+  "states": [
+    { "id": "default", "bodyUnit": "body.default" }
+  ],
+  "edges": [],
+  "bindings": []
+}

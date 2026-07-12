@@ -14,6 +14,8 @@ const RUNTIME_EXPORTS = Object.freeze([
   "ACCESS_UNIT_INDEX_HEADER_LENGTH",
   "ACCESS_UNIT_INDEX_MAGIC",
   "ACCESS_UNIT_RECORD_LENGTH",
+  "AVC_DECODER_SURFACE_PADDING",
+  "AvcIncrementalInspector",
   "FORMAT_ALIGNMENT",
   "FORMAT_DEFAULT_BUDGETS",
   "FORMAT_HEADER_LENGTH",
@@ -27,10 +29,18 @@ const RUNTIME_EXPORTS = Object.freeze([
   "SHA256_HEX_PATTERN",
   "adaptManifestToMotionGraph",
   "encodeReferenceFrame",
+  "inspectAvcAnnexBEncoderCandidateRendition",
+  "inspectAvcAnnexBRendition",
+  "maximumAvcDecodedRgbaBytes",
+  "maximumAvcDecoderSurfaceDimension",
+  "parseStrictJson",
   "parseFrontIndex",
   "parseHeader",
   "parseReferenceFrameHeader",
+  "prepareAvcEncoderRendition",
   "resolveFormatBudgets",
+  "serializeCanonicalJson",
+  "serializeCanonicalJsonWithLimits",
   "validateCompleteAsset",
   "validateReferenceFrame",
   "writeCanonicalAsset"
@@ -43,7 +53,7 @@ const FORBIDDEN_PLATFORM_IDENTIFIER =
 
 function productionSources(packageName: "format" | "graph"): readonly string[] {
   const sourceDirectory = resolve(WORKSPACE, `packages/${packageName}/src`);
-  return readdirSync(sourceDirectory)
+  return readdirSync(sourceDirectory, { recursive: true, encoding: "utf8" })
     .filter((entry) => entry.endsWith(".ts"))
     .sort()
     .map((entry) => resolve(sourceDirectory, entry));
@@ -107,7 +117,6 @@ describe("@rendered-motion/format public boundary", () => {
       "encodeHeader",
       "parseAccessUnitIndex",
       "parseCanonicalJson",
-      "serializeCanonicalJson",
       "validateCompiledManifestV01",
       "validatePngEnvelope"
     ]) {

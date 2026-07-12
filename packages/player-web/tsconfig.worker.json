@@ -1,0 +1,28 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "paths": {
+      "@rendered-motion/format": ["../format/src/index.ts"]
+    },
+    "lib": [
+      "ES2023",
+      "WebWorker"
+    ],
+    "types": [],
+    "noEmit": true
+  },
+  "include": [
+    "src/decoder-worker/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../format"
+    }
+  ]
+}

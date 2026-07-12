@@ -1,0 +1,3202 @@
+{
+  "provenanceVersion": "0.2",
+  "generatedAt": "2026-07-12",
+  "generator": "rendered-motion-compiler/0.1",
+  "compiler": {
+    "architecture": "arm64",
+    "nodeMajor": 25,
+    "package": "@rendered-motion/compiler",
+    "packageVersion": "0.0.0",
+    "platform": "darwin",
+    "projectVersion": "0.1"
+  },
+  "toolchain": {
+    "aggregateMemoryLimit": "derived",
+    "ffmpeg": {
+      "executableSha256": "329fa7360b28a067a0cd7281474bb18cd868932d5173646a674466bcb56d6e93",
+      "version": "ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers",
+      "versionOutputSha256": "98f2da65e4b3e39aa6ac74848582be422751d8f52176cf810eceb94bbcaa78d1",
+      "configuration": "configuration: --prefix=/opt/homebrew/Cellar/ffmpeg/8.1.2_1 --enable-shared --enable-pthreads --enable-version3 --cc=clang --host-cflags= --host-ldflags= --enable-ffplay --enable-gpl --enable-libsvtav1 --enable-libopus --enable-libx264 --enable-libmp3lame --enable-libdav1d --enable-libvmaf --enable-libvpx --enable-libx265 --enable-openssl --enable-videotoolbox --enable-audiotoolbox --enable-neon",
+      "configurationSha256": "8470f6e5d1c91c01f1228e91aa8827bea05a7e8a39c8dedefdb778716bdc1aec",
+      "encodersOutputSha256": "38b11441f5ffe17fd32539030ba9290b81e730878bb0cffe1af5084e2b7b8879",
+      "calibrationSha256": "88777af5e4d125466407cc218f088cf52a670ca3c3590365d2865f1a00d339c9"
+    },
+    "ffprobe": {
+      "executableSha256": "841ab2259a55e5c5e44c5851890867d48750ff1e7cfa92b5fbed91445a493128",
+      "version": "ffprobe version 8.1.2 Copyright (c) 2007-2026 the FFmpeg developers",
+      "versionOutputSha256": "8316221740e891c1f9d08d30a9a45059af9f1ec96741423eee3ae0c7721d9cec"
+    }
+  },
+  "fixtures": [
+    {
+      "name": "opaque-loop.rma",
+      "coverage": "Two-frame opaque body loop with one generated static fallback.",
+      "sourceProject": {
+        "path": "fixtures/compiler/m5/source/loop.json",
+        "bytes": 1020,
+        "sha256": "252daecb2078c7d97f650cba030932d89eaa0046fb7c60dad8752acdb43bf07c"
+      },
+      "sourceFrames": [
+        {
+          "path": "loop/frame-0000.png",
+          "bytes": 4209,
+          "sha256": "75c75688e4ed6bd78f4fd593de44e1dc6789b79a1169c34c72b2fafd7af7e71e"
+        },
+        {
+          "path": "loop/frame-0001.png",
+          "bytes": 4209,
+          "sha256": "ff2b010912e7f0a514c0c858703af33a4d4ddfefb3fe9d95a18f1f1b31d77689"
+        }
+      ],
+      "frontIndex": {
+        "offset": 0,
+        "length": 1512
+      },
+      "units": [
+        {
+          "rendition": "opaque.1x",
+          "unit": "body.default",
+          "sampleStart": 0,
+          "sampleCount": 2,
+          "sha256": "6ebe837196c2720077e4bc5cb52ffeb949bb3ddf630b51283a3d0e5571a575ff",
+          "offset": 1512,
+          "length": 112
+        }
+      ],
+      "staticFrames": [
+        {
+          "staticFrame": "static.00",
+          "sha256": "75c75688e4ed6bd78f4fd593de44e1dc6789b79a1169c34c72b2fafd7af7e71e",
+          "offset": 1624,
+          "length": 4209
+        }
+      ],
+      "stateStatics": [
+        {
+          "state": "default",
+          "staticFrame": "static.00"
+        }
+      ],
+      "normalization": [
+        {
+          "source": "frames",
+          "probe": {
+            "width": 32,
+            "height": 32,
+            "frameCount": 2,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 30
+            },
+            "timeBase": {
+              "denominator": 30,
+              "numerator": 1
+            },
+            "durationMicros": 66667,
+            "pixelFormat": "rgba",
+            "hasAlpha": true,
+            "variableFrameRate": false,
+            "frames": [
+              {
+                "durationTicks": 1,
+                "index": 0,
+                "timestampTicks": 0
+              },
+              {
+                "durationTicks": 1,
+                "index": 1,
+                "timestampTicks": 1
+              }
+            ]
+          },
+          "normalization": {
+            "mode": "exact",
+            "projectFrameCount": 2,
+            "selectedNativeFrames": [
+              0,
+              1
+            ],
+            "selectedProjectFrames": [
+              0,
+              1
+            ]
+          },
+          "alphaAudit": "passed"
+        }
+      ],
+      "invocations": [
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "discover:ffmpeg-version",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-hide_banner",
+            "-encoders"
+          ],
+          "operation": "discover:ffmpeg-encoders",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "discover:ffprobe-version",
+          "tool": "ffprobe"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "16x16",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=16:16:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "discover:ffmpeg-calibration",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-v",
+            "error",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-analyzeduration",
+            "10000000",
+            "-probesize",
+            "33554432",
+            "-threads",
+            "1",
+            "-f",
+            "image2",
+            "-framerate",
+            "30/1",
+            "-start_number",
+            "0",
+            "-select_streams",
+            "v",
+            "-read_intervals",
+            "%+#2",
+            "-show_entries",
+            "stream=index,width,height,pix_fmt,avg_frame_rate,r_frame_rate,time_base,nb_frames,duration,field_order,sample_aspect_ratio:stream_side_data=rotation:format=format_name,duration:frame=stream_index,best_effort_timestamp,duration",
+            "-of",
+            "json",
+            "$SOURCE/frames"
+          ],
+          "operation": "frames:probe",
+          "tool": "ffprobe"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-f",
+            "image2",
+            "-framerate",
+            "30/1",
+            "-start_number",
+            "0",
+            "-i",
+            "$SOURCE/frames",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-vf",
+            "select=between(n\\,0\\,1),format=rgba,alphaextract,signalstats,metadata=mode=print:key=lavfi.signalstats.YMIN:file='pipe\\:1':direct=1",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "null",
+            "-"
+          ],
+          "operation": "frames:alpha-audit",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-f",
+            "image2",
+            "-framerate",
+            "30/1",
+            "-start_number",
+            "0",
+            "-i",
+            "$SOURCE/frames",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-vf",
+            "select=between(n\\,0\\,1),scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=auto:out_range=full:in_color_matrix=auto:out_color_matrix=bt709,setsar=1,format=rgba",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "pipe:1"
+          ],
+          "operation": "frames:materialize-rgba",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "32x32",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "2000000",
+            "-maxrate",
+            "3000000",
+            "-bufsize",
+            "3000000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "encode:opaque.1x:body.default",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "verify:ffmpeg-version",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-hide_banner",
+            "-encoders"
+          ],
+          "operation": "verify:ffmpeg-encoders",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "verify:ffprobe-version",
+          "tool": "ffprobe"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "16x16",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=16:16:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "verify:ffmpeg-calibration",
+          "tool": "ffmpeg"
+        }
+      ],
+      "renditions": [
+        {
+          "accessUnits": 2,
+          "bitrate": {
+            "average": 2000000,
+            "peak": 3000000
+          },
+          "canonicalizations": [
+            {
+              "constraintSet2Canonicalized": true,
+              "unitId": "body.default"
+            }
+          ],
+          "codedHeight": 32,
+          "codedWidth": 32,
+          "encodedBytes": 112,
+          "id": "opaque.1x",
+          "inspection": {
+            "macroblocksPerFrame": 4,
+            "parameterSet": {
+              "codedHeight": 32,
+              "codedWidth": 32,
+              "color": {
+                "colourPrimaries": 1,
+                "fullRange": false,
+                "matrixCoefficients": 1,
+                "transferCharacteristics": 1
+              },
+              "constraintSet2": true,
+              "crop": {
+                "bottom": 0,
+                "left": 0,
+                "right": 0,
+                "top": 0,
+                "visibleHeight": 32,
+                "visibleWidth": 32
+              },
+              "fixedFrameRate": true,
+              "hrdPresent": false,
+              "levelIdc": 32,
+              "maxDecFrameBuffering": 1,
+              "maxNumRefFrames": 1,
+              "maxNumReorderFrames": 0,
+              "profileIdc": 66,
+              "squareSampleAspect": true
+            },
+            "units": [
+              {
+                "frames": [
+                  {
+                    "frameIndex": 0,
+                    "idr": true,
+                    "key": true,
+                    "nalUnitTypes": [
+                      9,
+                      7,
+                      8,
+                      5
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "I"
+                  },
+                  {
+                    "frameIndex": 1,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  }
+                ],
+                "id": "body.default"
+              }
+            ]
+          }
+        }
+      ],
+      "continuity": [
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 1,
+            "unit": "body.default"
+          },
+          "kind": "loop",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.002698796",
+            "identicalBoundary": false,
+            "neighborP95": "0.002698796",
+            "repeatedEndpointPause": false
+          },
+          "name": "body.default loop",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 0,
+            "unit": "body.default"
+          }
+        }
+      ],
+      "asset": {
+        "bytes": 5833,
+        "sha256": "dcda9b3afbd9e56c5aec4c71b24208bec94bef98d6046656ba837a4bc322ca49"
+      }
+    },
+    {
+      "name": "opaque-path.rma",
+      "coverage": "Initial one-shot, two body loops, locked bridge, pointer binding, and two generated static fallbacks.",
+      "sourceProject": {
+        "path": "fixtures/compiler/m5/source/path.json",
+        "bytes": 1964,
+        "sha256": "69c598d08f0e2033c04448f10f5d9e142894e488c60d509301382e26ad614651"
+      },
+      "sourceFrames": [
+        {
+          "path": "path/frame-0000.png",
+          "bytes": 4209,
+          "sha256": "58aa089c106fc7b447aa1b3286c781a6531a331786f7993b2ba5807203631bc0"
+        },
+        {
+          "path": "path/frame-0001.png",
+          "bytes": 4209,
+          "sha256": "219215532e8af7ffc11a09803e41e6877442019f22d421e2339edaaf425eace4"
+        },
+        {
+          "path": "path/frame-0002.png",
+          "bytes": 4209,
+          "sha256": "75c75688e4ed6bd78f4fd593de44e1dc6789b79a1169c34c72b2fafd7af7e71e"
+        },
+        {
+          "path": "path/frame-0003.png",
+          "bytes": 4209,
+          "sha256": "ff2b010912e7f0a514c0c858703af33a4d4ddfefb3fe9d95a18f1f1b31d77689"
+        },
+        {
+          "path": "path/frame-0004.png",
+          "bytes": 4209,
+          "sha256": "171e5894b309f3334b4bc9bc3181be9596c677c0cbcaed5fa8ecce54be45dc84"
+        },
+        {
+          "path": "path/frame-0005.png",
+          "bytes": 4209,
+          "sha256": "3a55fda5dd48d1017137b947ff873873825c338d5d3bd368fcf5bcf8245ef434"
+        },
+        {
+          "path": "path/frame-0006.png",
+          "bytes": 4209,
+          "sha256": "8162c8df6950f1f7855d02a06938e17c4936f6d9f01f034b99f61f919eb2d0c1"
+        },
+        {
+          "path": "path/frame-0007.png",
+          "bytes": 4209,
+          "sha256": "84a3bcd1a942dfdfa3e0cef595dd48f689a75165a37ed21ade60c5aff87aca87"
+        }
+      ],
+      "frontIndex": {
+        "offset": 0,
+        "length": 2928
+      },
+      "units": [
+        {
+          "rendition": "opaque.1x",
+          "unit": "active-body",
+          "sampleStart": 0,
+          "sampleCount": 2,
+          "sha256": "c2fd5174e2f9c47c2cf11a1b0c12a5de5347a3913fdaa76d157c140e5dbc6bd1",
+          "offset": 2928,
+          "length": 112
+        },
+        {
+          "rendition": "opaque.1x",
+          "unit": "bridge",
+          "sampleStart": 2,
+          "sampleCount": 2,
+          "sha256": "ee2defcf835d5056d1df586da236d9d7eda3eb01c45a2e34a907bcecc1d86997",
+          "offset": 3040,
+          "length": 76
+        },
+        {
+          "rendition": "opaque.1x",
+          "unit": "idle-body",
+          "sampleStart": 4,
+          "sampleCount": 2,
+          "sha256": "6ebe837196c2720077e4bc5cb52ffeb949bb3ddf630b51283a3d0e5571a575ff",
+          "offset": 3120,
+          "length": 112
+        },
+        {
+          "rendition": "opaque.1x",
+          "unit": "intro",
+          "sampleStart": 6,
+          "sampleCount": 2,
+          "sha256": "53d088250bc22021f7d0f37694aa45e2ebaca42f5272c22bb3b80afcddf2b161",
+          "offset": 3232,
+          "length": 112
+        }
+      ],
+      "staticFrames": [
+        {
+          "staticFrame": "static.00",
+          "sha256": "8162c8df6950f1f7855d02a06938e17c4936f6d9f01f034b99f61f919eb2d0c1",
+          "offset": 3344,
+          "length": 4209
+        },
+        {
+          "staticFrame": "static.01",
+          "sha256": "75c75688e4ed6bd78f4fd593de44e1dc6789b79a1169c34c72b2fafd7af7e71e",
+          "offset": 7560,
+          "length": 4209
+        }
+      ],
+      "stateStatics": [
+        {
+          "state": "active",
+          "staticFrame": "static.00"
+        },
+        {
+          "state": "idle",
+          "staticFrame": "static.01"
+        }
+      ],
+      "normalization": [
+        {
+          "source": "frames",
+          "probe": {
+            "width": 32,
+            "height": 32,
+            "frameCount": 8,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 30
+            },
+            "timeBase": {
+              "denominator": 30,
+              "numerator": 1
+            },
+            "durationMicros": 266667,
+            "pixelFormat": "rgba",
+            "hasAlpha": true,
+            "variableFrameRate": false,
+            "frames": [
+              {
+                "durationTicks": 1,
+                "index": 0,
+                "timestampTicks": 0
+              },
+              {
+                "durationTicks": 1,
+                "index": 1,
+                "timestampTicks": 1
+              },
+              {
+                "durationTicks": 1,
+                "index": 2,
+                "timestampTicks": 2
+              },
+              {
+                "durationTicks": 1,
+                "index": 3,
+                "timestampTicks": 3
+              },
+              {
+                "durationTicks": 1,
+                "index": 4,
+                "timestampTicks": 4
+              },
+              {
+                "durationTicks": 1,
+                "index": 5,
+                "timestampTicks": 5
+              },
+              {
+                "durationTicks": 1,
+                "index": 6,
+                "timestampTicks": 6
+              },
+              {
+                "durationTicks": 1,
+                "index": 7,
+                "timestampTicks": 7
+              }
+            ]
+          },
+          "normalization": {
+            "mode": "exact",
+            "projectFrameCount": 8,
+            "selectedNativeFrames": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "selectedProjectFrames": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          "alphaAudit": "passed"
+        }
+      ],
+      "invocations": [
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "discover:ffmpeg-version",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-hide_banner",
+            "-encoders"
+          ],
+          "operation": "discover:ffmpeg-encoders",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "discover:ffprobe-version",
+          "tool": "ffprobe"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "16x16",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=16:16:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "discover:ffmpeg-calibration",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-v",
+            "error",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-analyzeduration",
+            "10000000",
+            "-probesize",
+            "33554432",
+            "-threads",
+            "1",
+            "-f",
+            "image2",
+            "-framerate",
+            "30/1",
+            "-start_number",
+            "0",
+            "-select_streams",
+            "v",
+            "-read_intervals",
+            "%+#8",
+            "-show_entries",
+            "stream=index,width,height,pix_fmt,avg_frame_rate,r_frame_rate,time_base,nb_frames,duration,field_order,sample_aspect_ratio:stream_side_data=rotation:format=format_name,duration:frame=stream_index,best_effort_timestamp,duration",
+            "-of",
+            "json",
+            "$SOURCE/frames"
+          ],
+          "operation": "frames:probe",
+          "tool": "ffprobe"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-f",
+            "image2",
+            "-framerate",
+            "30/1",
+            "-start_number",
+            "0",
+            "-i",
+            "$SOURCE/frames",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-vf",
+            "select=between(n\\,0\\,7),format=rgba,alphaextract,signalstats,metadata=mode=print:key=lavfi.signalstats.YMIN:file='pipe\\:1':direct=1",
+            "-frames:v",
+            "8",
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "null",
+            "-"
+          ],
+          "operation": "frames:alpha-audit",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-f",
+            "image2",
+            "-framerate",
+            "30/1",
+            "-start_number",
+            "0",
+            "-i",
+            "$SOURCE/frames",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-vf",
+            "select=between(n\\,0\\,7),scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=auto:out_range=full:in_color_matrix=auto:out_color_matrix=bt709,setsar=1,format=rgba",
+            "-frames:v",
+            "8",
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "pipe:1"
+          ],
+          "operation": "frames:materialize-rgba",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "32x32",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "2000000",
+            "-maxrate",
+            "3000000",
+            "-bufsize",
+            "3000000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "encode:opaque.1x:active-body",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "32x32",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "2000000",
+            "-maxrate",
+            "3000000",
+            "-bufsize",
+            "3000000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "encode:opaque.1x:bridge",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "32x32",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "2000000",
+            "-maxrate",
+            "3000000",
+            "-bufsize",
+            "3000000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "encode:opaque.1x:idle-body",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "32x32",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "2000000",
+            "-maxrate",
+            "3000000",
+            "-bufsize",
+            "3000000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "encode:opaque.1x:intro",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "verify:ffmpeg-version",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-hide_banner",
+            "-encoders"
+          ],
+          "operation": "verify:ffmpeg-encoders",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "verify:ffprobe-version",
+          "tool": "ffprobe"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "16x16",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=16:16:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "verify:ffmpeg-calibration",
+          "tool": "ffmpeg"
+        }
+      ],
+      "renditions": [
+        {
+          "accessUnits": 8,
+          "bitrate": {
+            "average": 2000000,
+            "peak": 3000000
+          },
+          "canonicalizations": [
+            {
+              "constraintSet2Canonicalized": true,
+              "unitId": "active-body"
+            },
+            {
+              "constraintSet2Canonicalized": true,
+              "unitId": "bridge"
+            },
+            {
+              "constraintSet2Canonicalized": true,
+              "unitId": "idle-body"
+            },
+            {
+              "constraintSet2Canonicalized": true,
+              "unitId": "intro"
+            }
+          ],
+          "codedHeight": 32,
+          "codedWidth": 32,
+          "encodedBytes": 412,
+          "id": "opaque.1x",
+          "inspection": {
+            "macroblocksPerFrame": 4,
+            "parameterSet": {
+              "codedHeight": 32,
+              "codedWidth": 32,
+              "color": {
+                "colourPrimaries": 1,
+                "fullRange": false,
+                "matrixCoefficients": 1,
+                "transferCharacteristics": 1
+              },
+              "constraintSet2": true,
+              "crop": {
+                "bottom": 0,
+                "left": 0,
+                "right": 0,
+                "top": 0,
+                "visibleHeight": 32,
+                "visibleWidth": 32
+              },
+              "fixedFrameRate": true,
+              "hrdPresent": false,
+              "levelIdc": 32,
+              "maxDecFrameBuffering": 1,
+              "maxNumRefFrames": 1,
+              "maxNumReorderFrames": 0,
+              "profileIdc": 66,
+              "squareSampleAspect": true
+            },
+            "units": [
+              {
+                "frames": [
+                  {
+                    "frameIndex": 0,
+                    "idr": true,
+                    "key": true,
+                    "nalUnitTypes": [
+                      9,
+                      7,
+                      8,
+                      5
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "I"
+                  },
+                  {
+                    "frameIndex": 1,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  }
+                ],
+                "id": "active-body"
+              },
+              {
+                "frames": [
+                  {
+                    "frameIndex": 0,
+                    "idr": true,
+                    "key": true,
+                    "nalUnitTypes": [
+                      9,
+                      7,
+                      8,
+                      5
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "I"
+                  },
+                  {
+                    "frameIndex": 1,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  }
+                ],
+                "id": "bridge"
+              },
+              {
+                "frames": [
+                  {
+                    "frameIndex": 0,
+                    "idr": true,
+                    "key": true,
+                    "nalUnitTypes": [
+                      9,
+                      7,
+                      8,
+                      5
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "I"
+                  },
+                  {
+                    "frameIndex": 1,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  }
+                ],
+                "id": "idle-body"
+              },
+              {
+                "frames": [
+                  {
+                    "frameIndex": 0,
+                    "idr": true,
+                    "key": true,
+                    "nalUnitTypes": [
+                      9,
+                      7,
+                      8,
+                      5
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "I"
+                  },
+                  {
+                    "frameIndex": 1,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  }
+                ],
+                "id": "intro"
+              }
+            ]
+          }
+        }
+      ],
+      "continuity": [
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 7,
+            "unit": "active-body"
+          },
+          "kind": "loop",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.002831676",
+            "identicalBoundary": false,
+            "neighborP95": "0.002831676",
+            "repeatedEndpointPause": false
+          },
+          "name": "active-body loop",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 6,
+            "unit": "active-body"
+          }
+        },
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 3,
+            "unit": "idle-body"
+          },
+          "kind": "loop",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.002698796",
+            "identicalBoundary": false,
+            "neighborP95": "0.002698796",
+            "repeatedEndpointPause": false
+          },
+          "name": "idle-body loop",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 2,
+            "unit": "idle-body"
+          }
+        },
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 1,
+            "unit": "intro"
+          },
+          "kind": "intro",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.002665863",
+            "identicalBoundary": false,
+            "neighborP95": "0.002698796",
+            "repeatedEndpointPause": false
+          },
+          "name": "intro intro",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 2,
+            "unit": "idle-body"
+          }
+        },
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 3,
+            "unit": "idle-body"
+          },
+          "kind": "departure",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.002731845",
+            "identicalBoundary": false,
+            "neighborP95": "0.002765008",
+            "repeatedEndpointPause": false
+          },
+          "name": "idle-active departure",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 4,
+            "unit": "bridge"
+          }
+        },
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 5,
+            "unit": "bridge"
+          },
+          "kind": "arrival",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.002798285",
+            "identicalBoundary": false,
+            "neighborP95": "0.002831676",
+            "repeatedEndpointPause": false
+          },
+          "name": "idle-active arrival",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 6,
+            "unit": "active-body"
+          }
+        }
+      ],
+      "asset": {
+        "bytes": 11769,
+        "sha256": "edec42aad4ed140404caf895093fc3a986fbfdfaaf28f720cb47e918bf1308e0"
+      }
+    },
+    {
+      "name": "opaque-reversible.rma",
+      "coverage": "Forward-authored reversible transition, exact inverse edge, finish route, deliberate cut, and three static fallbacks.",
+      "sourceProject": {
+        "path": "fixtures/compiler/m5/source/reversible.json",
+        "bytes": 3551,
+        "sha256": "566d6a4e8ecce1d2af7feafd2192d752f828eda176557d39da59d74864ad2bd2"
+      },
+      "sourceFrames": [
+        {
+          "path": "reversible/frame-0000.png",
+          "bytes": 4209,
+          "sha256": "02c6e580e1bb2934dae5b6df2fdb29e462c184cd02c59e8636778ed13e872047"
+        },
+        {
+          "path": "reversible/frame-0001.png",
+          "bytes": 4209,
+          "sha256": "9db6d566cf6a6b995321e1957052d29763c3781a3d6c4f0268fb7bf452b912e4"
+        },
+        {
+          "path": "reversible/frame-0002.png",
+          "bytes": 4209,
+          "sha256": "af0689eaf82fdb3092712651708f895224acb2d3d053903337fbf4f40c421490"
+        },
+        {
+          "path": "reversible/frame-0003.png",
+          "bytes": 4209,
+          "sha256": "89725295ac716a251d031e468a37b1184213df85cb6a7dfe786c323fb2a6fa8b"
+        },
+        {
+          "path": "reversible/frame-0004.png",
+          "bytes": 4209,
+          "sha256": "75c75688e4ed6bd78f4fd593de44e1dc6789b79a1169c34c72b2fafd7af7e71e"
+        },
+        {
+          "path": "reversible/frame-0005.png",
+          "bytes": 4209,
+          "sha256": "af0bb5b064e49931bb124358969596dd36772551d7ff830e7444d16667e6142e"
+        },
+        {
+          "path": "reversible/frame-0006.png",
+          "bytes": 4209,
+          "sha256": "943a0d679668bfb2dde09ce6f7f950eb5b6a21c02c9d43f1b16b1ec40fadbe35"
+        },
+        {
+          "path": "reversible/frame-0007.png",
+          "bytes": 4209,
+          "sha256": "08087ddbf89ca7eccb46216baa90553af34585663a24b6b4d08fae8233b20a23"
+        },
+        {
+          "path": "reversible/frame-0008.png",
+          "bytes": 4209,
+          "sha256": "c9416b4e0baaed865cf5cbb9b4b24a4bf24fc2c213089e1eccefa38be59f86be"
+        },
+        {
+          "path": "reversible/frame-0009.png",
+          "bytes": 4209,
+          "sha256": "afd1613d0f7e5b9c3b6b043b49e6251fbdf06fa1945c0d228a697f6d80d2d8d2"
+        },
+        {
+          "path": "reversible/frame-0010.png",
+          "bytes": 4209,
+          "sha256": "abd7d7be1e4108661991952ec5b126cc78ac4a3cadecf0cd83172356a893e01d"
+        },
+        {
+          "path": "reversible/frame-0011.png",
+          "bytes": 4209,
+          "sha256": "fd9a9e5e1b45ea69f9bd396474c7ea814ae7298d1e817aac033df6967ec74a49"
+        },
+        {
+          "path": "reversible/frame-0012.png",
+          "bytes": 4209,
+          "sha256": "811caf5f4de8f713d08747e7574a452923705745acc5404a405edc8e7f7261bf"
+        },
+        {
+          "path": "reversible/frame-0013.png",
+          "bytes": 4209,
+          "sha256": "0ed4258a4c1030a28886a500c79284e50bbee20a14401a02d82cf816309560ca"
+        }
+      ],
+      "frontIndex": {
+        "offset": 0,
+        "length": 4352
+      },
+      "units": [
+        {
+          "rendition": "opaque.1x",
+          "unit": "done-body",
+          "sampleStart": 0,
+          "sampleCount": 6,
+          "sha256": "dd416c12b4826268397e7bc71e1199b94182372be2611708883d27d2827d148e",
+          "offset": 4352,
+          "length": 200
+        },
+        {
+          "rendition": "opaque.1x",
+          "unit": "hover-body",
+          "sampleStart": 6,
+          "sampleCount": 1,
+          "sha256": "539897d04e7d695a1b072d8f64880dbb69857c84285dd1a85086a053352a5f8e",
+          "offset": 4552,
+          "length": 56
+        },
+        {
+          "rendition": "opaque.1x",
+          "unit": "idle-body",
+          "sampleStart": 7,
+          "sampleCount": 1,
+          "sha256": "38f2484e45ca1a8fa41e59b4854593e2fc8f39c11df5a7812a80c6a4464960e9",
+          "offset": 4608,
+          "length": 60
+        },
+        {
+          "rendition": "opaque.1x",
+          "unit": "state-change",
+          "sampleStart": 8,
+          "sampleCount": 6,
+          "sha256": "a80aec52521b3f69bac48ef4268ba909fc9f3d6cdc7d9a0467814123bbd93b3a",
+          "offset": 4672,
+          "length": 196
+        }
+      ],
+      "staticFrames": [
+        {
+          "staticFrame": "static.00",
+          "sha256": "c9416b4e0baaed865cf5cbb9b4b24a4bf24fc2c213089e1eccefa38be59f86be",
+          "offset": 4872,
+          "length": 4209
+        },
+        {
+          "staticFrame": "static.01",
+          "sha256": "08087ddbf89ca7eccb46216baa90553af34585663a24b6b4d08fae8233b20a23",
+          "offset": 9088,
+          "length": 4209
+        },
+        {
+          "staticFrame": "static.02",
+          "sha256": "02c6e580e1bb2934dae5b6df2fdb29e462c184cd02c59e8636778ed13e872047",
+          "offset": 13304,
+          "length": 4209
+        }
+      ],
+      "stateStatics": [
+        {
+          "state": "done",
+          "staticFrame": "static.00"
+        },
+        {
+          "state": "hover",
+          "staticFrame": "static.01"
+        },
+        {
+          "state": "idle",
+          "staticFrame": "static.02"
+        }
+      ],
+      "normalization": [
+        {
+          "source": "frames",
+          "probe": {
+            "width": 32,
+            "height": 32,
+            "frameCount": 14,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 30
+            },
+            "timeBase": {
+              "denominator": 30,
+              "numerator": 1
+            },
+            "durationMicros": 466667,
+            "pixelFormat": "rgba",
+            "hasAlpha": true,
+            "variableFrameRate": false,
+            "frames": [
+              {
+                "durationTicks": 1,
+                "index": 0,
+                "timestampTicks": 0
+              },
+              {
+                "durationTicks": 1,
+                "index": 1,
+                "timestampTicks": 1
+              },
+              {
+                "durationTicks": 1,
+                "index": 2,
+                "timestampTicks": 2
+              },
+              {
+                "durationTicks": 1,
+                "index": 3,
+                "timestampTicks": 3
+              },
+              {
+                "durationTicks": 1,
+                "index": 4,
+                "timestampTicks": 4
+              },
+              {
+                "durationTicks": 1,
+                "index": 5,
+                "timestampTicks": 5
+              },
+              {
+                "durationTicks": 1,
+                "index": 6,
+                "timestampTicks": 6
+              },
+              {
+                "durationTicks": 1,
+                "index": 7,
+                "timestampTicks": 7
+              },
+              {
+                "durationTicks": 1,
+                "index": 8,
+                "timestampTicks": 8
+              },
+              {
+                "durationTicks": 1,
+                "index": 9,
+                "timestampTicks": 9
+              },
+              {
+                "durationTicks": 1,
+                "index": 10,
+                "timestampTicks": 10
+              },
+              {
+                "durationTicks": 1,
+                "index": 11,
+                "timestampTicks": 11
+              },
+              {
+                "durationTicks": 1,
+                "index": 12,
+                "timestampTicks": 12
+              },
+              {
+                "durationTicks": 1,
+                "index": 13,
+                "timestampTicks": 13
+              }
+            ]
+          },
+          "normalization": {
+            "mode": "exact",
+            "projectFrameCount": 14,
+            "selectedNativeFrames": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13
+            ],
+            "selectedProjectFrames": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13
+            ]
+          },
+          "alphaAudit": "passed"
+        }
+      ],
+      "invocations": [
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "discover:ffmpeg-version",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-hide_banner",
+            "-encoders"
+          ],
+          "operation": "discover:ffmpeg-encoders",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "discover:ffprobe-version",
+          "tool": "ffprobe"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "16x16",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=16:16:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "discover:ffmpeg-calibration",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-v",
+            "error",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-analyzeduration",
+            "10000000",
+            "-probesize",
+            "33554432",
+            "-threads",
+            "1",
+            "-f",
+            "image2",
+            "-framerate",
+            "30/1",
+            "-start_number",
+            "0",
+            "-select_streams",
+            "v",
+            "-read_intervals",
+            "%+#14",
+            "-show_entries",
+            "stream=index,width,height,pix_fmt,avg_frame_rate,r_frame_rate,time_base,nb_frames,duration,field_order,sample_aspect_ratio:stream_side_data=rotation:format=format_name,duration:frame=stream_index,best_effort_timestamp,duration",
+            "-of",
+            "json",
+            "$SOURCE/frames"
+          ],
+          "operation": "frames:probe",
+          "tool": "ffprobe"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-f",
+            "image2",
+            "-framerate",
+            "30/1",
+            "-start_number",
+            "0",
+            "-i",
+            "$SOURCE/frames",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-vf",
+            "select=between(n\\,0\\,13),format=rgba,alphaextract,signalstats,metadata=mode=print:key=lavfi.signalstats.YMIN:file='pipe\\:1':direct=1",
+            "-frames:v",
+            "14",
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "null",
+            "-"
+          ],
+          "operation": "frames:alpha-audit",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "file,pipe",
+            "-f",
+            "image2",
+            "-framerate",
+            "30/1",
+            "-start_number",
+            "0",
+            "-i",
+            "$SOURCE/frames",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-vf",
+            "select=between(n\\,0\\,13),scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=auto:out_range=full:in_color_matrix=auto:out_color_matrix=bt709,setsar=1,format=rgba",
+            "-frames:v",
+            "14",
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "pipe:1"
+          ],
+          "operation": "frames:materialize-rgba",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "32x32",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "6",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "encode:opaque.1x:done-body",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "32x32",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "1",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "encode:opaque.1x:hover-body",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "32x32",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "1",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "encode:opaque.1x:idle-body",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "32x32",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=32:32:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "6",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "encode:opaque.1x:state-change",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "verify:ffmpeg-version",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-hide_banner",
+            "-encoders"
+          ],
+          "operation": "verify:ffmpeg-encoders",
+          "tool": "ffmpeg"
+        },
+        {
+          "arguments": [
+            "-version"
+          ],
+          "operation": "verify:ffprobe-version",
+          "tool": "ffprobe"
+        },
+        {
+          "arguments": [
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-max_alloc",
+            "67108864",
+            "-protocol_whitelist",
+            "pipe",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            "16x16",
+            "-framerate",
+            "30/1",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata",
+            "-1",
+            "-map_chapters",
+            "-1",
+            "-vf",
+            "scale=16:16:flags=lanczos+accurate_rnd+full_chroma_int:in_range=full:out_range=tv:in_color_matrix=bt709:out_color_matrix=bt709,setsar=1,format=yuv420p",
+            "-frames:v",
+            "2",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-level:v",
+            "3.2",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_range",
+            "tv",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            "-threads",
+            "1",
+            "-filter_threads",
+            "1",
+            "-g",
+            "901",
+            "-keyint_min",
+            "901",
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-refs",
+            "1",
+            "-b:v",
+            "300000",
+            "-maxrate",
+            "600000",
+            "-bufsize",
+            "600000",
+            "-x264-params",
+            "aud=1:bframes=0:cabac=0:colormatrix=bt709:colorprim=bt709:force-cfr=1:keyint=901:min-keyint=901:open-gop=0:ref=1:range=tv:repeat-headers=1:scenecut=0:sliced-threads=0:slices=1:threads=1:lookahead-threads=1:sync-lookahead=0:transfer=bt709",
+            "-f",
+            "h264",
+            "pipe:1"
+          ],
+          "operation": "verify:ffmpeg-calibration",
+          "tool": "ffmpeg"
+        }
+      ],
+      "renditions": [
+        {
+          "accessUnits": 14,
+          "bitrate": {
+            "average": 300000,
+            "peak": 600000
+          },
+          "canonicalizations": [
+            {
+              "constraintSet2Canonicalized": true,
+              "unitId": "done-body"
+            },
+            {
+              "constraintSet2Canonicalized": true,
+              "unitId": "hover-body"
+            },
+            {
+              "constraintSet2Canonicalized": true,
+              "unitId": "idle-body"
+            },
+            {
+              "constraintSet2Canonicalized": true,
+              "unitId": "state-change"
+            }
+          ],
+          "codedHeight": 32,
+          "codedWidth": 32,
+          "encodedBytes": 512,
+          "id": "opaque.1x",
+          "inspection": {
+            "macroblocksPerFrame": 4,
+            "parameterSet": {
+              "codedHeight": 32,
+              "codedWidth": 32,
+              "color": {
+                "colourPrimaries": 1,
+                "fullRange": false,
+                "matrixCoefficients": 1,
+                "transferCharacteristics": 1
+              },
+              "constraintSet2": true,
+              "crop": {
+                "bottom": 0,
+                "left": 0,
+                "right": 0,
+                "top": 0,
+                "visibleHeight": 32,
+                "visibleWidth": 32
+              },
+              "fixedFrameRate": true,
+              "hrdPresent": false,
+              "levelIdc": 32,
+              "maxDecFrameBuffering": 1,
+              "maxNumRefFrames": 1,
+              "maxNumReorderFrames": 0,
+              "profileIdc": 66,
+              "squareSampleAspect": true
+            },
+            "units": [
+              {
+                "frames": [
+                  {
+                    "frameIndex": 0,
+                    "idr": true,
+                    "key": true,
+                    "nalUnitTypes": [
+                      9,
+                      7,
+                      8,
+                      5
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "I"
+                  },
+                  {
+                    "frameIndex": 1,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  },
+                  {
+                    "frameIndex": 2,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  },
+                  {
+                    "frameIndex": 3,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  },
+                  {
+                    "frameIndex": 4,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  },
+                  {
+                    "frameIndex": 5,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  }
+                ],
+                "id": "done-body"
+              },
+              {
+                "frames": [
+                  {
+                    "frameIndex": 0,
+                    "idr": true,
+                    "key": true,
+                    "nalUnitTypes": [
+                      9,
+                      7,
+                      8,
+                      5
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "I"
+                  }
+                ],
+                "id": "hover-body"
+              },
+              {
+                "frames": [
+                  {
+                    "frameIndex": 0,
+                    "idr": true,
+                    "key": true,
+                    "nalUnitTypes": [
+                      9,
+                      7,
+                      8,
+                      5
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "I"
+                  }
+                ],
+                "id": "idle-body"
+              },
+              {
+                "frames": [
+                  {
+                    "frameIndex": 0,
+                    "idr": true,
+                    "key": true,
+                    "nalUnitTypes": [
+                      9,
+                      7,
+                      8,
+                      5
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "I"
+                  },
+                  {
+                    "frameIndex": 1,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  },
+                  {
+                    "frameIndex": 2,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  },
+                  {
+                    "frameIndex": 3,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  },
+                  {
+                    "frameIndex": 4,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  },
+                  {
+                    "frameIndex": 5,
+                    "idr": false,
+                    "key": false,
+                    "nalUnitTypes": [
+                      9,
+                      1
+                    ],
+                    "sliceCount": 1,
+                    "sliceType": "P"
+                  }
+                ],
+                "id": "state-change"
+              }
+            ]
+          }
+        }
+      ],
+      "continuity": [
+        {
+          "from": {
+            "direction": "runtime",
+            "frame": null,
+            "unit": "idle-body"
+          },
+          "kind": "cut",
+          "metrics": null,
+          "name": "idle-done cut",
+          "status": "cut",
+          "to": {
+            "direction": "forward",
+            "frame": 8,
+            "unit": "done-body"
+          }
+        },
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 7,
+            "unit": "hover-body"
+          },
+          "kind": "departure",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.0390227",
+            "identicalBoundary": false,
+            "neighborP95": "0.054433243",
+            "repeatedEndpointPause": false
+          },
+          "name": "hover-done departure",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 8,
+            "unit": "done-body"
+          }
+        },
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 7,
+            "unit": "hover-body"
+          },
+          "kind": "departure",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.035407185",
+            "identicalBoundary": false,
+            "neighborP95": "0.031894309",
+            "repeatedEndpointPause": false
+          },
+          "name": "hover-idle departure",
+          "status": "pass",
+          "to": {
+            "direction": "reverse",
+            "frame": 6,
+            "unit": "state-change"
+          }
+        },
+        {
+          "from": {
+            "direction": "reverse",
+            "frame": 1,
+            "unit": "state-change"
+          },
+          "kind": "arrival",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.01605985",
+            "identicalBoundary": false,
+            "neighborP95": "0.028488783",
+            "repeatedEndpointPause": false
+          },
+          "name": "hover-idle arrival",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 0,
+            "unit": "idle-body"
+          }
+        },
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 0,
+            "unit": "idle-body"
+          },
+          "kind": "departure",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.01605985",
+            "identicalBoundary": false,
+            "neighborP95": "0.028488783",
+            "repeatedEndpointPause": false
+          },
+          "name": "idle-hover departure",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 1,
+            "unit": "state-change"
+          }
+        },
+        {
+          "from": {
+            "direction": "forward",
+            "frame": 6,
+            "unit": "state-change"
+          },
+          "kind": "arrival",
+          "metrics": {
+            "alphaBoundaryRms": 0,
+            "alphaNeighborP95": 0,
+            "boundaryRms": "0.035407185",
+            "identicalBoundary": false,
+            "neighborP95": "0.031894309",
+            "repeatedEndpointPause": false
+          },
+          "name": "idle-hover arrival",
+          "status": "pass",
+          "to": {
+            "direction": "forward",
+            "frame": 7,
+            "unit": "hover-body"
+          }
+        }
+      ],
+      "asset": {
+        "bytes": 17513,
+        "sha256": "642e5d60a461f3f0d0e53be9c1a238a3f5dfdad23f4db19eb2c12a94a6f13e8a"
+      }
+    }
+  ]
+}

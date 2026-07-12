@@ -45,8 +45,21 @@ M4 freezes the minimal compiled asset contract:
 - range-only immutable parsing with no retained media payload views; and
 - two checked-in conformance assets plus deterministic mutation fuzzing.
 
-The FFmpeg compiler, integrated decoder scheduler, packed alpha, range loader,
-and public custom element follow in later milestones.
+M5 adds the first production-codec authoring and decode path:
+
+- strict JSON projects and a one-command video/PNG compiler;
+- deterministic, independently decodable opaque AVC units produced by a
+  caller-installed FFmpeg/libx264 toolchain;
+- compiler-generated per-state static PNG fallbacks;
+- `rma compile`, `init`, `dev`, `inspect`, `validate`, and safe `unpack` flows;
+- a pure hostile-input AVC inspector shared by compiler, validator, and worker;
+- a dedicated WebCodecs worker with bounded sample/frame ownership; and
+- 2,008 checked-in-asset frames across 1,001 loop occurrences, an intro,
+  locked bridge, and target body with one configure and zero reset/flush, plus
+  two independently keyed forward occurrences of a compiled reversible unit.
+
+The integrated decoder scheduler, packed alpha, range loader, and public custom
+element follow in later milestones.
 
 ## Run it
 
@@ -60,6 +73,24 @@ npm run dev
 Then open the displayed localhost URL. The page includes the hover/focus
 reversal demo, resident-cache diagnostics, the 1,000-reversal GPU proof, and
 the original 1,000-seam loop proof.
+
+To create a generated starter and compile it, install a local FFmpeg/FFprobe
+build with `libx264` enabled, then run:
+
+```bash
+npm run rma -- init my-motion
+npm run rma -- compile my-motion/motion.json --out my-motion.rma
+npm run rma -- validate my-motion.rma
+```
+
+The compiler never downloads or bundles codec tools. Its build report records
+the resolved executable fingerprints and effective encoder calibration.
+
+H.264/AVC deployment, the selected encoder build, and the source/derived media
+may carry patent, codec-license, content-license, and distribution obligations
+that vary by jurisdiction and product. Using a caller-installed tool does not
+remove those obligations; obtain product-specific legal review before a
+production release. This repository does not provide legal clearance.
 
 ## Verify it
 
@@ -84,9 +115,12 @@ npx playwright install chromium
 - [M2 implementation plan](docs/superpowers/plans/2026-07-11-m2-resident-reversible-interaction-implementation.md)
 - [M4 format design](docs/superpowers/specs/2026-07-11-m4-minimal-compiled-format-design.md)
 - [M4 implementation plan](docs/superpowers/plans/2026-07-11-m4-minimal-compiled-format-implementation.md)
+- [M5 compiler/worker design](docs/superpowers/specs/2026-07-11-m5-opaque-avc-compiler-worker-design.md)
+- [M5 compiler/worker plan](docs/superpowers/plans/2026-07-11-m5-opaque-avc-compiler-worker-implementation.md)
 - [M1 browser evidence](docs/evidence/2026-07-11-m1-continuous-loop.md)
 - [M2 browser evidence](docs/evidence/2026-07-11-m2-resident-reversal.md)
 - [M3 graph evidence](docs/evidence/2026-07-11-m3-deterministic-graph.md)
 - [M4 format evidence](docs/evidence/2026-07-11-m4-minimal-compiled-format.md)
+- [M5 compiler/worker evidence](docs/evidence/2026-07-11-m5-opaque-avc-compiler-worker.md)
 
 Headless browser results prove decoded ordering and lifecycle behavior, not physical display scan-out continuity. Display certification requires separate headed device profiles and external observation.

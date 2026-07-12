@@ -11,8 +11,9 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @rendered-motion/graph && npm run build -w @rendered-motion/format && npm run build -w @rendered-motion/player-web && npm run build -w @rendered-motion/playground",
+    "build": "npm run build -w @rendered-motion/graph && npm run build -w @rendered-motion/format && npm run build -w @rendered-motion/compiler && npm run build -w @rendered-motion/player-web && npm run build -w @rendered-motion/playground",
     "dev": "npm run dev -w @rendered-motion/playground",
+    "rma": "npm run build -w @rendered-motion/graph && npm run build -w @rendered-motion/format && npm run build -w @rendered-motion/compiler && node --enable-source-maps packages/compiler/dist/cli.js",
     "test": "npm run test:unit && npm run test:browser",
     "test:unit": "vitest run",
     "test:browser": "playwright test",

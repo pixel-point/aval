@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@rendered-motion/format": "0.0.0",
     "@rendered-motion/player-web": "0.0.0"
   }
 }

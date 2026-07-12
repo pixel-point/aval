@@ -16,6 +16,43 @@ export {
 } from "./constants.js";
 export { FormatError } from "./errors.js";
 export type { FormatErrorCode, FormatErrorDetails } from "./errors.js";
+export {
+  parseStrictJson,
+  serializeCanonicalJson,
+  serializeCanonicalJsonWithLimits
+} from "./canonical-json.js";
+export type {
+  CanonicalJsonObject,
+  CanonicalJsonWriteLimits,
+  CanonicalJsonValue
+} from "./canonical-json.js";
+export {
+  AvcIncrementalInspector,
+  AVC_DECODER_SURFACE_PADDING,
+  inspectAvcAnnexBEncoderCandidateRendition,
+  inspectAvcAnnexBRendition,
+  maximumAvcDecodedRgbaBytes,
+  maximumAvcDecoderSurfaceDimension,
+  prepareAvcEncoderRendition
+} from "./avc/index.js";
+export type {
+  AvcAccessUnitInput,
+  AvcAccessUnitSummary,
+  AvcColorSummary,
+  AvcConstrainedBaselineProfile,
+  AvcCropSummary,
+  AvcEncoderRenditionPreparation,
+  AvcEncoderRenditionPreparationInput,
+  AvcEncoderUnitStreamInput,
+  AvcFrameRate,
+  AvcIncrementalAccessUnitInput,
+  AvcIncrementalAccessUnitInspection,
+  AvcParameterSetSummary,
+  AvcRenditionInspection,
+  AvcRenditionInspectionInput,
+  AvcUnitInput,
+  AvcUnitInspection
+} from "./avc/index.js";
 export { adaptManifestToMotionGraph } from "./graph-adapter.js";
 export { parseHeader } from "./header.js";
 export type {

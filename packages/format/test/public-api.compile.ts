@@ -1,12 +1,32 @@
 import type {
   AccessUnitInputV01,
   AccessUnitRecord,
+  AvcAccessUnitInput,
+  AvcAccessUnitSummary,
+  AvcColorSummary,
+  AvcConstrainedBaselineProfile,
+  AvcCropSummary,
+  AvcEncoderRenditionPreparation,
+  AvcEncoderRenditionPreparationInput,
+  AvcEncoderUnitStreamInput,
+  AvcFrameRate,
+  AvcIncrementalAccessUnitInput,
+  AvcIncrementalAccessUnitInspection,
+  AvcIncrementalInspector,
+  AvcParameterSetSummary,
+  AvcRenditionInspection,
+  AvcRenditionInspectionInput,
+  AvcUnitInput,
+  AvcUnitInspection,
   BindingSourceV01,
   BindingV01,
   BitrateV01,
   ByteRange,
   CanvasV01,
   CanonicalAssetInputV01,
+  CanonicalJsonObject,
+  CanonicalJsonWriteLimits,
+  CanonicalJsonValue,
   CompiledManifestInputV01,
   CompiledManifestV01,
   DeclaredLimitsV01,
@@ -51,12 +71,32 @@ import type {
 export type PublicFormatTypes = readonly [
   AccessUnitInputV01,
   AccessUnitRecord,
+  AvcAccessUnitInput,
+  AvcAccessUnitSummary,
+  AvcColorSummary,
+  AvcConstrainedBaselineProfile,
+  AvcCropSummary,
+  AvcEncoderRenditionPreparation,
+  AvcEncoderRenditionPreparationInput,
+  AvcEncoderUnitStreamInput,
+  AvcFrameRate,
+  AvcIncrementalAccessUnitInput,
+  AvcIncrementalAccessUnitInspection,
+  AvcIncrementalInspector,
+  AvcParameterSetSummary,
+  AvcRenditionInspection,
+  AvcRenditionInspectionInput,
+  AvcUnitInput,
+  AvcUnitInspection,
   BindingSourceV01,
   BindingV01,
   BitrateV01,
   ByteRange,
   CanvasV01,
   CanonicalAssetInputV01,
+  CanonicalJsonObject,
+  CanonicalJsonWriteLimits,
+  CanonicalJsonValue,
   CompiledManifestInputV01,
   CompiledManifestV01,
   DeclaredLimitsV01,
@@ -98,11 +138,15 @@ export type PublicFormatTypes = readonly [
 
 // Internal implementation contracts deliberately do not cross the package
 // root even though their defining modules use named exports internally.
-// @ts-expect-error canonical JSON is private
-export type { CanonicalJsonValue } from "@rendered-motion/format";
+// @ts-expect-error encoder constraint rewriting is private
+export { canonicalizeAvcConstraintSet2 } from "@rendered-motion/format";
 // @ts-expect-error canonical layout is private
 export type { CanonicalAssetLayout } from "@rendered-motion/format";
 // @ts-expect-error PNG validation inputs are private
 export type { PngEnvelopeValidationInput } from "@rendered-motion/format";
 // @ts-expect-error writer normalization is private
 export type { NormalizedWriterInput } from "@rendered-motion/format";
+
+declare const publicAvcProfile: AvcConstrainedBaselineProfile;
+// @ts-expect-error compatibility policy is selected by the entry point
+publicAvcProfile.requireConstraintSet2;

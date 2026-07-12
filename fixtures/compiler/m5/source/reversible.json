@@ -1,0 +1,151 @@
+{
+  "projectVersion": "0.1",
+  "profile": "avc-annexb-opaque-v0",
+  "canvas": {
+    "width": 32,
+    "height": 32,
+    "fit": "contain",
+    "pixelAspect": [1, 1],
+    "colorSpace": "srgb"
+  },
+  "frameRate": { "numerator": 30, "denominator": 1 },
+  "sources": [
+    {
+      "id": "frames",
+      "type": "png-sequence",
+      "directory": "reversible",
+      "prefix": "frame-",
+      "digits": 4,
+      "suffix": ".png",
+      "firstNumber": 0,
+      "frameCount": 14
+    }
+  ],
+  "renditions": [
+    {
+      "id": "opaque.1x",
+      "codedWidth": 32,
+      "codedHeight": 32,
+      "bitrate": { "average": 300000, "peak": 600000 }
+    }
+  ],
+  "units": [
+    {
+      "id": "done-body",
+      "kind": "body",
+      "source": "frames",
+      "range": [8, 14],
+      "playback": "finite",
+      "ports": [
+        { "id": "default", "entryFrame": 0, "portalFrames": [0, 5] }
+      ]
+    },
+    {
+      "id": "hover-body",
+      "kind": "body",
+      "source": "frames",
+      "range": [7, 8],
+      "playback": "finite",
+      "ports": [
+        { "id": "default", "entryFrame": 0, "portalFrames": [0] }
+      ]
+    },
+    {
+      "id": "idle-body",
+      "kind": "body",
+      "source": "frames",
+      "range": [0, 1],
+      "playback": "finite",
+      "ports": [
+        { "id": "default", "entryFrame": 0, "portalFrames": [0] }
+      ]
+    },
+    {
+      "id": "state-change",
+      "kind": "reversible",
+      "source": "frames",
+      "range": [1, 7],
+      "residency": {
+        "endpoints": [
+          { "state": "idle", "port": "default", "frames": 6 },
+          { "state": "hover", "port": "default", "frames": 6 }
+        ]
+      }
+    }
+  ],
+  "initialState": "idle",
+  "states": [
+    { "id": "done", "bodyUnit": "done-body" },
+    { "id": "hover", "bodyUnit": "hover-body" },
+    { "id": "idle", "bodyUnit": "idle-body" }
+  ],
+  "edges": [
+    {
+      "id": "hover-done",
+      "from": "hover",
+      "to": "done",
+      "trigger": { "type": "completion" },
+      "start": {
+        "type": "finish",
+        "targetPort": "default",
+        "maxWaitFrames": 0
+      },
+      "continuity": "exact-authored"
+    },
+    {
+      "id": "hover-idle",
+      "from": "hover",
+      "to": "idle",
+      "trigger": { "type": "event", "name": "hover-off" },
+      "start": {
+        "type": "portal",
+        "sourcePort": "default",
+        "targetPort": "default",
+        "maxWaitFrames": 0
+      },
+      "transition": {
+        "kind": "reversible",
+        "unit": "state-change",
+        "direction": "reverse",
+        "reverseOf": "idle-hover"
+      },
+      "continuity": "exact-reverse"
+    },
+    {
+      "id": "idle-done",
+      "from": "idle",
+      "to": "done",
+      "trigger": { "type": "event", "name": "activate" },
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "continuity": "cut",
+      "targetRunwayFrames": 6
+    },
+    {
+      "id": "idle-hover",
+      "from": "idle",
+      "to": "hover",
+      "trigger": { "type": "event", "name": "hover-on" },
+      "start": {
+        "type": "portal",
+        "sourcePort": "default",
+        "targetPort": "default",
+        "maxWaitFrames": 0
+      },
+      "transition": {
+        "kind": "reversible",
+        "unit": "state-change",
+        "direction": "forward"
+      },
+      "continuity": "exact-authored"
+    }
+  ],
+  "bindings": [
+    { "source": "activate", "event": "activate" },
+    { "source": "pointer.enter", "event": "hover-on" },
+    { "source": "pointer.leave", "event": "hover-off" }
+  ]
+}

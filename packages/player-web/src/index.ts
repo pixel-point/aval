@@ -140,3 +140,75 @@ export {
   type ResidentReversiblePlayerTick,
   type ResidentReversibleVisibilitySource
 } from "./experimental/resident-reversible-player.js";
+export {
+  DECODER_WORKER_PROTOCOL_VERSION,
+  DECODER_WORKER_HARD_LIMITS,
+  DEFAULT_DECODER_WAIT_TIMEOUT_MS,
+  type DecoderWorkerAbortGenerationCommand,
+  type DecoderWorkerAckEvent,
+  type DecoderWorkerActivateGenerationCommand,
+  type DecoderWorkerAvcConfig,
+  type DecoderWorkerAvcProfile,
+  type DecoderWorkerClientPort,
+  type DecoderWorkerColorSpaceExpectation,
+  type DecoderWorkerCommand,
+  type DecoderWorkerConfigureCommand,
+  type DecoderWorkerDisposeCommand,
+  type DecoderWorkerDisposedEvent,
+  type DecoderWorkerErrorCode,
+  type DecoderWorkerErrorEvent,
+  type DecoderWorkerEvent,
+  type DecoderWorkerFrameEvent,
+  type DecoderWorkerLimits,
+  type DecoderWorkerMessagePort,
+  type DecoderWorkerMetrics,
+  type DecoderWorkerOutputExpectation,
+  type DecoderWorkerReleaseFrameCommand,
+  type DecoderWorkerRequestOperation,
+  type DecoderWorkerSample,
+  type DecoderWorkerSnapshotCommand,
+  type DecoderWorkerSnapshotEvent,
+  type DecoderWorkerSubmitCommand,
+  type DecoderWorkerVisibleRect
+} from "./decoder-worker/protocol.js";
+export {
+  isDecoderWorkerCommand,
+  isDecoderWorkerEvent
+} from "./decoder-worker/protocol-validation.js";
+export {
+  type WorkerAvcInspector,
+  type WorkerAvcInspectorFactory,
+  type WorkerAvcSampleInspection
+} from "./decoder-worker/avc-inspector-adapter.js";
+export {
+  DecoderWorkerCore,
+  type DecoderWorkerCoreOptions,
+  type DecoderWorkerEventSink,
+  type WorkerEncodedVideoChunkFactory,
+  type WorkerVideoDecoderAdapter,
+  type WorkerVideoDecoderFactory,
+  type WorkerVideoDecoderSupportProbe
+} from "./decoder-worker/core.js";
+export {
+  DecoderWorkerHost,
+  installDecoderWorker,
+  type DecoderWorkerHostOptions
+} from "./decoder-worker/host.js";
+export {
+  DecoderWorkerClient,
+  DecoderWorkerGenerationAbortedError,
+  DecoderWorkerRemoteError,
+  DecoderWorkerTransportError,
+  DecoderWorkerWatchdogError,
+  type DecoderWorkerClientOptions,
+  type DecoderWorkerConfigureOptions,
+  type DecoderWorkerWaitOptions,
+  type ManagedDecoderWorkerFrame
+} from "./decoder-worker/client.js";
+export {
+  createDecoderWorkerClient,
+  resolveDecoderWorkerEntryUrl,
+  type BrowserDecoderWorkerFactory,
+  type CreateDecoderWorkerClientOptions,
+  type OwnedDecoderWorkerPort
+} from "./decoder-worker/factory.js";

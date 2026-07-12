@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   compareUtf8Strings,
   parseCanonicalJson,
-  serializeCanonicalJson
+  parseStrictJson,
+  serializeCanonicalJson,
+  serializeCanonicalJsonWithLimits
 } from "../src/canonical-json.js";
 import { FormatError } from "../src/errors.js";
 import type { FormatErrorCode } from "../src/errors.js";
@@ -28,6 +30,17 @@ function expectCode(action: () => unknown, code: FormatErrorCode): FormatError {
 }
 
 describe("canonical JSON serialization", () => {
+  it("shares a strict noncanonical source-document parser", () => {
+    const value = parseStrictJson(utf8('{ "z": 2, "a": 1 }'));
+    expect(value).toEqual({ z: 2, a: 1 });
+    expect(Object.getPrototypeOf(value)).toBeNull();
+    expect(Object.isFrozen(value)).toBe(true);
+    expectCode(
+      () => parseStrictJson(utf8('{"a":1,"\\u0061":2}')),
+      "JSON_DUPLICATE_KEY"
+    );
+  });
+
   it("writes the recursively minified canonical form", () => {
     const value = Object.assign(Object.create(null) as Record<string, unknown>, {
       z: [true, false, null, -42],
@@ -36,6 +49,26 @@ describe("canonical JSON serialization", () => {
 
     expect(text(serializeCanonicalJson(value))).toBe(
       '{"a":{"a":1,"b":2},"z":[true,false,null,-42]}'
+    );
+  });
+
+  it("uses the same writer for explicitly bounded high-cardinality output", () => {
+    const values = Array.from({ length: 25_000 }, (_, index) => index);
+    const bytes = serializeCanonicalJsonWithLimits({ values }, {
+      maxBytes: 1024 * 1024,
+      maxDepth: 16,
+      maxNodes: 30_000,
+      maxStringBytes: 4_096
+    });
+    expect(JSON.parse(text(bytes))).toEqual({ values });
+    expectCode(
+      () => serializeCanonicalJsonWithLimits({ values }, {
+        maxBytes: 1_024,
+        maxDepth: 16,
+        maxNodes: 30_000,
+        maxStringBytes: 1_024
+      }),
+      "BUDGET_EXCEEDED"
     );
   });
 
