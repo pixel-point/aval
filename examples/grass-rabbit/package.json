@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build --base=/aval/",
+    "build:vercel": "npm --prefix ../.. run build -w @pixel-point/aval-graph && npm --prefix ../.. run build -w @pixel-point/aval-format && npm --prefix ../.. run build -w @pixel-point/aval-player-web && npm --prefix ../.. run build -w @pixel-point/aval-element && npm --prefix ../.. run build -w @pixel-point/aval-grass-rabbit-example",
     "compile": "avl compile motion.json --out public/grass-rabbit.avl --force",
     "dev": "vite --host 127.0.0.1"
   },
