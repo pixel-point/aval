@@ -10,6 +10,8 @@ decoder timeline moving forward across a loop instead of seeking a video file
 at every seam. Hover, focus, application state, reversals, portals, finite
 bodies, and held states are graph routes rather than hand-timed media seeks.
 
+It's an early **technical preview**, so things will be changing fast and will get into a more stable shape within the next couple of weeks.
+
 ## Five-minute start
 
 ```sh
@@ -96,6 +98,14 @@ npm run test:browser:reference
 
 Browser animation is capability-probed. Unsupported WebCodecs/WebGL/AVC
 configurations leave the element's optional host-owned fallback slot visible.
+
+## TODO
+
+- Add support for H.265, AV1, and VP9 codecs to work with the .avl container.  
+- React dedicated component and API.  
+- Safari support.  
+- More browser tests.  
+- Render some cool stuff in 3D for the demo instead of that AI-generated loop that I was not able to make look the way I wanted to actually showcase the uninterruptible animation.
 
 ## Documentation
 
