@@ -346,6 +346,7 @@ export {
   type FrameRendererOptions,
   type FrameRendererSnapshot,
   type FrameRendererTimerHost,
+  type FrameSourceLayout,
   type FrameTextureKind
 } from "./runtime/frame-renderer.js";
 export {

@@ -28,7 +28,9 @@ import {
 } from "./frame-renderer-browser.js";
 import {
   FrameRenderer,
+  type CopyableVideoFrame,
   type FrameRendererBackend,
+  type FrameSourceLayout,
   type FrameTextureLayout,
   type FrameTextureKind,
   type LegacyOpaqueFrameRendererBackend
@@ -426,6 +428,12 @@ class TrackedBrowserBackend implements FrameRendererBackend {
 
   public readonly limits;
   public readonly readPixels?: () => Uint8Array;
+  public readonly uploadFrame?: (
+    kind: FrameTextureKind,
+    index: number,
+    frame: CopyableVideoFrame,
+    layout: Readonly<FrameSourceLayout>
+  ) => void;
 
   public constructor(backend: FrameRendererBackend) {
     this.#backend = backend;
@@ -433,6 +441,11 @@ class TrackedBrowserBackend implements FrameRendererBackend {
     const readPixels = backend.readPixels;
     if (readPixels !== undefined) {
       this.readPixels = () => readPixels.call(backend);
+    }
+    const uploadFrame = backend.uploadFrame;
+    if (uploadFrame !== undefined) {
+      this.uploadFrame = (kind, index, frame, layout) =>
+        uploadFrame.call(backend, kind, index, frame, layout);
     }
   }
 
@@ -470,6 +483,12 @@ class TrackedBrowserBackend implements FrameRendererBackend {
 class LegacyOpaqueBackendAdapter implements FrameRendererBackend {
   public readonly limits;
   public readonly readPixels?: () => Uint8Array;
+  public readonly uploadFrame?: (
+    kind: FrameTextureKind,
+    index: number,
+    frame: CopyableVideoFrame,
+    layout: Readonly<FrameSourceLayout>
+  ) => void;
   readonly #legacy: LegacyOpaqueFrameRendererBackend;
 
   public constructor(
@@ -480,6 +499,11 @@ class LegacyOpaqueBackendAdapter implements FrameRendererBackend {
     const readPixels = legacy.readPixels;
     if (readPixels !== undefined) {
       this.readPixels = () => readPixels.call(legacy);
+    }
+    const uploadFrame = legacy.uploadFrame;
+    if (uploadFrame !== undefined) {
+      this.uploadFrame = (kind, index, frame, layout) =>
+        uploadFrame.call(legacy, kind, index, frame, layout);
     }
   }
 

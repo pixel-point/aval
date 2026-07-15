@@ -5,7 +5,10 @@ import {
   BrowserFrameBackend,
   FRAME_FRAGMENT_SHADER_SOURCE
 } from "./frame-renderer-browser.js";
-import type { FrameTextureLayout } from "./frame-renderer.js";
+import type {
+  CopyableVideoFrame,
+  FrameTextureLayout
+} from "./frame-renderer.js";
 import {
   deriveFrameSamplingLayout
 } from "./frame-renderer-validation.js";
@@ -204,6 +207,30 @@ describe("browser profile-neutral frame backend", () => {
       layer: 0,
       byteLength: 16 * 16 * 4
     });
+  });
+
+  it("uploads a native VideoFrame into the exact texture-array rectangle", () => {
+    const fixture = createRecordingCanvas();
+    const backend = new BrowserFrameBackend(fixture.canvas);
+    const frame = {} as CopyableVideoFrame;
+
+    backend.allocate(PACKED_LAYOUT, 3);
+    backend.uploadFrame("resident", 1, frame, {
+      x: 2,
+      y: 3,
+      width: 4,
+      height: 5
+    });
+
+    expect(fixture.gl.nativeUploads).toEqual([{
+      x: 2,
+      y: 3,
+      width: 4,
+      height: 5,
+      depth: 1,
+      layer: 1,
+      source: frame
+    }]);
   });
 
   it("keeps opaque alpha exactly one and freezes premultiplied shader math", () => {
@@ -750,6 +777,15 @@ class RecordingGl {
     readonly layer: number;
     readonly byteLength: number;
   }> = [];
+  public readonly nativeUploads: Array<{
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+    readonly depth: number;
+    readonly layer: number;
+    readonly source: TexImageSource;
+  }> = [];
   public readonly createdTextures: WebGLTexture[] = [];
   public readonly deletedTextures: WebGLTexture[] = [];
   public readonly createdShaders: WebGLShader[] = [];
@@ -884,23 +920,35 @@ class RecordingGl {
   public texSubImage3D(
     _target: number,
     _level: number,
-    _x: number,
-    _y: number,
+    x: number,
+    y: number,
     layer: number,
     width: number,
     height: number,
     depth: number,
     _format: number,
     _type: number,
-    pixels: Uint8Array
+    source: Uint8Array | TexImageSource
   ): void {
-    this.uploads.push({
-      width,
-      height,
-      depth,
-      layer,
-      byteLength: pixels.byteLength
-    });
+    if (source instanceof Uint8Array) {
+      this.uploads.push({
+        width,
+        height,
+        depth,
+        layer,
+        byteLength: source.byteLength
+      });
+    } else {
+      this.nativeUploads.push({
+        x,
+        y,
+        width,
+        height,
+        depth,
+        layer,
+        source
+      });
+    }
   }
   public readPixels(): void {}
 

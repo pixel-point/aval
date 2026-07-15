@@ -262,11 +262,7 @@ export function validateDecodedFrame(
       true
     );
   }
-  if (
-    !isNonContradictoryBt709Limited(frame.colorSpace) ||
-    expected.colorSpace !== null &&
-    !matchesColorSpace(frame.colorSpace, expected.colorSpace)
-  ) {
+  if (!matchesDecodedBt709ColorSpace(frame.colorSpace, expected.colorSpace)) {
     throw new DecoderWorkerCoreError(
       "DECODER_OUTPUT_INVALID",
       "decoder output color space did not match the configured rendition",
@@ -289,6 +285,34 @@ function isNonContradictoryBt709Limited(actual: VideoColorSpace): boolean {
     (actual.primaries === null || actual.primaries === "bt709") &&
     (actual.transfer === null || actual.transfer === "bt709")
   );
+}
+
+function matchesDecodedBt709ColorSpace(
+  actual: VideoColorSpace,
+  expected: DecoderWorkerColorSpaceExpectation | null
+): boolean {
+  if (isNonContradictoryBt709Limited(actual)) {
+    return expected === null || matchesColorSpace(actual, expected);
+  }
+  return isWebKitNormalizedBt709(actual) &&
+    (expected === null || isExactBt709Limited(expected));
+}
+
+/** WebKit exposes decoded BT.709 video through this complete normalized tuple. */
+function isWebKitNormalizedBt709(actual: VideoColorSpace): boolean {
+  return actual.fullRange === true &&
+    actual.matrix === "bt709" &&
+    actual.primaries === "bt709" &&
+    actual.transfer === "iec61966-2-1";
+}
+
+function isExactBt709Limited(
+  expected: DecoderWorkerColorSpaceExpectation
+): boolean {
+  return expected.fullRange === false &&
+    expected.matrix === "bt709" &&
+    expected.primaries === "bt709" &&
+    expected.transfer === "bt709";
 }
 
 export function normalizeCoreError(

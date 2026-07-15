@@ -217,10 +217,15 @@ test("decodes the compiled opaque path through one dedicated worker", async ({
 
   expect(report.colorSpaceVariants.length).toBeGreaterThan(0);
   for (const color of report.colorSpaceVariants) {
-    expect(color.fullRange).not.toBe(true);
-    expect([null, "bt709"]).toContain(color.matrix);
-    expect([null, "bt709"]).toContain(color.primaries);
-    expect([null, "bt709"]).toContain(color.transfer);
+    const limitedBt709 = color.fullRange !== true &&
+      [null, "bt709"].includes(color.matrix) &&
+      [null, "bt709"].includes(color.primaries) &&
+      [null, "bt709"].includes(color.transfer);
+    const webKitNormalizedBt709 = color.fullRange === true &&
+      color.matrix === "bt709" &&
+      color.primaries === "bt709" &&
+      color.transfer === "iec61966-2-1";
+    expect(limitedBt709 || webKitNormalizedBt709).toBe(true);
   }
 
   expect(report.credit).toMatchObject({

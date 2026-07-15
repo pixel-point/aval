@@ -868,10 +868,7 @@ function assertNativeOutput(
   );
   const color = frame.colorSpace;
   requireFixture(
-    color.fullRange !== true &&
-      (color.matrix === null || color.matrix === "bt709") &&
-      (color.primaries === null || color.primaries === "bt709") &&
-      (color.transfer === null || color.transfer === "bt709"),
+    matchesDecodedBt709ColorSpace(color),
     `decoded color metadata contradicts BT.709 limited range at ordinal ${String(
       expected.ordinal
     )}`
@@ -880,6 +877,18 @@ function assertNativeOutput(
     managed.decodedBytes === frame.codedWidth * frame.codedHeight * 4,
     `decoded byte accounting mismatch at ordinal ${String(expected.ordinal)}`
   );
+}
+
+function matchesDecodedBt709ColorSpace(color: VideoColorSpace): boolean {
+  const limitedBt709 = color.fullRange !== true &&
+    (color.matrix === null || color.matrix === "bt709") &&
+    (color.primaries === null || color.primaries === "bt709") &&
+    (color.transfer === null || color.transfer === "bt709");
+  const webKitNormalizedBt709 = color.fullRange === true &&
+    color.matrix === "bt709" &&
+    color.primaries === "bt709" &&
+    color.transfer === "iec61966-2-1";
+  return limitedBt709 || webKitNormalizedBt709;
 }
 
 function updateCreditEvidence(

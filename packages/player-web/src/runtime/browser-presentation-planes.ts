@@ -2,7 +2,9 @@ import type { CanvasV01 } from "@pixel-point/aval-format";
 
 import {
   RendererUnavailableError,
-  type FrameRendererBackend
+  type CopyableVideoFrame,
+  type FrameRendererBackend,
+  type FrameSourceLayout
 } from "./frame-renderer.js";
 import type { FrameTextureKind, FrameTextureLayout } from "./frame-renderer.js";
 import {
@@ -745,6 +747,7 @@ interface ValidatedPresentationBackend {
   readonly setPresentationGeometry: PresentableFrameBackend["setPresentationGeometry"];
   readonly allocate: PresentableFrameBackend["allocate"];
   readonly upload: PresentableFrameBackend["upload"];
+  readonly uploadFrame: NonNullable<PresentableFrameBackend["uploadFrame"]> | null;
   readonly draw: PresentableFrameBackend["draw"];
   readonly readPixels: NonNullable<PresentableFrameBackend["readPixels"]> | null;
   readonly dispose: () => unknown;
@@ -783,6 +786,7 @@ function capturePresentationBackend(
     ) as unknown;
     const allocateImplementation = Reflect.get(value, "allocate") as unknown;
     const uploadImplementation = Reflect.get(value, "upload") as unknown;
+    const uploadFrameImplementation = Reflect.get(value, "uploadFrame") as unknown;
     const drawImplementation = Reflect.get(value, "draw") as unknown;
     const readPixelsImplementation = Reflect.get(value, "readPixels") as unknown;
     if (
@@ -790,6 +794,10 @@ function capturePresentationBackend(
       typeof allocateImplementation !== "function" ||
       typeof uploadImplementation !== "function" ||
       typeof drawImplementation !== "function" ||
+      (
+        uploadFrameImplementation !== undefined &&
+        typeof uploadFrameImplementation !== "function"
+      ) ||
       (
         readPixelsImplementation !== undefined &&
         typeof readPixelsImplementation !== "function"
@@ -835,6 +843,21 @@ function capturePresentationBackend(
         ) => {
           Reflect.apply(uploadImplementation, value, [kind, index, pixels]);
         },
+        uploadFrame: uploadFrameImplementation === undefined
+          ? null
+          : (
+            kind: FrameTextureKind,
+            index: number,
+            frame: CopyableVideoFrame,
+            layout: Readonly<FrameSourceLayout>
+          ) => {
+            Reflect.apply(uploadFrameImplementation, value, [
+              kind,
+              index,
+              frame,
+              layout
+            ]);
+          },
         draw: (kind: FrameTextureKind, index: number) => {
           Reflect.apply(drawImplementation, value, [kind, index]);
         },
@@ -884,6 +907,12 @@ class AttachedPresentationBackend implements PresentableFrameBackend {
 
   public readonly limits;
   public readonly readPixels?: () => Uint8Array;
+  public readonly uploadFrame?: (
+    kind: FrameTextureKind,
+    index: number,
+    frame: CopyableVideoFrame,
+    layout: Readonly<FrameSourceLayout>
+  ) => void;
 
   public constructor(
     backend: Readonly<ValidatedPresentationBackend>,
@@ -899,6 +928,14 @@ class AttachedPresentationBackend implements PresentableFrameBackend {
         const pixels = readPixels();
         this.#assertActive();
         return pixels;
+      };
+    }
+    const uploadFrame = backend.uploadFrame;
+    if (uploadFrame !== null) {
+      this.uploadFrame = (kind, index, frame, layout) => {
+        this.#assertActive();
+        uploadFrame(kind, index, frame, layout);
+        this.#assertActive();
       };
     }
   }

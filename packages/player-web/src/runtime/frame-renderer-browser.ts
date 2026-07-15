@@ -1,8 +1,10 @@
 import {
   RendererDisposedError,
   RendererUnavailableError,
+  type CopyableVideoFrame,
   type FrameRendererBackend,
   type FrameRendererBackendLimits,
+  type FrameSourceLayout,
   type FrameTextureLayout,
   type FrameTextureKind,
   type LegacyOpaqueFrameRendererBackend,
@@ -218,6 +220,36 @@ export class BrowserFrameBackend implements FrameRendererBackend {
       pixels
     );
     if (this.#checkErrors) assertNoGlError(gl, `${kind} texture upload`);
+    this.#assertAllocated();
+  }
+
+  public uploadFrame(
+    kind: FrameTextureKind,
+    index: number,
+    frame: CopyableVideoFrame,
+    layout: Readonly<FrameSourceLayout>
+  ): void {
+    this.#assertAllocated();
+    validateSourceLayout(layout, this.#codedWidth, this.#codedHeight);
+    const gl = this.#gl;
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.#textureFor(kind));
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texSubImage3D(
+      gl.TEXTURE_2D_ARRAY,
+      0,
+      layout.x,
+      layout.y,
+      index,
+      layout.width,
+      layout.height,
+      1,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      frame as VideoFrame
+    );
+    // A native-source overload can fail only through the GL error channel.
+    // Always consume it so FrameRenderer can retry with its RGBA copy fallback.
+    assertNoGlError(gl, `${kind} native frame upload`);
     this.#assertAllocated();
   }
 
@@ -657,6 +689,15 @@ implements LegacyOpaqueFrameRendererBackend {
     this.#backend.upload(kind, index, pixels);
   }
 
+  public uploadFrame(
+    kind: FrameTextureKind,
+    index: number,
+    frame: CopyableVideoFrame,
+    layout: Readonly<FrameSourceLayout>
+  ): void {
+    this.#backend.uploadFrame(kind, index, frame, layout);
+  }
+
   public draw(kind: FrameTextureKind, index: number): void {
     this.#backend.draw(kind, index);
   }
@@ -667,6 +708,29 @@ implements LegacyOpaqueFrameRendererBackend {
 
   public dispose(): void {
     this.#backend.dispose();
+  }
+}
+
+function validateSourceLayout(
+  layout: Readonly<FrameSourceLayout>,
+  codedWidth: number,
+  codedHeight: number
+): void {
+  if (
+    layout === null ||
+    typeof layout !== "object" ||
+    !Number.isSafeInteger(layout.x) ||
+    !Number.isSafeInteger(layout.y) ||
+    !Number.isSafeInteger(layout.width) ||
+    !Number.isSafeInteger(layout.height) ||
+    layout.x < 0 ||
+    layout.y < 0 ||
+    layout.width < 1 ||
+    layout.height < 1 ||
+    layout.x + layout.width > codedWidth ||
+    layout.y + layout.height > codedHeight
+  ) {
+    throw new RangeError("native frame upload layout is out of bounds");
   }
 }
 

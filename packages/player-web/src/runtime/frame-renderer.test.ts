@@ -139,6 +139,64 @@ describe("profile-neutral frame renderer", () => {
     });
   });
 
+  it("uploads a validated native frame when the backend supports it", async () => {
+    const backend = new FakeNativeBackend();
+    const renderer = new FrameRenderer(backend, LAYOUT);
+    const source = borrowedFrame(31, {
+      copyFailure: new TypeError("RGBA copy is unsupported")
+    });
+
+    await expect(renderer.uploadResident(1, source.source)).resolves.toEqual({
+      kind: "resident",
+      layer: 1,
+      resourceGeneration: 1
+    });
+    expect(source.copyOptions()).toBeUndefined();
+    expect(source.closeCalls()).toBe(1);
+    expect(backend.uploads).toHaveLength(0);
+    expect(backend.frameUploads).toEqual([{
+      kind: "resident",
+      index: 1,
+      frame: source.source.frame,
+      layout: { x: 0, y: 0, width: 4, height: 12 }
+    }]);
+  });
+
+  it("falls back to the bounded RGBA copy when native upload fails", async () => {
+    const backend = new FakeNativeBackend();
+    backend.frameUploadFailure = new TypeError("native upload is unsupported");
+    const renderer = new FrameRenderer(backend, LAYOUT);
+    const source = borrowedFrame(19);
+
+    await expect(renderer.uploadStreaming(0, 1, source.source)).resolves.toMatchObject({
+      kind: "stream",
+      slot: 0,
+      pathGeneration: 1
+    });
+    expect(source.copyOptions()).toEqual({
+      rect: { x: 0, y: 0, width: 4, height: 12 },
+      format: "RGBA",
+      layout: [{ offset: 0, stride: 64 }]
+    });
+    expect(source.closeCalls()).toBe(1);
+    expect(backend.uploads).toHaveLength(1);
+  });
+
+  it("does not commit a native upload that reenters renderer disposal", async () => {
+    const backend = new FakeNativeBackend();
+    const renderer = new FrameRenderer(backend, LAYOUT);
+    const source = borrowedFrame(13);
+    backend.frameUploadAction = () => renderer.dispose();
+
+    await expect(renderer.uploadResident(0, source.source)).resolves.toBeNull();
+    expect(source.closeCalls()).toBe(1);
+    expect(renderer.snapshot()).toMatchObject({
+      state: "disposed",
+      uploadedResidentLayers: 0,
+      residentUploads: 0
+    });
+  });
+
   it("bounds browser-owned coded padding while copying only exact storage pixels", async () => {
     const backend = new FakeBackend();
     const renderer = new FrameRenderer(backend, LAYOUT);
@@ -603,6 +661,38 @@ class FakeBackend implements FrameRendererBackend {
 
   public dispose(): void {
     this.disposeCalls += 1;
+  }
+}
+
+class FakeNativeBackend extends FakeBackend {
+  public readonly frameUploads: Array<{
+    readonly kind: FrameTextureKind;
+    readonly index: number;
+    readonly frame: CopyableVideoFrame;
+    readonly layout: Readonly<{
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    }>;
+  }> = [];
+  public frameUploadFailure: Error | null = null;
+  public frameUploadAction: (() => void) | null = null;
+
+  public uploadFrame(
+    kind: FrameTextureKind,
+    index: number,
+    frame: CopyableVideoFrame,
+    layout: Readonly<{
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    }>
+  ): void {
+    if (this.frameUploadFailure !== null) throw this.frameUploadFailure;
+    this.frameUploadAction?.();
+    this.frameUploads.push({ kind, index, frame, layout });
   }
 }
 

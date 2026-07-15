@@ -22,6 +22,7 @@ import {
   DECODER_WORKER_PROTOCOL_VERSION,
   type DecoderWorkerClientPort,
   type DecoderWorkerAvcConfig,
+  type DecoderWorkerColorSpaceExpectation,
   type DecoderWorkerLimits,
   type DecoderWorkerMessagePort,
   type DecoderWorkerSample
@@ -794,6 +795,90 @@ describe("dedicated decoder worker boundary", () => {
     await fixture.dispose();
   });
 
+  it.each([
+    ["unspecified", null],
+    ["exact BT.709 limited", {
+      fullRange: false,
+      matrix: "bt709",
+      primaries: "bt709",
+      transfer: "bt709"
+    }]
+  ] as const)(
+    "accepts WebKit-normalized BT.709 output with %s expectations",
+    async (_label, expectedColorSpace) => {
+      const fixture = createFixture(
+        { maxOutstandingFrames: 1 },
+        { expectedColorSpace }
+      );
+      await fixture.configure();
+      await fixture.client.activateGeneration(1);
+      await fixture.client.submit(1, createUnitSamples(0, 0, 1));
+
+      const frame = fixture.decoder.emitNext({
+        codedWidth: 2,
+        displayWidth: 2,
+        fullRange: true,
+        matrix: "bt709",
+        primaries: "bt709",
+        transfer: "iec61966-2-1"
+      });
+      await fixture.client.waitForFrames(1, { timeoutMs: 100 });
+      fixture.client.takeFrame()?.close();
+      await drainMessages();
+
+      expect(frame.closeCalls).toBe(1);
+      expect(fixture.decoder.closeCalls).toBe(0);
+      await fixture.dispose();
+    }
+  );
+
+  it.each([
+    {
+      label: "a near-match output tuple",
+      expectedColorSpace: null,
+      outputTransfer: "bt709"
+    },
+    {
+      label: "a noncanonical configured expectation",
+      expectedColorSpace: {
+        fullRange: false,
+        matrix: "bt709",
+        primaries: "bt709",
+        transfer: "iec61966-2-1"
+      },
+      outputTransfer: "iec61966-2-1"
+    }
+  ] as const)(
+    "rejects WebKit color-space compatibility for $label",
+    async ({ expectedColorSpace, outputTransfer }) => {
+      const fixture = createFixture(
+        { maxOutstandingFrames: 1 },
+        { expectedColorSpace }
+      );
+      await fixture.configure();
+      await fixture.client.activateGeneration(1);
+      await fixture.client.submit(1, createUnitSamples(0, 0, 1));
+      const waiting = fixture.client.waitForFrames(1, { timeoutMs: 100 });
+
+      const frame = fixture.decoder.emitNext({
+        codedWidth: 2,
+        displayWidth: 2,
+        fullRange: true,
+        matrix: "bt709",
+        primaries: "bt709",
+        transfer: outputTransfer
+      });
+      await expect(waiting).rejects.toMatchObject({
+        code: "DECODER_OUTPUT_INVALID",
+        fatal: true
+      });
+      expect(frame.closeCalls).toBe(1);
+      expect(fixture.decoder.closeCalls).toBe(1);
+
+      await fixture.dispose();
+    }
+  );
+
   it("closes the decoder when decode() throws and settles the client failure", async () => {
     const fixture = createFixture({}, { decoderRejectTag: 0 });
     await fixture.configure();
@@ -1004,6 +1089,7 @@ function createFixture(
       config: VideoDecoderConfig
     ) => VideoDecoderConfig;
     readonly codec?: DecoderWorkerAvcConfig["codec"];
+    readonly expectedColorSpace?: DecoderWorkerColorSpaceExpectation | null;
   } = {}
 ): Fixture {
   const { clientPort, workerPort } = createPortPair();
@@ -1073,7 +1159,7 @@ function createFixture(
           displayWidth: 2,
           displayHeight: 2,
           visibleRect: { x: 0, y: 0, width: 2, height: 2 },
-          colorSpace: null
+          colorSpace: options.expectedColorSpace ?? null
         },
         limits
       }),
@@ -1151,9 +1237,9 @@ class FakeVideoFrame {
   public readonly visibleRect = { x: 0, y: 0, width: 2, height: 2 };
   public readonly colorSpace: {
     readonly fullRange: boolean | null;
-    readonly matrix: null;
-    readonly primaries: null;
-    readonly transfer: null;
+    readonly matrix: VideoMatrixCoefficients | null;
+    readonly primaries: VideoColorPrimaries | null;
+    readonly transfer: VideoTransferCharacteristics | null;
   };
   public closeCalls = 0;
 
@@ -1163,6 +1249,9 @@ class FakeVideoFrame {
       readonly codedWidth: number;
       readonly displayWidth: number;
       readonly fullRange?: boolean;
+      readonly matrix?: VideoMatrixCoefficients;
+      readonly primaries?: VideoColorPrimaries;
+      readonly transfer?: VideoTransferCharacteristics;
     }
   ) {
     this.timestamp = chunk.timestamp;
@@ -1173,9 +1262,9 @@ class FakeVideoFrame {
     this.displayHeight = 2;
     this.colorSpace = {
       fullRange: geometry.fullRange ?? null,
-      matrix: null,
-      primaries: null,
-      transfer: null
+      matrix: geometry.matrix ?? null,
+      primaries: geometry.primaries ?? null,
+      transfer: geometry.transfer ?? null
     };
   }
 
@@ -1251,6 +1340,9 @@ class FakeVideoDecoder implements WorkerVideoDecoderAdapter {
       readonly codedWidth: number;
       readonly displayWidth: number;
       readonly fullRange?: boolean;
+      readonly matrix?: VideoMatrixCoefficients;
+      readonly primaries?: VideoColorPrimaries;
+      readonly transfer?: VideoTransferCharacteristics;
     } = {
       codedWidth: 2,
       displayWidth: 2

@@ -592,6 +592,8 @@ export class BrowserFrameBackend implements FrameRendererBackend_2 {
     setPresentationGeometry(geometry: Readonly<PresentationGeometry>): boolean;
     // (undocumented)
     upload(kind: FrameTextureKind, index: number, pixels: Uint8Array): void;
+    // (undocumented)
+    uploadFrame(kind: FrameTextureKind, index: number, frame: CopyableVideoFrame, layout: Readonly<FrameSourceLayout>): void;
 }
 
 // @public (undocumented)
@@ -632,6 +634,8 @@ export class BrowserOpaqueFrameBackend implements OpaqueFrameRendererBackend {
     readPixels(): Uint8Array;
     // (undocumented)
     upload(kind: FrameTextureKind, index: number, pixels: Uint8Array): void;
+    // (undocumented)
+    uploadFrame(kind: FrameTextureKind, index: number, frame: CopyableVideoFrame, layout: Readonly<FrameSourceLayout>): void;
 }
 
 // @public @deprecated (undocumented)
@@ -2221,6 +2225,18 @@ export { FrameRendererTimerHost }
 export { FrameRendererTimerHost as OpaqueFrameRendererTimerHost }
 
 // @public (undocumented)
+export interface FrameSourceLayout {
+    // (undocumented)
+    readonly height: number;
+    // (undocumented)
+    readonly width: number;
+    // (undocumented)
+    readonly x: number;
+    // (undocumented)
+    readonly y: number;
+}
+
+// @public (undocumented)
 type FrameTextureKind = "resident" | "stream";
 export { FrameTextureKind }
 export { FrameTextureKind as OpaqueTextureKind }
@@ -3210,6 +3226,8 @@ export interface OpaqueFrameRendererBackend {
     readPixels?(): Uint8Array;
     // (undocumented)
     upload(kind: FrameTextureKind, index: number, pixels: Uint8Array): void;
+    // (undocumented)
+    uploadFrame?(kind: FrameTextureKind, index: number, frame: CopyableVideoFrame, layout: Readonly<FrameSourceLayout>): void;
 }
 
 // @public (undocumented)

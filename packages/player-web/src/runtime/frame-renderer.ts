@@ -61,11 +61,25 @@ export interface FrameRendererBackendLimits {
 
 export type FrameTextureKind = "resident" | "stream";
 
+export interface FrameSourceLayout {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 /** Small injectable boundary used for deterministic ownership tests. */
 export interface FrameRendererBackend {
   readonly limits: Readonly<FrameRendererBackendLimits>;
   allocate(layout: FrameTextureLayout, streamingSlots: number): void;
   upload(kind: FrameTextureKind, index: number, pixels: Uint8Array): void;
+  /** Optional native-source path for browsers without VideoFrame RGBA copy. */
+  uploadFrame?(
+    kind: FrameTextureKind,
+    index: number,
+    frame: CopyableVideoFrame,
+    layout: Readonly<FrameSourceLayout>
+  ): void;
   draw(kind: FrameTextureKind, index: number): void;
   readPixels?(): Uint8Array;
   dispose(): void;
@@ -76,6 +90,12 @@ export interface LegacyOpaqueFrameRendererBackend {
   readonly limits: Readonly<FrameRendererBackendLimits>;
   allocate(layout: LegacyOpaqueFrameTextureLayout, streamingSlots: number): void;
   upload(kind: FrameTextureKind, index: number, pixels: Uint8Array): void;
+  uploadFrame?(
+    kind: FrameTextureKind,
+    index: number,
+    frame: CopyableVideoFrame,
+    layout: Readonly<FrameSourceLayout>
+  ): void;
   draw(kind: FrameTextureKind, index: number): void;
   readPixels?(): Uint8Array;
   dispose(): void;
@@ -146,9 +166,8 @@ const DEFAULT_RENDERER_TIMERS: Readonly<FrameRendererTimerHost> =
 const LEGACY_VISIBLE_FRAME_OPTIONS = new WeakSet<object>();
 
 /**
- * Owns one bounded staging buffer and serializes every async frame copy before
- * passing packed RGBA bytes to an injected WebGL backend. Source frames are
- * always closed exactly once by this class after ownership is transferred.
+ * Serializes native frame uploads and owns one bounded RGBA staging fallback.
+ * Source frames are always closed exactly once after ownership is transferred.
  */
 export class FrameRenderer {
   readonly #layout: Readonly<FrameTextureLayout>;
@@ -268,9 +287,8 @@ export class FrameRenderer {
     return this.#queueUpload(
       source,
       resourceGeneration,
-      (pixels) => {
-        this.#requireActiveBackend().upload("resident", layer, pixels);
-        this.#assertUploadCurrent(resourceGeneration);
+      Object.freeze({ kind: "resident", index: layer }),
+      () => {
         this.#uploadedResidentLayers.add(layer);
         this.#residentUploads += 1;
         return Object.freeze({
@@ -294,9 +312,8 @@ export class FrameRenderer {
     return this.#queueUpload(
       source,
       resourceGeneration,
-      (pixels) => {
-        this.#requireActiveBackend().upload("stream", slot, pixels);
-        this.#assertUploadCurrent(resourceGeneration);
+      Object.freeze({ kind: "stream", index: slot }),
+      () => {
         this.#streamingUploads += 1;
         const uploadSerial = this.#nextStreamingUploadSerial;
         this.#nextStreamingUploadSerial += 1;
@@ -513,7 +530,11 @@ export class FrameRenderer {
   #queueUpload<T extends RenderFrameHandle>(
     source: BorrowedVideoFrame,
     resourceGeneration: number,
-    upload: (pixels: Uint8Array) => T
+    destination: Readonly<{
+      readonly kind: FrameTextureKind;
+      readonly index: number;
+    }>,
+    commit: () => T
   ): Promise<T | null> {
     validateFrameGeneration(resourceGeneration, "resource generation");
     validateFrameObject(source, "borrowed video frame");
@@ -538,25 +559,54 @@ export class FrameRenderer {
           this.#layout,
           this.#legacyVisibleFrameGeometry
         );
-        const staging = this.#staging;
-        staging.fill(0);
-        const copy = this.#trackSourceCopy(source.frame.copyTo(staging, {
-          rect: copyLayout.rect,
-          format: "RGBA",
-          layout: [
-            {
-              offset: copyLayout.offset,
-              stride: copyLayout.stride
+        const backend = this.#requireActiveBackend();
+        let uploaded = false;
+        if (backend.uploadFrame !== undefined) {
+          try {
+            backend.uploadFrame(
+              destination.kind,
+              destination.index,
+              source.frame,
+              copyLayout.source
+            );
+            uploaded = true;
+          } catch {
+            if (
+              this.#state !== "active" ||
+              resourceGeneration !== this.#resourceGeneration
+            ) {
+              throw new RendererUploadAbortedError(
+                "renderer changed during native frame upload"
+              );
             }
-          ]
-        }));
-        const copiedPlanes = await awaitRendererCopy(
-          copy,
-          this.#uploadAbort.signal,
-          this.#copyTimeoutMs,
-          this.#timers
-        );
-        validateCopiedPlaneLayout(copiedPlanes, copyLayout);
+            // Some engines expose the WebGL overload but reject a native
+            // VideoFrame at runtime. The bounded RGBA copy remains the fallback.
+          }
+        }
+        if (!uploaded) {
+          const staging = this.#staging;
+          staging.fill(0);
+          const copy = this.#trackSourceCopy(source.frame.copyTo(staging, {
+            rect: copyLayout.rect,
+            format: "RGBA",
+            layout: [
+              {
+                offset: copyLayout.offset,
+                stride: copyLayout.stride
+              }
+            ]
+          }));
+          const copiedPlanes = await awaitRendererCopy(
+            copy,
+            this.#uploadAbort.signal,
+            this.#copyTimeoutMs,
+            this.#timers
+          );
+          validateCopiedPlaneLayout(copiedPlanes, copyLayout);
+          this.#assertUploadCurrent(resourceGeneration);
+          backend.upload(destination.kind, destination.index, staging);
+        }
+        this.#assertUploadCurrent(resourceGeneration);
         if (
           this.#state !== "active" ||
           resourceGeneration !== this.#resourceGeneration
@@ -564,7 +614,7 @@ export class FrameRenderer {
           this.#staleUploads += 1;
           return;
         }
-        result = upload(staging);
+        result = commit();
       } catch (error) {
         if (
           this.#state === "disposed" ||
@@ -785,7 +835,8 @@ function validateFrameGeometry(
     return Object.freeze({
       rect: visible,
       offset: 0,
-      stride: width * 4
+      stride: width * 4,
+      source: Object.freeze({ x: 0, y: 0, width, height })
     });
   }
   if (
@@ -808,7 +859,8 @@ function validateFrameGeometry(
   return Object.freeze({
     rect: visible,
     offset: (y * geometry.codedWidth + x) * 4,
-    stride: geometry.codedWidth * 4
+    stride: geometry.codedWidth * 4,
+    source: Object.freeze({ x, y, width, height })
   });
 }
 
@@ -824,6 +876,7 @@ interface FrameCopyLayout {
   readonly rect: DOMRectReadOnly;
   readonly offset: number;
   readonly stride: number;
+  readonly source: Readonly<FrameSourceLayout>;
 }
 
 function validateCopiedPlaneLayout(
@@ -937,6 +990,12 @@ function adaptLegacyOpaqueBackend(
     limits: backend.limits,
     allocate,
     upload: (kind, index, pixels) => backend.upload(kind, index, pixels),
+    ...(backend.uploadFrame === undefined
+      ? {}
+      : {
+          uploadFrame: (kind, index, frame, layout) =>
+            backend.uploadFrame!(kind, index, frame, layout)
+        }),
     draw: (kind, index) => backend.draw(kind, index),
     dispose: () => backend.dispose()
   };
