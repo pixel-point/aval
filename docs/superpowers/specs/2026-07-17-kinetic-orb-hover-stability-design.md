@@ -93,7 +93,12 @@ scheduler guarantee rather than a consequence of promise resolution timing.
 
 After retiring the active owner, advancement holds the last submitted frame
 until the required route reports ready. It does not mutate the graph or draw
-from the closed run during that handoff.
+from the closed run during that handoff. The handoff is bound to the held body
+unit and authored frame, not permanently to one edge: replacing a pending edge
+at that same boundary keeps the hold, while replacing it with an edge authored
+at a later boundary first reacquires the current body ahead of the new route.
+That priority transfer prevents the replacement prefetch from parking the
+serial decoder in front of the stream needed to resume presentation.
 
 The player separates these operations instead of combining them in a
 mode-bearing `prepareRoutes` method:
@@ -108,13 +113,16 @@ mode-bearing `prepareRoutes` method:
 ### Run ownership
 
 Taking a prefetched run transfers it out of the discardable prefetch registry
-synchronously, before any await. Reconciliation may discard only runs that are
-still wholly owned by prefetch. Once handed to active playback, the active
-consumer exclusively controls close and frame consumption.
+synchronously, before any await. The claim is a cancellable handle owning both
+readiness and close authority, so teardown can close an admitted-but-not-ready
+run before awaiting it. Reconciliation may discard only runs that are still
+wholly owned by prefetch. Once handed to active playback, the active consumer
+exclusively controls cancellation, close, and frame consumption.
 
 One scheduler entry is the source of truth for loading, admission, readiness,
-and ownership. A claim removes the entry synchronously and returns its run
-promise. There is no parallel map/set pair whose updates can diverge.
+and ownership. A claim removes the entry synchronously and returns its
+cancellable readiness handle. There is no parallel map/set pair whose updates
+can diverge.
 
 ### Decoder terminal protocol
 

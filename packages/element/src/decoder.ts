@@ -1,3 +1,12 @@
+import {
+  DECODER_RING_SIZE,
+  isDecoderTerminalEvent,
+  isDecoderWorkerEvent,
+  type DecoderChunk,
+  type DecoderCommand,
+  type DecoderRunEvent
+} from "./decoder-protocol.js";
+
 export interface DecodeSample {
   readonly data: ArrayBuffer;
   readonly timestamp: number;
@@ -35,18 +44,14 @@ export interface DecoderLimits {
   readonly clearTimeout?: (handle: number) => void;
 }
 
-type WorkerEvent =
-  | Readonly<{ t: "configured"; supported: boolean }>
-  | Readonly<{ t: "started"; run: number }>
-  | Readonly<{ t: "accepted"; run: number }>
-  | Readonly<{ t: "frame"; run: number; timestamp: number; frame: VideoFrame }>
-  | Readonly<{ t: "flushed"; run: number }>
-  | Readonly<{ t: "closed"; run: number }>
-  | Readonly<{ t: "error"; run: number }>;
-
-const RING = 12;
 const PROGRESS_MS = 2_000;
 const MAX_BYTES = Number.MAX_SAFE_INTEGER;
+
+type DecoderLane =
+  | Readonly<{ phase: "idle"; generationFloor: number }>
+  | Readonly<{ phase: "running"; run: DecodeRun }>
+  | Readonly<{ phase: "closing"; run: DecodeRun }>
+  | Readonly<{ phase: "terminal" }>;
 
 export class Decoder {
   readonly #worker: Worker;
@@ -63,7 +68,7 @@ export class Decoder {
   #sequence = 0;
   #decodedBytes = 0;
   #encodedBytes = 0;
-  #active: DecodeRun | undefined;
+  #lane: DecoderLane = { phase: "idle", generationFloor: 0 };
   #configured = false;
   #disposed = false;
   #error: Error | undefined;
@@ -107,7 +112,7 @@ export class Decoder {
     this.#worker.addEventListener("error", () => this.#fail());
     this.#worker.addEventListener("messageerror", () => this.#fail());
     try {
-      this.#worker.postMessage({ t: "configure", config: { ...config } });
+      this.#post({ t: "configure", config: { ...config } });
     } catch {
       this.#fail();
     }
@@ -133,8 +138,7 @@ export class Decoder {
       this.#expectation,
       (message, transfer) => {
         if (this.#disposed || this.#error !== undefined) throw abortError();
-        if (transfer === undefined) this.#worker.postMessage(message);
-        else this.#worker.postMessage(message, transfer);
+        this.#post(message, transfer);
       },
       () => this.#availableCredit(),
       () => this.#creditChanged(),
@@ -180,8 +184,9 @@ export class Decoder {
   public dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#lane = { phase: "terminal" };
     for (const run of [...this.#runs.values()]) run.close();
-    try { this.#worker.postMessage({ t: "dispose" }); } catch { /* terminal */ }
+    try { this.#post({ t: "dispose" }); } catch { /* terminal */ }
     this.#worker.terminate();
     for (const run of [...this.#runs.values()]) this.#deleteRun(run);
     this.#queue.length = 0;
@@ -189,11 +194,11 @@ export class Decoder {
   }
 
   #receive(value: unknown): void {
-    if (this.#disposed) {
+    if (this.#disposed || this.#lane.phase === "terminal") {
       closeTransferredFrame(value, this.#VideoFrame);
       return;
     }
-    if (!isWorkerEvent(value, this.#VideoFrame)) {
+    if (!isDecoderWorkerEvent(value, this.#VideoFrame)) {
       closeTransferredFrame(value, this.#VideoFrame);
       this.#fail();
       return;
@@ -212,40 +217,76 @@ export class Decoder {
       this.#schedule();
       return;
     }
-    const run = this.#runs.get(value.run);
-    if (run === undefined) {
-      if (value.t === "frame") value.frame.close();
-      return;
-    }
-    if (run !== this.#active) {
-      if (value.t === "frame") value.frame.close();
-      this.#fail();
-      return;
-    }
-    if (run.closed && value.t !== "closed") {
-      if (value.t === "frame") value.frame.close();
-      return;
-    }
     if (value.t === "error") {
       this.#fail();
       return;
     }
-    if (value.t === "closed" && !run.closed) {
+    this.#receiveRun(value);
+  }
+
+  #receiveRun(event: DecoderRunEvent): void {
+    const lane = this.#lane;
+    if (lane.phase === "terminal") {
+      if (event.t === "frame") event.frame.close();
+      return;
+    }
+    if (lane.phase === "idle") {
+      if (event.run <= lane.generationFloor) this.#receiveStale(event);
+      else this.#rejectRunEvent(event);
+      return;
+    }
+    const generation = lane.run.generation;
+    if (event.run < generation) {
+      this.#receiveStale(event);
+      return;
+    }
+    if (event.run > generation) {
+      this.#rejectRunEvent(event);
+      return;
+    }
+    if (lane.phase === "closing") {
+      if (event.t === "frame") {
+        event.frame.close();
+        return;
+      }
+      if (isDecoderTerminalEvent(event)) {
+        this.#settleActive(lane.run, true);
+      }
+      // Start and acceptance may already be in flight when local close wins.
+      return;
+    }
+    if (event.t === "closed") {
       this.#fail();
       return;
     }
     try {
-      run.receive(value);
+      lane.run.receive(event);
     } catch (error) {
-      if (value.t === "frame") value.frame.close();
+      if (event.t === "frame") event.frame.close();
       this.#fail(error instanceof Error ? error : undefined);
       return;
     }
-    if (value.t === "flushed" || value.t === "closed") {
-      this.#active = undefined;
-      if (value.t === "closed") this.#deleteRun(run);
-      this.#schedule();
-    }
+    if (event.t === "flushed") this.#settleActive(lane.run, false);
+  }
+
+  #receiveStale(event: DecoderRunEvent): void {
+    if (isDecoderTerminalEvent(event)) return;
+    if (event.t === "frame") event.frame.close();
+    this.#fail();
+  }
+
+  #rejectRunEvent(event: DecoderRunEvent): void {
+    if (event.t === "frame") event.frame.close();
+    this.#fail();
+  }
+
+  #settleActive(run: DecodeRun, deleteRun: boolean): void {
+    this.#lane = {
+      phase: "idle",
+      generationFloor: run.generation
+    };
+    if (deleteRun) this.#deleteRun(run);
+    this.#schedule();
   }
 
   #schedule(): void {
@@ -253,17 +294,22 @@ export class Decoder {
       !this.#configured ||
       this.#disposed ||
       this.#error !== undefined ||
-      this.#active !== undefined
+      this.#lane.phase !== "idle"
     ) return;
+    const generationFloor = this.#lane.generationFloor;
     let run: DecodeRun | undefined;
     while ((run = this.#queue.shift()) !== undefined && run.closed) {
       this.#deleteRun(run);
     }
     if (run === undefined) return;
-    this.#active = run;
+    if (run.generation <= generationFloor) {
+      this.#fail();
+      return;
+    }
+    this.#lane = { phase: "running", run };
     run.activate();
     try {
-      this.#worker.postMessage({ t: "start", run: run.generation });
+      this.#post({ t: "start", run: run.generation });
     } catch {
       this.#fail();
     }
@@ -272,16 +318,22 @@ export class Decoder {
   #closeRun(run: DecodeRun): void {
     const index = this.#queue.indexOf(run);
     if (index >= 0) this.#queue.splice(index, 1);
-    if (this.#disposed || this.#error !== undefined) {
+    if (
+      this.#disposed ||
+      this.#error !== undefined ||
+      this.#lane.phase === "terminal"
+    ) {
       this.#deleteRun(run);
       return;
     }
-    if (this.#active !== run) {
+    if (this.#lane.phase === "closing" && this.#lane.run === run) return;
+    if (this.#lane.phase !== "running" || this.#lane.run !== run) {
       this.#deleteRun(run);
       return;
     }
+    this.#lane = { phase: "closing", run };
     try {
-      this.#worker.postMessage({ t: "close", run: run.generation });
+      this.#post({ t: "close", run: run.generation });
     } catch {
       this.#fail();
     }
@@ -290,11 +342,16 @@ export class Decoder {
   #availableCredit(): number {
     let outstanding = 0;
     for (const run of this.#runs.values()) outstanding += run.outstanding;
-    return Math.max(0, RING - outstanding);
+    return Math.max(0, DECODER_RING_SIZE - outstanding);
   }
 
   #creditChanged(): void {
-    this.#active?.pump();
+    if (this.#lane.phase === "running") this.#lane.run.pump();
+  }
+
+  #post(message: DecoderCommand, transfer?: Transferable[]): void {
+    if (transfer === undefined) this.#worker.postMessage(message);
+    else this.#worker.postMessage(message, transfer);
   }
 
   #claimDecodedBytes(bytes: number): void {
@@ -340,7 +397,7 @@ export class Decoder {
     for (const run of [...this.#runs.values()]) run.fail(error);
     for (const run of [...this.#runs.values()]) this.#deleteRun(run);
     this.#queue.length = 0;
-    this.#active = undefined;
+    this.#lane = { phase: "terminal" };
     this.#worker.terminate();
   }
 }
@@ -349,7 +406,7 @@ export class DecodeRun {
   readonly #id: number;
   readonly #samples: readonly Readonly<DecodeSample>[];
   readonly #expectation: DecoderOutputExpectation;
-  readonly #post: (message: unknown, transfer?: Transferable[]) => void;
+  readonly #post: (message: DecoderCommand, transfer?: Transferable[]) => void;
   readonly #credit: () => number;
   readonly #creditChanged: () => void;
   readonly #claimBytes: (bytes: number) => void;
@@ -391,7 +448,7 @@ export class DecodeRun {
     samples: readonly Readonly<DecodeSample>[],
     persistent: boolean,
     expectation: Readonly<DecoderOutputExpectation>,
-    post: (message: unknown, transfer?: Transferable[]) => void,
+    post: (message: DecoderCommand, transfer?: Transferable[]) => void,
     credit: () => number,
     creditChanged: () => void,
     claimBytes: (bytes: number) => void,
@@ -463,7 +520,7 @@ export class DecodeRun {
     this.#updateProgressWatchdog(true);
   }
 
-  public receive(event: Exclude<WorkerEvent, Readonly<{ t: "configured" }>>): void {
+  public receive(event: DecoderRunEvent): void {
     if (this.#closed) {
       if (event.t === "frame") event.frame.close();
       return;
@@ -498,7 +555,6 @@ export class DecodeRun {
       this.#clearProgressWatchdog();
       return;
     }
-    if (event.t === "error") throw new Error("AVAL decoder failed");
     const expected = this.#outputs.get(event.timestamp);
     if (
       expected === undefined ||
@@ -606,16 +662,14 @@ export class DecodeRun {
       this.#updateProgressWatchdog(false);
       return;
     }
-    const chunks: Array<{
-      data: ArrayBuffer;
-      timestamp: number;
-      duration: number;
-      key: boolean;
-    }> = [];
+    const chunks: DecoderChunk[] = [];
     const transfer: Transferable[] = [];
     let reserved = 0;
     const available = this.#credit();
-    while (this.#nextSample < this.#samples.length && chunks.length < RING) {
+    while (
+      this.#nextSample < this.#samples.length &&
+      chunks.length < DECODER_RING_SIZE
+    ) {
       const sample = this.#samples[this.#nextSample]!;
       if (sample.displayedFrames > available - reserved) break;
       this.#nextSample += 1;
@@ -723,7 +777,7 @@ function validateSample(sample: Readonly<DecodeSample>, buffers: Set<ArrayBuffer
     sample.duration < 0 ||
     !Number.isSafeInteger(sample.displayedFrames) ||
     sample.displayedFrames < 0 ||
-    sample.displayedFrames > RING ||
+    sample.displayedFrames > DECODER_RING_SIZE ||
     sample.displayedFrames > 0 && sample.duration === 0 ||
     typeof sample.key !== "boolean"
   ) throw new RangeError("invalid decoder sample");
@@ -857,22 +911,6 @@ function validateExpectation(
 
 function positive(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
-}
-
-function isWorkerEvent(
-  value: unknown,
-  VideoFrameConstructor: typeof globalThis.VideoFrame
-): value is WorkerEvent {
-  if (typeof value !== "object" || value === null || !("t" in value)) return false;
-  const event = value as { t?: unknown; run?: unknown; supported?: unknown; frame?: unknown; timestamp?: unknown };
-  if (event.t === "configured") return typeof event.supported === "boolean";
-  if (!Number.isSafeInteger(event.run) || Number(event.run) < 1) return false;
-  if (event.t === "frame") {
-    return event.frame instanceof VideoFrameConstructor &&
-      Number.isSafeInteger(event.timestamp);
-  }
-  return event.t === "started" || event.t === "accepted" || event.t === "flushed" ||
-    event.t === "closed" || event.t === "error";
 }
 
 function closeTransferredFrame(

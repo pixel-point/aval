@@ -26,8 +26,8 @@ regression self-building and required in CI.
 
 - Extract snapshot-to-plan logic with no resource side effects.
 - Represent required pending and follow-on departures, current target bodies,
-  reversible residency, completion speculation, and loop speculation in an
-  ordered plan.
+  detached-body resume, reversible residency, completion speculation, and loop
+  speculation in an ordered plan.
 - Add table-driven tests for pending, follow-on, and speculation suppression.
 
 ## Task 3: Priority-aware prepared-run scheduler
@@ -36,9 +36,12 @@ regression self-building and required in CI.
   latest plan, waiting for a required load instead of admitting ready
   speculation.
 - Store loading, admitted, ready, and scheduler-owned state in one entry.
-- Make `claim()` synchronously transfer ownership before awaiting the run.
+- Make `claim()` synchronously transfer cancellable readiness/close ownership
+  before awaiting the run.
 - Split player orchestration into plan/reconcile, active retirement, and
   departure/hold evaluation.
+- Preserve a detached handoff across same-boundary route replacement, and
+  prioritize body reacquisition when the replacement departs later.
 - Keep one integration regression for the real player/graph boundary and remove
   duplicated fake-runtime scaffolding.
 

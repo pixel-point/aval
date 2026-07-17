@@ -4,6 +4,11 @@ import {
   Decoder,
   type DecoderLimits
 } from "../src/decoder.js";
+import {
+  isDecoderCommand,
+  type DecoderCommand,
+  type DecoderWorkerEvent
+} from "../src/decoder-protocol.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -325,6 +330,162 @@ describe("Decoder output certification", () => {
     decoder.dispose();
   });
 
+  it.each(["flushed", "closed"] as const)(
+    "releases a locally closed active run on a late %s acknowledgement",
+    async (terminal) => {
+      const Worker = fakeWorker();
+      const VideoFrame = fakeVideoFrame();
+      vi.stubGlobal("Worker", Worker);
+      vi.stubGlobal("VideoFrame", VideoFrame);
+
+      const decoder = configuredDecoder();
+      const worker = Worker.latest();
+      worker.emit({ t: "configured", supported: true });
+      await decoder.supported();
+      const first = oneFrameRun(decoder);
+      const second = oneFrameRun(decoder);
+      expect(worker.posted).toContainEqual({ t: "start", run: first.generation });
+      expect(worker.posted).not.toContainEqual({ t: "start", run: second.generation });
+
+      worker.emit({ t: "started", run: first.generation });
+      worker.emit({ t: "accepted", run: first.generation });
+      expect(worker.posted).toContainEqual({ t: "flush", run: first.generation });
+      first.close();
+      expect(worker.posted).toContainEqual({ t: "close", run: first.generation });
+
+      worker.emit({ t: terminal, run: first.generation });
+      expect(worker.posted).toContainEqual({ t: "start", run: second.generation });
+
+      // Duplicate terminal messages from the retired generation are stale and
+      // must not interfere with the new active owner.
+      worker.emit({ t: "flushed", run: first.generation });
+      worker.emit({ t: "closed", run: first.generation });
+      expect(worker.terminated).toBe(false);
+      worker.emit({ t: "started", run: second.generation });
+      expect(worker.posted).toContainEqual(expect.objectContaining({
+        t: "decode",
+        run: second.generation
+      }));
+
+      second.close();
+      decoder.dispose();
+    }
+  );
+
+  it("treats a worker error as globally fatal after a local close", async () => {
+    const Worker = fakeWorker();
+    const VideoFrame = fakeVideoFrame();
+    vi.stubGlobal("Worker", Worker);
+    vi.stubGlobal("VideoFrame", VideoFrame);
+
+    const decoder = configuredDecoder();
+    const worker = Worker.latest();
+    worker.emit({ t: "configured", supported: true });
+    await decoder.supported();
+    const first = oneFrameRun(decoder);
+    const second = oneFrameRun(decoder);
+    worker.emit({ t: "started", run: first.generation });
+    worker.emit({ t: "accepted", run: first.generation });
+    first.close();
+
+    worker.emit({ t: "error" });
+
+    expect(worker.terminated).toBe(true);
+    expect(worker.posted).not.toContainEqual({ t: "start", run: second.generation });
+    expect(decoder.snapshot()).toEqual({
+      workerCount: 0,
+      openFrames: 0,
+      openFrameBytes: 0
+    });
+    decoder.dispose();
+  });
+
+  it("discards in-flight run events until a locally closing run is acknowledged", async () => {
+    const Worker = fakeWorker();
+    const VideoFrame = fakeVideoFrame();
+    vi.stubGlobal("Worker", Worker);
+    vi.stubGlobal("VideoFrame", VideoFrame);
+
+    const decoder = configuredDecoder();
+    const worker = Worker.latest();
+    worker.emit({ t: "configured", supported: true });
+    await decoder.supported();
+    const first = oneFrameRun(decoder);
+    const second = oneFrameRun(decoder);
+    worker.emit({ t: "started", run: first.generation });
+    first.close();
+
+    const frame = new VideoFrame(32, 34);
+    worker.emit({ t: "accepted", run: first.generation });
+    worker.emit({
+      t: "frame",
+      run: first.generation,
+      timestamp: 0,
+      frame
+    });
+
+    expect((frame as unknown as { closed: boolean }).closed).toBe(true);
+    expect(worker.terminated).toBe(false);
+    worker.emit({ t: "closed", run: first.generation });
+    expect(worker.posted).toContainEqual({ t: "start", run: second.generation });
+    second.close();
+    decoder.dispose();
+  });
+
+  it.each(["started", "accepted"] as const)(
+    "rejects a stale nonterminal %s event",
+    async (kind) => {
+      const Worker = fakeWorker();
+      const VideoFrame = fakeVideoFrame();
+      vi.stubGlobal("Worker", Worker);
+      vi.stubGlobal("VideoFrame", VideoFrame);
+
+      const decoder = configuredDecoder();
+      const worker = Worker.latest();
+      worker.emit({ t: "configured", supported: true });
+      await decoder.supported();
+      const first = oneFrameRun(decoder);
+      const second = oneFrameRun(decoder);
+      first.close();
+      worker.emit({ t: "closed", run: first.generation });
+      expect(worker.posted).toContainEqual({ t: "start", run: second.generation });
+
+      worker.emit({ t: kind, run: first.generation });
+
+      expect(worker.terminated).toBe(true);
+      expect(worker.posted).not.toContainEqual({ t: "decode", run: second.generation });
+      decoder.dispose();
+    }
+  );
+
+  it("closes and rejects a stale transferred frame", async () => {
+    const Worker = fakeWorker();
+    const VideoFrame = fakeVideoFrame();
+    vi.stubGlobal("Worker", Worker);
+    vi.stubGlobal("VideoFrame", VideoFrame);
+
+    const decoder = configuredDecoder();
+    const worker = Worker.latest();
+    worker.emit({ t: "configured", supported: true });
+    await decoder.supported();
+    const first = oneFrameRun(decoder);
+    oneFrameRun(decoder);
+    first.close();
+    worker.emit({ t: "closed", run: first.generation });
+    const frame = new VideoFrame(32, 34);
+
+    worker.emit({
+      t: "frame",
+      run: first.generation,
+      timestamp: 0,
+      frame
+    });
+
+    expect((frame as unknown as { closed: boolean }).closed).toBe(true);
+    expect(worker.terminated).toBe(true);
+    decoder.dispose();
+  });
+
   it("does not time out a ready prefetched run while its reordered frames are parked", async () => {
     vi.useFakeTimers();
     const Worker = fakeWorker();
@@ -399,8 +560,9 @@ function twoFrameRun(decoder: Decoder) {
 }
 
 interface FakeWorkerInstance {
+  readonly posted: readonly DecoderCommand[];
   readonly terminated: boolean;
-  emit(value: unknown): void;
+  emit(value: DecoderWorkerEvent): void;
 }
 
 function fakeWorker(): {
@@ -411,15 +573,19 @@ function fakeWorker(): {
   let latest: (Worker & FakeWorkerInstance) | null = null;
   class StubWorker {
     readonly #messages = new Set<Listener>();
+    public readonly posted: DecoderCommand[] = [];
     public terminated = false;
 
     public constructor() { latest = this as unknown as Worker & FakeWorkerInstance; }
     public addEventListener(type: string, listener: EventListener): void {
       if (type === "message") this.#messages.add(listener as Listener);
     }
-    public postMessage(): void { /* Commands are driven explicitly by the test. */ }
+    public postMessage(value: unknown): void {
+      if (!isDecoderCommand(value)) throw new Error("invalid decoder command");
+      this.posted.push(value);
+    }
     public terminate(): void { this.terminated = true; }
-    public emit(value: unknown): void {
+    public emit(value: DecoderWorkerEvent): void {
       for (const listener of this.#messages) {
         listener({ data: value } as MessageEvent<unknown>);
       }
@@ -453,6 +619,7 @@ function fakeVideoFrame(colorSpace: Readonly<VideoColorSpaceInit> = {
       height: 2
     };
     public readonly colorSpace = normalizedColorSpace;
+    public closed = false;
 
     public constructor(
       public readonly codedWidth: number,
@@ -460,7 +627,7 @@ function fakeVideoFrame(colorSpace: Readonly<VideoColorSpaceInit> = {
       public readonly timestamp = 0
     ) {}
 
-    public close(): void { /* Ownership is asserted through decoder state. */ }
+    public close(): void { this.closed = true; }
   } as unknown as {
     new(codedWidth: number, codedHeight: number, timestamp?: number): VideoFrame;
   };

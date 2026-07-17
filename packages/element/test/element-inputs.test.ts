@@ -14,6 +14,7 @@ import {
   needsIntersectionSample,
   persistedPageShow,
   publicFailureCode,
+  queueOwnedEventFollowup,
   queueOwnedMicrotask,
   runtimeHostSupported,
   sourceMutation,
@@ -421,6 +422,64 @@ describe("element inputs", () => {
     await Promise.resolve();
     expect(ran).toBe(true);
     expect(createOwnershipSnapshot(true, 0, 0, pending).completed).toBe(true);
+  });
+
+  it("runs engagement followups after listener-accepted sends", async () => {
+    const events = new ElementPublicEvents({} as HTMLElement);
+    const mutations = new ElementEventMutationGate(events);
+    const order: string[] = [];
+    let pending = 0;
+    events.transaction(true);
+    expect(deferAcceptedSend(
+      () => true,
+      (operation) => mutations.defer(operation),
+      () => { order.push("accepted-send"); }
+    )).toBe(true);
+    events.transaction(false);
+    queueOwnedEventFollowup(
+      (operation) => events.after(operation),
+      (delta) => { pending += delta; },
+      () => { order.push("engagement-retry"); }
+    );
+
+    expect(pending).toBe(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(["accepted-send", "engagement-retry"]);
+    expect(pending).toBe(0);
+  });
+
+  it("invalidates engagement followups after a listener changes targets", async () => {
+    const events = new ElementPublicEvents({} as HTMLElement);
+    const mutations = new ElementEventMutationGate(events);
+    const first = {};
+    const second = {};
+    const order: string[] = [];
+    let pending = 0;
+    let epoch = 1;
+    let target = first;
+    let replayed = false;
+    events.transaction(true);
+    expect(mutations.defer(() => {
+      epoch += 1;
+      target = second;
+      order.push("target-change");
+    })).toBe(true);
+    events.transaction(false);
+    queueOwnedEventFollowup(
+      (operation) => events.after(operation),
+      (delta) => { pending += delta; },
+      () => {
+        order.push("engagement-retry");
+        replayed = bindingCurrent(1, epoch, first, target);
+      }
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(["target-change", "engagement-retry"]);
+    expect(replayed).toBe(false);
+    expect(pending).toBe(0);
   });
 
   it("retains published-player cleanup authority when post-publication startup fails", async () => {

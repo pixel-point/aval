@@ -27,6 +27,11 @@ import {
   createReadinessPlan,
   type ReadinessPlan
 } from "./readiness.js";
+import {
+  MAX_ROUTE_PREFETCH_INTENTS,
+  planRoutePrefetch,
+  RoutePrefetchQueue
+} from "./route-prefetch.js";
 import type {
   Metadata,
   Player,
@@ -48,11 +53,16 @@ type State = Manifest["states"][number];
 interface ActiveMedia {
   readonly unit: Unit;
   run: DecodeRun | null;
-  readonly starting: Promise<DecodeRun> | null;
+  readonly starting: DecodeRunStart | null;
   readonly resident: string | null;
   lastIndex: number;
   drainedIndex: number;
   drain: Promise<void>;
+}
+
+interface DecodeRunStart {
+  readonly ready: Promise<DecodeRun>;
+  cancel(): void;
 }
 
 type PrepareResult = RuntimeReadinessResult;
@@ -63,15 +73,16 @@ interface StateRequest {
   readonly reject: (reason: unknown) => void;
 }
 
-interface PreparedRun {
-  readonly controller: AbortController;
-  promise: Promise<DecodeRun>;
-  run: DecodeRun | null;
-}
-
 const PREPARE_MS = 5_000;
 const RING = 12;
-const MAX_PREFETCH_WANTS = 4;
+
+type RouteHold = "authored" | "decoder-handoff" | null;
+
+type DecoderHandoff = Readonly<{
+  edgeId: string;
+  unitId: string;
+  frameIndex: number;
+}> | null;
 
 const COLOR = Object.freeze({
   fullRange: false as const,
@@ -335,8 +346,7 @@ class PlayerImpl implements Player {
   readonly #resident = new Map<string, Promise<void>>();
   readonly #residentReady = new Set<string>();
   readonly #residentFrames = new Map<string, Set<number>>();
-  readonly #prefetched = new Map<string, PreparedRun>();
-  readonly #prefetchReady = new Set<string>();
+  readonly #routePrefetch: RoutePrefetchQueue<DecodeRun>;
   readonly #validated = new Set<string>();
   readonly #trace: Readonly<AvalRuntimeTraceRecord>[] = [];
   readonly #requests = new Map<number, StateRequest>();
@@ -372,6 +382,7 @@ class PlayerImpl implements Player {
   #underflows = 0;
   #incidents = 0;
   #inUnderflow = false;
+  #decoderHandoff: DecoderHandoff = null;
   #awaitingContextRestore = false;
   #restartRequested = false;
   #contextLosses = 0;
@@ -420,6 +431,12 @@ class PlayerImpl implements Player {
     this.#units = new Map(this.#manifest.units.map((unit) => [unit.id, unit]));
     this.#edges = this.#manifest.edges;
     this.#edgesById = new Map(this.#edges.map((edge) => [edge.id, edge]));
+    this.#routePrefetch = new RoutePrefetchQueue({
+      signal: deadline.signal,
+      preload: (unit, signal) => this.#preloadRun(unit, signal),
+      admit: (unit) => this.#createLoadedRun(unit),
+      onFailure: (error) => this.#fail(error)
+    });
     this.#visible = input.visible;
     this.#contextRestored = () => {
       if (!this.#awaitingContextRestore || this.#disposed) return;
@@ -647,7 +664,7 @@ class PlayerImpl implements Player {
   public async settled(): Promise<void> {
     await Promise.allSettled([
       ...this.#resident.values(),
-      ...[...this.#prefetched.values()].map(({ promise }) => promise)
+      this.#routePrefetch.settled()
     ]);
     await (this.#renderer ?? this.#retiredRenderer)?.settled();
   }
@@ -874,31 +891,26 @@ class PlayerImpl implements Player {
 
   async #retireAnimationResources(): Promise<void> {
     this.#cancelFrame();
+    this.#decoderHandoff = null;
     this.#preparationDeadline.cancel(abortError());
     const active = this.#active;
     const initialMedia = this.#initialMedia;
     this.#initialMedia = null;
     initialMedia?.run.close();
-    const prepared = [...this.#prefetched.values()];
-    for (const item of prepared) {
-      item.controller.abort(abortError());
-      item.run?.close();
-    }
-    this.#prefetched.clear();
-    this.#prefetchReady.clear();
+    this.#closeActive(active);
+    if (this.#active === active) this.#active = null;
+    const prefetched = this.#routePrefetch.retire();
     const renderer = this.#renderer;
     await Promise.allSettled([
       ...(this.#advanceWork === null ? [] : [this.#advanceWork]),
       ...(this.#preparationMediaWork === null ? [] : [this.#preparationMediaWork]),
       ...(active?.starting === null || active?.starting === undefined
-        ? [] : [active.starting]),
+        ? [] : [active.starting.ready]),
       ...(active === null ? [] : [active.drain]),
-      ...prepared.map(({ promise }) => promise),
+      prefetched,
       ...this.#resident.values(),
       ...(renderer === null ? [] : [renderer.settled()])
     ]);
-    this.#closeActive(active);
-    if (this.#active === active) this.#active = null;
     this.#decoder?.dispose();
     this.#decoder = null;
     renderer?.dispose();
@@ -964,10 +976,11 @@ class PlayerImpl implements Player {
 
   #schedule(): void {
     const graph = this.#graph;
+    const snapshot = graph?.snapshot();
     if (
       this.#disposed || this.#failed || this.#paused || !this.#visible ||
-      this.#staticReason !== null || this.#active === null || this.#raf !== null ||
-      graph === null || !this.#needsTick(graph.snapshot())
+      this.#staticReason !== null || this.#raf !== null || graph === null ||
+      snapshot?.readiness !== "animated" || !this.#needsTick(snapshot)
     ) return;
     this.#raf = this.#input.platform.requestAnimationFrame((time) => {
       this.#raf = null;
@@ -978,9 +991,7 @@ class PlayerImpl implements Player {
       this.#busy = true;
       const work = this.#advance();
       this.#advanceWork = work;
-      void work.catch((error) => {
-        if (!isAbort(error)) this.#fail(error);
-      }).finally(() => {
+      void work.catch((error) => this.#fail(error)).finally(() => {
         if (this.#advanceWork === work) this.#advanceWork = null;
         this.#busy = false;
         this.#nextDeadline();
@@ -1002,14 +1013,15 @@ class PlayerImpl implements Player {
     const departure = this.#departure(before);
     if (departure !== null) this.#prepareRoutes(before);
     const routeReady = departure === null || this.#departureReady(departure);
-    if (!routeReady && routeWaitBlocksPresentation(
-      before.presentation,
-      departure,
-      before.presentation?.kind === "body"
-        ? this.#unit(before.presentation.unitId)
-        : null
-    )) {
-      if (!this.#inUnderflow) {
+    const hold = this.#routeHold(before, departure, routeReady);
+    if (hold === "decoder-handoff") {
+      this.#inUnderflow = false;
+      const handedOff = this.#active;
+      this.#closeActive(handedOff);
+      if (this.#active === handedOff) this.#active = null;
+    }
+    if (hold !== null) {
+      if (hold === "authored" && !this.#inUnderflow) {
         this.#inUnderflow = true;
         this.#underflows += 1;
         this.#incidents += 1;
@@ -1241,6 +1253,9 @@ class PlayerImpl implements Player {
         this.#assertAnimation(generation, renderer, decoder);
         this.#drainThrough(active, presentation.frameIndex);
       } else {
+        if (active.drainedIndex < presentation.frameIndex - 1) {
+          this.#drainThrough(active, presentation.frameIndex - 1);
+        }
         await active.drain;
         this.#assertAnimation(generation, renderer, decoder);
         const run = await this.#activeRun(active);
@@ -1288,8 +1303,10 @@ class PlayerImpl implements Player {
       drain: Promise.resolve()
     };
     this.#active = active;
-    void starting.then((run) => {
-      if (this.#active === active && !this.#disposed && this.#staticReason === null) {
+    void starting.ready.then((run) => {
+      if (
+        this.#active === active && !this.#disposed && this.#staticReason === null
+      ) {
         active.run = run;
       } else run.close();
     }, (error) => {
@@ -1301,7 +1318,7 @@ class PlayerImpl implements Player {
   async #activeRun(active: ActiveMedia): Promise<DecodeRun> {
     if (active.run !== null) return active.run;
     if (active.starting === null) throw new Error("Invalid AVAL media state");
-    const run = await active.starting;
+    const run = await active.starting.ready;
     if (this.#active !== active || this.#staticReason !== null || this.#disposed) {
       run.close();
       throw abortError();
@@ -1326,120 +1343,162 @@ class PlayerImpl implements Player {
 
   #closeActive(active: ActiveMedia | null): void {
     if (active === null) return;
+    active.starting?.cancel();
     active.run?.close();
-    if (active.run === null && active.starting !== null) {
-      void active.starting.then((run) => run.close(), () => undefined);
-    }
   }
 
-  async #takeRun(unit: Unit): Promise<DecodeRun> {
+  #takeRun(unit: Unit): DecodeRunStart {
     const initial = this.#initialMedia;
     if (initial?.unit.id === unit.id) {
       this.#initialMedia = null;
-      return initial.run;
+      return this.#resolvedRunStart(initial.run);
     }
-    const prepared = this.#prefetched.get(unit.id);
-    let run: DecodeRun;
-    if (prepared === undefined) {
-      run = await this.#newRun(unit);
-      await run.ready();
-    } else {
-      try { run = await prepared.promise; }
-      finally {
-        this.#prefetched.delete(unit.id);
-        this.#prefetchReady.delete(unit.id);
-      }
-    }
-    if (this.#disposed) {
-      run.close();
-      throw abortError();
-    }
-    return run;
+    const prepared = this.#routePrefetch.claim(unit.id);
+    return prepared ?? this.#createRunStart(unit);
   }
 
-  #queue(unit: Unit): Promise<DecodeRun> {
-    const existing = this.#prefetched.get(unit.id);
-    if (existing !== undefined) return existing.promise;
+  #resolvedRunStart(run: DecodeRun): DecodeRunStart {
+    return Object.freeze({
+      ready: Promise.resolve(run),
+      cancel: () => run.close()
+    });
+  }
+
+  #createRunStart(unit: Unit): DecodeRunStart {
     const controller = new AbortController();
-    let prepared!: PreparedRun;
-    let operation!: Promise<DecodeRun>;
-    operation = this.#newRun(
-      unit,
-      combinedSignal(this.#preparationDeadline.signal, controller.signal)
-    ).then(async (run) => {
-      prepared.run = run;
+    const signal = AbortSignal.any([
+      this.#preparationDeadline.signal,
+      controller.signal
+    ]);
+    let run: DecodeRun | null = null;
+    const ready = this.#newRun(unit, signal).then(async (created) => {
+      run = created;
       try {
-        if (controller.signal.aborted) throw abortError();
-        await run.ready();
-        if (this.#prefetched.get(unit.id)?.promise === operation) {
-          this.#prefetchReady.add(unit.id);
-        }
-        return run;
+        await created.ready();
+        signal.throwIfAborted();
+        if (this.#disposed) throw abortError();
+        return created;
       } catch (error) {
-        run.close();
+        created.close();
         throw error;
       }
     });
-    prepared = { controller, promise: operation, run: null };
-    this.#prefetched.set(unit.id, prepared);
-    void operation.catch((error) => {
-      if (!controller.signal.aborted && !isAbort(error)) this.#fail(error);
+    let canceled = false;
+    return Object.freeze({
+      ready,
+      cancel: () => {
+        if (canceled) return;
+        canceled = true;
+        controller.abort(abortError());
+        run?.close();
+        void ready.then((created) => created.close(), () => undefined);
+      }
     });
-    return operation;
   }
 
   #prepareRoutes(snapshot: Readonly<MotionGraphSnapshot>): void {
     if (this.#staticReason !== null || this.#disposed || this.#failed) return;
-    const wanted = new Map<string, Readonly<{ unit: Unit; priority: number }>>();
-    const want = (unit: Unit, priority: number): void => {
-      const previous = wanted.get(unit.id);
-      if (previous === undefined || priority < previous.priority) {
-        wanted.set(unit.id, { unit, priority });
-      }
-    };
-    const active = this.#edge(snapshot.activeEdgeId);
-    const followOn = this.#edge(snapshot.followOnEdgeId);
+    const active = this.#active;
+    const plan = planRoutePrefetch(
+      this.#manifest,
+      snapshot,
+      active === null
+        ? null
+        : {
+            unitId: active.unit.id,
+            mode: active.resident === null ? "stream" : "resident"
+          },
+      RING,
+      this.#handoffResumeUnit(snapshot)
+    );
+    for (const unit of plan.resident) void this.#ensureResident(unit);
+    this.#routePrefetch.reconcile(plan.decode);
+  }
+
+  #handoffResumeUnit(snapshot: Readonly<MotionGraphSnapshot>): string | null {
+    const handoff = this.#decoderHandoff;
     const presentation = snapshot.presentation;
-    if (active !== null) {
-      let target = active.to;
-      if (snapshot.phase === "reversible") {
-        if (followOn !== null) target = followOn.from;
-        else if (snapshot.requestedState === active.from) target = active.from;
-      }
-      const unit = this.#unit(this.#state(target).bodyUnit);
-      if (this.#active?.unit.id !== unit.id || this.#active.resident !== null) {
-        want(unit, 0);
-      }
-    }
-    const pending = this.#edge(snapshot.pendingEdgeId);
-    if (pending !== null) {
-      this.#wantDeparture(pending, presentation?.kind === "intro" ? 1 : 0, want);
-    }
-    if (followOn !== null) this.#wantDeparture(followOn, 1, want);
-    if (presentation?.kind === "intro") {
-      const unit = this.#unit(this.#state(presentation.state).bodyUnit);
-      want(unit, 0);
-    } else if (presentation?.kind === "body") {
-      const unit = this.#unit(presentation.unitId);
-      if (unit.frameCount - presentation.frameIndex <= 12) {
-        const completion = this.#edges.find((edge) =>
-          edge.from === presentation.state && edge.trigger?.type === "completion"
-        );
-        if (completion !== undefined) this.#wantDeparture(completion, 0, want);
-        else if (unit.kind === "body" && unit.playback === "loop") {
-          want(unit, 2);
-        }
-      }
-    }
-    this.#reconcilePrefetch(wanted);
     if (
-      pending !== null && presentation?.kind === "body" &&
-      this.#active?.resident === null &&
-      this.#active.unit.id === presentation.unitId &&
-      this.#atDepartureBoundary(pending, presentation.state, presentation.frameIndex)
-    ) {
-      this.#closeActive(this.#active);
+      handoff === null || presentation?.kind !== "body" ||
+      handoff.unitId !== presentation.unitId ||
+      handoff.frameIndex !== presentation.frameIndex
+    ) return null;
+    const departure = this.#departure(snapshot);
+    if (
+      departure !== null && snapshot.pendingEdgeId === departure.id &&
+      this.#atDepartureBoundary(
+        departure,
+        presentation.state,
+        presentation.frameIndex
+      )
+    ) return null;
+    return presentation.unitId;
+  }
+
+  #routeHold(
+    snapshot: Readonly<MotionGraphSnapshot>,
+    departure: Readonly<Edge> | null,
+    routeReady: boolean
+  ): RouteHold {
+    if (routeReady) {
+      this.#decoderHandoff = null;
+      return null;
     }
+    const presentation = snapshot.presentation;
+    if (
+      departure !== null && presentation?.kind === "body" &&
+      this.#decoderHandoff !== null &&
+      this.#decoderHandoff.unitId === presentation.unitId &&
+      this.#decoderHandoff.frameIndex === presentation.frameIndex &&
+      snapshot.pendingEdgeId === departure.id &&
+      this.#atDepartureBoundary(
+        departure,
+        presentation.state,
+        presentation.frameIndex
+      )
+    ) {
+      if (this.#decoderHandoff.edgeId !== departure.id) {
+        this.#decoderHandoff = Object.freeze({
+          edgeId: departure.id,
+          unitId: presentation.unitId,
+          frameIndex: presentation.frameIndex
+        });
+      }
+      return "decoder-handoff";
+    }
+    this.#decoderHandoff = null;
+    if (departure !== null &&
+      this.#activeBlocksPendingDeparture(snapshot, departure)) {
+      if (presentation?.kind !== "body") {
+        throw new Error("AVAL decoder handoff invariant failed");
+      }
+      this.#decoderHandoff = Object.freeze({
+        edgeId: departure.id,
+        unitId: presentation.unitId,
+        frameIndex: presentation.frameIndex
+      });
+      return "decoder-handoff";
+    }
+    return routeWaitBlocksPresentation(
+      presentation,
+      departure,
+      presentation?.kind === "body" ? this.#unit(presentation.unitId) : null
+    ) ? "authored" : null;
+  }
+
+  #activeBlocksPendingDeparture(
+    snapshot: Readonly<MotionGraphSnapshot>,
+    departure: Readonly<Edge>
+  ): boolean {
+    const presentation = snapshot.presentation;
+    return snapshot.pendingEdgeId === departure.id &&
+      presentation?.kind === "body" && this.#active?.resident === null &&
+      this.#active.unit.id === presentation.unitId &&
+      this.#atDepartureBoundary(
+        departure,
+        presentation.state,
+        presentation.frameIndex
+      );
   }
 
   #atDepartureBoundary(
@@ -1454,48 +1513,6 @@ class PlayerImpl implements Player {
     if (start.type === "finish") return frameIndex === body.frameCount - 1;
     return body.ports.find(({ id }) => id === start.sourcePort)
       ?.portalFrames.includes(frameIndex) === true;
-  }
-
-  #wantDeparture(
-    edge: Readonly<Edge>,
-    priority: number,
-    want: (unit: Unit, priority: number) => void
-  ): void {
-    const transition = edge.transition;
-    if (transition?.kind === "reversible") {
-      void this.#ensureResident(this.#unit(transition.unit));
-      return;
-    }
-    want(this.#unit(
-      transition === undefined ? this.#state(edge.to).bodyUnit : transition.unit
-    ), priority);
-  }
-
-  #reconcilePrefetch(
-    wanted: ReadonlyMap<string, Readonly<{ unit: Unit; priority: number }>>
-  ): void {
-    const desired = [...wanted.values()].sort((left, right) =>
-      left.priority - right.priority
-    );
-    if (desired.length > MAX_PREFETCH_WANTS) {
-      throw new Error("AVAL prefetch invariant failed");
-    }
-    const current = [...this.#prefetched.keys()];
-    let prefix = 0;
-    while (prefix < current.length && prefix < desired.length &&
-      current[prefix] === desired[prefix]!.unit.id) prefix += 1;
-    for (const id of current.slice(prefix)) this.#discard(id);
-    for (const { unit } of desired.slice(prefix)) this.#queue(unit);
-  }
-
-  #discard(id: string): void {
-    const prepared = this.#prefetched.get(id);
-    if (prepared === undefined) return;
-    this.#prefetched.delete(id);
-    this.#prefetchReady.delete(id);
-    prepared.controller.abort(abortError());
-    prepared.run?.close();
-    void prepared.promise.then((run) => run.close(), () => undefined);
   }
 
   #departure(snapshot: Readonly<MotionGraphSnapshot>): Readonly<Edge> | null {
@@ -1524,24 +1541,34 @@ class PlayerImpl implements Player {
     const unit = transition === undefined
       ? this.#state(edge.to).bodyUnit
       : transition.unit;
-    return this.#prefetchReady.has(unit);
+    return this.#routePrefetch.isReady(unit);
   }
 
   async #newRun(
     unit: Unit,
     signal: AbortSignal = this.#preparationDeadline.signal
   ): Promise<DecodeRun> {
-    const decoder = this.#decoder;
-    if (decoder === null) throw new Error("AVAL decoder is unavailable");
-    const span = unit.chunks.find(({ rendition }) => rendition === this.#rendition.id);
-    if (span === undefined) throw new Error("Invalid AVAL asset");
+    await this.#preloadRun(unit, signal);
+    signal.throwIfAborted();
+    return this.#createLoadedRun(unit);
+  }
+
+  async #preloadRun(unit: Unit, signal: AbortSignal): Promise<void> {
+    if (this.#decoder === null) throw new Error("AVAL decoder is unavailable");
+    this.#unitSpan(unit);
     await this.#asset.unitBytes(this.#rendition.id, unit.id, signal);
     signal.throwIfAborted();
     this.#reportResourceBytes();
+  }
+
+  #createLoadedRun(unit: Unit): DecodeRun {
+    const decoder = this.#decoder;
+    if (decoder === null) throw new Error("AVAL decoder is unavailable");
+    const span = this.#unitSpan(unit);
     const copyBytes = encodedUnitCopyBytes(this.#asset, span);
     const decoderBytes = checkedTotal([
-      this.#decoder?.snapshot().openFrameBytes ?? 0,
-      this.#decoder?.encodedBytes ?? 0,
+      decoder.snapshot().openFrameBytes,
+      decoder.encodedBytes,
       copyBytes
     ]);
     if (resourceBytes(this.#asset, decoderBytes, this.#renderer) >
@@ -1577,6 +1604,12 @@ class PlayerImpl implements Player {
       throw new Error("Invalid AVAL asset");
     }
     return run;
+  }
+
+  #unitSpan(unit: Unit): Unit["chunks"][number] {
+    const span = unit.chunks.find(({ rendition }) => rendition === this.#rendition.id);
+    if (span === undefined) throw new Error("Invalid AVAL asset");
+    return span;
   }
 
   #ensureResident(unit: Unit): Promise<void> {
@@ -1885,7 +1918,11 @@ export function encodedCopyCeilingForUnits(unitCopyBytes: readonly number[]): nu
   const ordered = unitCopyBytes.map((value) => checkedTotal([value]))
     .sort((left, right) => right - left);
   const maximum = ordered[0] ?? 0;
-  return checkedTotal([maximum, maximum, ...ordered.slice(0, MAX_PREFETCH_WANTS)]);
+  return checkedTotal([
+    maximum,
+    maximum,
+    ...ordered.slice(0, MAX_ROUTE_PREFETCH_INTENTS)
+  ]);
 }
 
 function encodedCopyCeiling(
@@ -2050,10 +2087,6 @@ class PreparationDeadline {
     this.#parent.removeEventListener("abort", this.#parentAbort);
     this.#controller.abort(abortError());
   }
-}
-
-function combinedSignal(first: AbortSignal, second: AbortSignal): AbortSignal {
-  return AbortSignal.any([first, second]);
 }
 
 function preparationTimeout(): DOMException {

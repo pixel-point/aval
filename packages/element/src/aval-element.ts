@@ -2,6 +2,7 @@ import { ElementAttributeReflection } from "./element-attribute-reflection.js";
 import { AVAL_ATTRIBUTES, AVAL_UPGRADE_PROPERTIES } from "./element-attributes.js";
 import { normalizeIntegrity, normalizeSource } from "./element-configuration.js";
 import { ElementEventMutationGate } from "./element-event-mutation-gate.js";
+import { ElementEngagementBinding } from "./element-engagement-binding.js";
 import { ElementPublicEvents } from "./element-public-events.js";
 import { ElementTrace } from "./element-trace.js";
 import type {
@@ -73,6 +74,7 @@ export function createAvalElementClass(
     readonly #lifecycle = new LifecycleLane();
     readonly #events: ElementPublicEvents;
     readonly #eventMutations: ElementEventMutationGate;
+    readonly #engagementBinding: ElementEngagementBinding;
     readonly #trace = new ElementTrace();
     readonly #counters = {
       prepare: 0,
@@ -112,6 +114,7 @@ export function createAvalElementClass(
       type: string;
       listener: EventListener;
     }> = [];
+    #boundInputTarget: Element | null = null;
     #bindingEpoch = 0;
     #player: Player | null = null;
     #retiringPlayer: Player | null = null;
@@ -163,7 +166,6 @@ export function createAvalElementClass(
     #playSequence = 0;
     #hovered = false;
     #focused = false;
-    #engaged = false;
 
     public constructor() {
       super();
@@ -171,6 +173,9 @@ export function createAvalElementClass(
       this.#layers = new ShadowLayerOwner(this);
       this.#events = new ElementPublicEvents(this);
       this.#eventMutations = new ElementEventMutationGate(this.#events);
+      this.#engagementBinding = new ElementEngagementBinding(
+        (source) => this.#sendBinding(source)
+      );
       this.#sourceObserver = this.#createSourceObserver();
       this.#attributes.upgrade(AVAL_UPGRADE_PROPERTIES);
       this.#manualPlaying = this.autoplay === "visible";
@@ -1051,6 +1056,7 @@ export function createAvalElementClass(
             }
           : {})
       }, generation);
+      if (type === "transitionend") this.#queueEngagementRetry();
     }
 
     #publishFailure(
@@ -1489,6 +1495,7 @@ export function createAvalElementClass(
         return;
       }
       const bindingEpoch = this.#bindingEpoch;
+      this.#boundInputTarget = target;
       const current = (): boolean => bindingCurrent(
         bindingEpoch,
         this.#bindingEpoch,
@@ -1539,32 +1546,56 @@ export function createAvalElementClass(
       this.#bindingEpoch += 1;
       const listeners = this.#inputListeners;
       this.#inputListeners = [];
+      this.#boundInputTarget = null;
       for (const { target, type, listener } of listeners) this.#attemptRelease(
         "listener",
         () => target.removeEventListener(type, listener)
       );
       this.#hovered = false;
       this.#focused = false;
-      this.#engaged = false;
+      this.#engagementBinding.reset();
     }
 
     #engagement(force = false): void {
       const engaged = this.#hovered || this.#focused;
-      if (force || engaged !== this.#engaged) {
-        this.#engaged = engaged;
-        this.#sendBinding(engaged ? "engagement.on" : "engagement.off");
-      }
+      this.#engagementBinding.update(engaged, force);
     }
 
-    #sendBinding(source: string): void {
-      if (this.bindings === "none") return;
+    #queueEngagementRetry(): void {
+      const bindingEpoch = this.#bindingEpoch;
+      const target = this.#boundInputTarget;
+      queueOwnedEventFollowup(
+        (operation) => this.#events.after(operation),
+        (delta) => { this.#deferredCommandCount += delta; },
+        () => {
+          if (
+            target === null ||
+            !bindingCurrent(
+              bindingEpoch,
+              this.#bindingEpoch,
+              target,
+              this.#boundInputTarget
+            ) ||
+            target !== this.interactionTarget
+          ) return;
+          this.#engagementBinding.retry(this.#hovered || this.#focused);
+        }
+      );
+    }
+
+    #sendBinding(source: string): boolean | null {
+      if (this.bindings === "none") return null;
       this.#trace.record(
         `input-${source.replaceAll(".", "-")}`,
         Math.max(1, this.#sourceGeneration)
       );
+      let result: boolean | null = null;
       for (const binding of this.#metadata?.bindings ?? []) {
-        if (binding.source === source) this.send(binding.event);
+        if (binding.source !== source) continue;
+        const accepted = this.send(binding.event);
+        result = result === null ? accepted : result || accepted;
       }
+      return result;
     }
 
     #resolveInteractionTarget(): Element | null {
@@ -1964,6 +1995,19 @@ export function queueOwnedMicrotask(
 ): void {
   pending(1);
   queueMicrotask(() => {
+    pending(-1);
+    operation();
+  });
+}
+
+/** Runs after listener-deferred public work while retaining cleanup ownership. */
+export function queueOwnedEventFollowup(
+  after: (operation: () => void) => Promise<void>,
+  pending: (delta: 1 | -1) => void,
+  operation: () => void
+): void {
+  pending(1);
+  void after(() => {
     pending(-1);
     operation();
   });

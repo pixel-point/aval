@@ -13,7 +13,7 @@ export default defineConfig({
   use: {
     baseURL,
     deviceScaleFactor: 1,
-    trace: "off",
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
     viewport: { width: 1280, height: 900 }
   },
@@ -23,12 +23,5 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 30_000
   },
-  projects: [
-    {
-      name: "chromium",
-      use: {
-        headless: false
-      }
-    }
-  ]
+  projects: [{ name: "chromium" }]
 });

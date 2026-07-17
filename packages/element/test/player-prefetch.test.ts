@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const media = vi.hoisted(() => ({
-  runs: [] as Array<{ label: number; closed: boolean; ready: boolean }>,
-  holding: null as { label: number; closed: boolean; ready: boolean } | null,
-  releaseBlocked: [] as Array<() => void>
+  runs: [] as Array<{
+    label: number;
+    closed: boolean;
+    ready: boolean;
+    taken: number[];
+  }>,
+  holding: null as {
+    label: number;
+    closed: boolean;
+    ready: boolean;
+    taken: number[];
+  } | null,
+  releaseBlocked: [] as Array<() => void>,
+  autoReleaseBlocked: true,
+  forceBlockedTransitions: false
 }));
 
 vi.mock("../src/asset.js", () => {
@@ -11,7 +23,11 @@ vi.mock("../src/asset.js", () => {
     body("idle-body", 0, 16),
     { id: "idle-intro", kind: "one-shot", frameCount: 2, chunks: [span(1)] },
     body("hover-body", 2, 16),
-    { id: "idle-hover", kind: "bridge", frameCount: 16, chunks: [span(3)] }
+    { id: "idle-hover", kind: "bridge", frameCount: 16, chunks: [span(3)] },
+    body("other-body", 4, 16),
+    { id: "idle-other", kind: "bridge", frameCount: 16, chunks: [span(5)] },
+    body("later-body", 6, 16),
+    { id: "idle-later", kind: "bridge", frameCount: 16, chunks: [span(7)] }
   ];
   const records = units.map((unit, index) => ({
     offset: 1_000 + index,
@@ -47,22 +63,54 @@ vi.mock("../src/asset.js", () => {
       initialState: "idle",
       states: [
         { id: "idle", bodyUnit: "idle-body", initialUnit: "idle-intro" },
-        { id: "hover", bodyUnit: "hover-body" }
+        { id: "hover", bodyUnit: "hover-body" },
+        { id: "other", bodyUnit: "other-body" },
+        { id: "later", bodyUnit: "later-body" }
       ],
-      edges: [{
-        id: "idle-hover-edge",
-        from: "idle",
-        to: "hover",
-        start: {
-          type: "portal",
-          sourcePort: "entry",
-          targetPort: "entry",
-          maxWaitFrames: 16
+      edges: [
+        {
+          id: "idle-hover-edge",
+          from: "idle",
+          to: "hover",
+          start: {
+            type: "portal",
+            sourcePort: "entry",
+            targetPort: "entry",
+            maxWaitFrames: 16
+          },
+          transition: { kind: "locked", unit: "idle-hover" },
+          trigger: { type: "event", name: "hover" },
+          continuity: "exact-authored"
         },
-        transition: { kind: "locked", unit: "idle-hover" },
-        trigger: { type: "event", name: "hover" },
-        continuity: "exact-authored"
-      }],
+        {
+          id: "idle-other-edge",
+          from: "idle",
+          to: "other",
+          start: {
+            type: "portal",
+            sourcePort: "entry",
+            targetPort: "entry",
+            maxWaitFrames: 16
+          },
+          transition: { kind: "locked", unit: "idle-other" },
+          trigger: { type: "event", name: "other" },
+          continuity: "exact-authored"
+        },
+        {
+          id: "idle-later-edge",
+          from: "idle",
+          to: "later",
+          start: {
+            type: "portal",
+            sourcePort: "later",
+            targetPort: "entry",
+            maxWaitFrames: 16
+          },
+          transition: { kind: "locked", unit: "idle-later" },
+          trigger: { type: "event", name: "later" },
+          continuity: "exact-authored"
+        }
+      ],
       bindings: [],
       readiness: { policy: "all-routes", bootstrapUnits: [], immediateEdges: [] },
       limits: {
@@ -107,7 +155,10 @@ vi.mock("../src/asset.js", () => {
       kind: "body",
       playback: "loop",
       frameCount,
-      ports: [{ id: "entry", entryFrame: 0, portalFrames: [0] }],
+      ports: [
+        { id: "entry", entryFrame: 0, portalFrames: [0] },
+        { id: "later", entryFrame: 0, portalFrames: [8] }
+      ],
       chunks: [span(chunkStart)]
     };
   }
@@ -127,12 +178,16 @@ vi.mock("../src/decoder.js", () => ({
     public createRun(samples: readonly { timestamp: number; displayedFrames: number }[]) {
       const label = samples[0]!.timestamp;
       const holds = label === 0 && media.holding === null;
-      const block = label === 300 && media.holding?.closed === false;
-      const tracked = { label, closed: false, ready: false };
+      const block = (label === 300 || label === 500 || label === 700) && (
+        media.forceBlockedTransitions || media.holding?.closed === false
+      );
+      const tracked = { label, closed: false, ready: false, taken: [] as number[] };
       media.runs.push(tracked);
       if (holds) media.holding = tracked;
+      let rejectReadiness: ((reason?: unknown) => void) | undefined;
       const readiness = block
-        ? new Promise<void>((resolve) => {
+        ? new Promise<void>((resolve, reject) => {
+            rejectReadiness = reject;
             media.releaseBlocked.push(() => {
               tracked.ready = true;
               resolve();
@@ -146,14 +201,21 @@ vi.mock("../src/decoder.js", () => ({
         outstanding: 0,
         closed: false,
         ready: () => readiness,
-        take: async (index: number) => ({ index }),
+        take: async (index: number) => {
+          tracked.taken.push(index);
+          return { index };
+        },
         release: () => undefined,
         complete: async () => undefined,
         close: () => {
+          if (tracked.closed) return;
           tracked.closed = true;
+          rejectReadiness?.(new DOMException("closed", "AbortError"));
           if (media.holding === tracked) {
             media.holding = null;
-            for (const release of media.releaseBlocked.splice(0)) release();
+            if (media.autoReleaseBlocked) {
+              for (const release of media.releaseBlocked.splice(0)) release();
+            }
           }
         }
       };
@@ -201,6 +263,8 @@ afterEach(() => {
   media.runs.length = 0;
   media.holding = null;
   media.releaseBlocked.length = 0;
+  media.autoReleaseBlocked = true;
+  media.forceBlockedTransitions = false;
   vi.unstubAllGlobals();
 });
 
@@ -284,6 +348,7 @@ describe("player multi-route prefetch", () => {
     });
     player.activate();
     await player.prepare();
+    await eventually(() => lastRun(0) !== undefined);
     const originalBody = lastRun(0)!;
     const bridgeRuns = media.runs.filter(({ label }) => label === 300).length;
     const request = player.setState("hover");
@@ -306,9 +371,100 @@ describe("player multi-route prefetch", () => {
       transitionStarted,
       `${events.join(",")}:${JSON.stringify(player.snapshot(true))}`
     ).toBe(true);
+    expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
+    expect(events).not.toContain("underflow");
 
     await player.dispose();
     await expect(request).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("holds same-boundary replacement and resumes before a later route", async () => {
+    vi.stubGlobal("Worker", class {});
+    vi.stubGlobal("VideoDecoder", class {});
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    media.autoReleaseBlocked = false;
+    media.forceBlockedTransitions = true;
+    const events: string[] = [];
+    const player = await createPlayer({
+      canvas: new EventTarget() as HTMLCanvasElement,
+      platform: testPlatform(),
+      initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
+      baseUrl: "https://example.test/",
+      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      credentials: "same-origin",
+      signal: new AbortController().signal,
+      preparationTimeoutMs: 5_000,
+      motion: "full",
+      reduced: false,
+      initialState: null,
+      initialBody: false,
+      visible: true,
+      decoderReady: () => true,
+      onResourceBytes: () => undefined,
+      onMetadata: () => undefined,
+      onReadiness: () => undefined,
+      onAnimationResourcesRetired: () => undefined,
+      onDraw: () => undefined,
+      onRestart: () => undefined,
+      onEvent: (type) => events.push(type),
+      onFailure: (code) => events.push(`failure:${code}`)
+    });
+    player.activate();
+    await player.prepare();
+    await eventually(() => lastRun(0) !== undefined);
+    const originalBody = lastRun(0)!;
+    const outgoing = player.setState("hover");
+    void outgoing.catch(() => undefined);
+    await eventually(() => lastRun(300) !== undefined);
+    await driveFrames(frames, () => originalBody.closed);
+    expect(originalBody.closed).toBe(true);
+    expect(lastRun(300)?.ready).toBe(false);
+    await driveFrames(frames, () => false, 4);
+    expect(events).not.toContain("underflow");
+
+    const replacement = player.setState("other");
+    void replacement.catch(() => undefined);
+    await eventually(() => lastRun(500) !== undefined);
+    await driveFrames(frames, () => false, 4);
+    expect(lastRun(500)?.ready).toBe(false);
+    expect(media.runs.filter(({ label }) => label === 0)).toHaveLength(1);
+    expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
+    expect(events).not.toContain("underflow");
+
+    const laterReplacement = player.setState("later");
+    void laterReplacement.catch(() => undefined);
+    await eventually(() => lastRun(700) !== undefined);
+    await driveFrames(frames, () => (
+      media.runs.filter(({ label }) => label === 0).length >= 2 &&
+      (lastRun(0)?.taken.length ?? 0) >= 2
+    ));
+    const resumed = lastRun(0)!;
+    expect(resumed).not.toBe(originalBody);
+    expect(resumed.taken.slice(0, 2)).toEqual([0, 1]);
+    expect(lastRun(700)?.ready).toBe(false);
+    expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
+    expect(events).not.toContain("underflow");
+
+    const returnToIdle = player.setState("idle");
+    await driveFrames(frames, () => false, 4);
+    await player.dispose();
+    const outcomes = await Promise.allSettled([
+      outgoing,
+      replacement,
+      laterReplacement,
+      returnToIdle
+    ]);
+    expect(outcomes.map(({ status }) => status)).toEqual([
+      "rejected",
+      "rejected",
+      "rejected",
+      "fulfilled"
+    ]);
   });
 
   it("buffers initial publications until activated with an authoritative graph", async () => {
@@ -367,9 +523,10 @@ function lastRun(label: number) {
 
 async function driveFrames(
   frames: FrameRequestCallback[],
-  complete: () => boolean
+  complete: () => boolean,
+  maximum = 40
 ): Promise<void> {
-  for (let attempt = 0; attempt < 40 && !complete(); attempt += 1) {
+  for (let attempt = 0; attempt < maximum && !complete(); attempt += 1) {
     await Promise.resolve();
     const frame = frames.shift();
     if (frame !== undefined) frame(performance.now() + 10_000 + attempt * 100);
