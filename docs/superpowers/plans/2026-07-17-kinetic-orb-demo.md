@@ -58,7 +58,7 @@ git commit -m "chore: scaffold kinetic orb example"
 
 - [ ] **Step 1: Write the deterministic scene generator**
 
-Create `generate_scene.py` with constants `FPS = 24`, `FRAME_END = 95`, `SIZE = 512`, named collections and materials, a central orb root, graphite shell, repeated emissive ribs, translucent core, inner marker, floor, camera, area lights, Eevee motion blur, and a world background.
+Create `generate_scene.py` with constants `FPS = 24`, `FRAME_END = 95`, `SIZE = 512`, named materials, a central orb root, graphite inner shell, repeated emissive ribs, inner markers, floor, camera, area lights, Eevee motion blur, and a world background.
 
 Use a frame-change handler that calculates each pose from the current source frame. The handler must derive rotation, core energy, rib energy, and marker energy from explicit unit-local functions, and it must preserve `15° / frame` rotation for frames 24–95.
 

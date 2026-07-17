@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en" class="scheme-only-dark antialiased">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <meta name="description" content="A frame-accurate interactive kinetic orb powered by AVAL.">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/style.css">
+    <title>AVAL · Kinetic orb</title>
+  </head>
+  <body class="min-w-0 bg-black font-sans text-white">
+    <main class="isolate min-h-svh overflow-hidden">
+      <div class="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_70%_38%,rgb(0_123_255/0.12),transparent_33%),radial-gradient(circle_at_45%_100%,rgb(0_80_180/0.08),transparent_40%)]" aria-hidden="true"></div>
+
+      <header class="relative border-b border-white/8">
+        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8">
+          <a class="rounded-sm font-medium tracking-tight text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300" href="/" aria-label="Homepage">
+            AVAL
+          </a>
+          <p class="font-mono text-base text-neutral-500 sm:text-sm">Interactive render / 01</p>
+        </div>
+      </header>
+
+      <section class="relative py-12 sm:py-16 lg:py-20" aria-labelledby="page-title">
+        <div class="mx-auto grid w-full max-w-6xl items-center gap-12 px-5 sm:px-8 lg:grid-cols-[5fr_7fr] lg:gap-16">
+          <div class="min-w-0">
+            <p class="font-mono text-base tracking-wide text-cyan-300 sm:text-sm">One frame to react</p>
+            <h1 id="page-title" class="max-w-[14ch] pt-5 text-balance text-5xl font-medium tracking-tight sm:text-6xl">
+              Motion that never waits.
+            </h1>
+            <p class="max-w-[40ch] pt-6 text-pretty text-lg text-neutral-400 sm:text-base">
+              The orb keeps rotating through every state. Hover or focus it to energize the inner core, then leave to watch it discharge without breaking momentum.
+            </p>
+
+            <div class="flex flex-wrap items-center gap-3 pt-8">
+              <p id="orb-state" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 py-2 pr-3 pl-2 text-base font-medium text-white sm:text-sm" role="status" aria-live="polite">
+                <span class="size-2 shrink-0 rounded-full bg-cyan-300 shadow-[0_0_16px_rgb(103_232_249/0.8)]" aria-hidden="true"></span>
+                <span data-state-label>loading</span>
+              </p>
+              <p class="text-base text-neutral-500 sm:text-sm">Hover or press Tab</p>
+            </div>
+          </div>
+
+          <div class="min-w-0">
+            <div class="relative overflow-hidden rounded-[min(4vw,32px)] bg-neutral-950 ring-1 ring-white/10 [--padding:--spacing(2)]">
+              <div class="pointer-events-none absolute inset-0 z-10 rounded-[calc(min(4vw,32px)-var(--padding))] ring-1 ring-inset ring-white/6" aria-hidden="true"></div>
+              <aval-player
+                id="kinetic-orb"
+                class="aspect-square size-full opacity-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
+                width="512"
+                height="512"
+                tabindex="0"
+                aria-label="Interactive kinetic orb. Hover or focus to energize its inner core."
+              >
+                <source src="%BASE_URL%kinetic-orb/h264.avl" type='application/vnd.aval; codecs="avc1.64001E"' integrity="sha256-zqnmkqzUO6GrZUqPhyxVPXgc7RW3B/Y3HYRy95cJ1rQ=">
+              </aval-player>
+              <div class="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-end justify-between bg-linear-to-t from-black/70 to-transparent p-5 pt-16 sm:p-6 sm:pt-20" aria-hidden="true">
+                <p class="font-mono text-base text-white/70 sm:text-sm">24 FPS · H.264</p>
+                <p class="font-mono text-base tabular-nums text-cyan-200 sm:text-sm">≤ 42 ms</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="relative border-t border-white/8 py-10 sm:py-12" aria-labelledby="timeline-title">
+        <div class="mx-auto w-full max-w-6xl px-5 sm:px-8">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <h2 id="timeline-title" class="text-balance text-xl font-medium text-white">One authored timeline</h2>
+            <p class="max-w-[56ch] text-pretty text-base text-neutral-500 sm:text-sm">Five exact ranges. Constant forward rotation after the intro.</p>
+          </div>
+
+          <dl class="grid pt-7 sm:grid-cols-5" data-timeline>
+            <div class="border-t border-white/8 py-5 sm:border-t-0 sm:border-l sm:px-5 sm:py-0 sm:first:border-l-0 sm:first:pl-0 sm:last:pr-0">
+              <dt class="font-mono text-base font-medium text-cyan-300 sm:text-sm">00–23</dt>
+              <dd class="pt-2 text-base text-neutral-400 sm:text-sm">Intro charge</dd>
+            </div>
+            <div class="border-t border-white/8 py-5 sm:border-t-0 sm:border-l sm:px-5 sm:py-0 sm:first:border-l-0 sm:first:pl-0 sm:last:pr-0">
+              <dt class="font-mono text-base font-medium text-white sm:text-sm">24–47</dt>
+              <dd class="pt-2 text-base text-neutral-400 sm:text-sm">Idle loop</dd>
+            </div>
+            <div class="border-t border-white/8 py-5 sm:border-t-0 sm:border-l sm:px-5 sm:py-0 sm:first:border-l-0 sm:first:pl-0 sm:last:pr-0">
+              <dt class="font-mono text-base font-medium text-white sm:text-sm">48–59</dt>
+              <dd class="pt-2 text-base text-neutral-400 sm:text-sm">Hover in</dd>
+            </div>
+            <div class="border-t border-white/8 py-5 sm:border-t-0 sm:border-l sm:px-5 sm:py-0 sm:first:border-l-0 sm:first:pl-0 sm:last:pr-0">
+              <dt class="font-mono text-base font-medium text-cyan-300 sm:text-sm">60–83</dt>
+              <dd class="pt-2 text-base text-neutral-400 sm:text-sm">Hover loop</dd>
+            </div>
+            <div class="border-t border-white/8 py-5 sm:border-t-0 sm:border-l sm:px-5 sm:py-0 sm:first:border-l-0 sm:first:pl-0 sm:last:pr-0">
+              <dt class="font-mono text-base font-medium text-white sm:text-sm">84–95</dt>
+              <dd class="pt-2 text-base text-neutral-400 sm:text-sm">Hover out</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

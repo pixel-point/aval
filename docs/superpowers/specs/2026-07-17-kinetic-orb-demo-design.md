@@ -8,7 +8,7 @@ The first version publishes only H.264. It is a visual and interaction proof, no
 
 ## Approved visual direction
 
-The scene is a square, near-black product shot centered on a graphite kinetic orb. The orb has twelve evenly spaced cyan emissive ribs, a dark faceted shell, a translucent inner sphere, and a small inner energy marker. A soft floor shadow, blue rim lighting, sparse atmospheric particles, bloom, and motion blur give the render depth without competing with the interaction.
+The scene is a square, near-black product shot centered on a graphite kinetic orb. The orb has twelve evenly spaced cyan emissive ribs, a smaller suspended graphite inner shell, and repeated inner energy markers. A soft floor reflection, blue rim lighting, emissive materials, and motion blur give the render depth without competing with the interaction. Blender 5.1's legacy compositor output node is not used, keeping the generated scene portable across its current background renderer.
 
 The animation language is:
 
