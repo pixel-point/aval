@@ -28,14 +28,16 @@ values match, and the compiler reports no warnings.
 The primary failure is decoder head-of-line blocking:
 
 1. A leave arrives while `hover-in` is active, making `hover-out` the required
-   follow-on route.
-2. Route preparation currently gives a speculative `entering → hover`
-   completion prefetch higher priority than that requested follow-on route.
-3. The 24-frame `hover-loop` starts on the serial decoder and fills the
-   12-frame output ring while parked. It cannot flush because no consumer is
-   draining it.
-4. The required `hover-out` run remains queued forever, while presentation is
-   held at the last `hover-in` frame.
+   pending or follow-on route.
+2. The speculative `entering → hover` completion has already prefetched
+   `hover-loop`. Reconciliation discards that parked run, but also immediately
+   requeues the same speculation behind the required route.
+3. Per-unit loading is asynchronous. The now-cached `hover-loop` reaches
+   `Decoder.createRun()` before the uncached required `hover-out`, regardless
+   of the order in which the player called `#queue()`.
+4. The 24-frame `hover-loop` fills the 12-frame output ring while parked. It
+   cannot flush because no consumer is draining it, so `hover-out` remains
+   queued forever and presentation holds at the last `hover-in` frame.
 
 Two ownership races can independently pin or diverge playback:
 
@@ -44,6 +46,11 @@ Two ownership races can independently pin or diverge playback:
 - a late `flushed` acknowledgement for a locally closed run is ignored before
   the decoder's active slot is released.
 
+Retiring the current decoder owner also creates a strict handoff boundary. If
+the player advances before the required replacement is ready, it attempts to
+draw from the locally closed run and surfaces an `AbortError`. The last already
+submitted frame must remain held until the replacement owns ready frames.
+
 The current broad `AbortError` suppression can hide graph/media divergence,
 and the waiter-only watchdog change converts the parked-run timeout from a
 visible error into an indefinite silent freeze. These changes address symptoms
@@ -51,17 +58,52 @@ rather than the scheduling invariant.
 
 ## Repair design
 
+The repair uses targeted extraction rather than another conditional patch in
+`PlayerImpl` or a playback-pipeline rewrite. Route planning, prepared-run
+admission, and decoder lifecycle certification become three separately tested
+units. The graph contract, serial decoder, renderer, and public element API stay
+unchanged.
+
 ### Route scheduling
 
 Requested and follow-on intent outranks speculative completion prefetch. When
-a newer required route exists, completion speculation must not start ahead of
-it. If a lower-priority parked run already owns the serial decoder, the player
-must close it and allow the required run to start.
+a newer required route exists, completion speculation is omitted rather than
+merely queued later: asynchronous asset loading means call order alone is not
+a decoder priority guarantee. If a lower-priority parked run already owns the
+serial decoder, the player closes it and allows only the required run to start.
 
 A non-consumed prefetch whose unit can exceed the available decoder ring must
 never be allowed to block a required route indefinitely. The implementation
 will encode this as a scheduling/ownership invariant rather than a
 kinetic-orb-specific frame-count exception.
+
+Route selection is a pure operation. `planRoutePrefetch()` receives a graph
+snapshot plus read-only manifest lookups and returns an ordered plan containing
+required route units, speculative completion units, and reversible units that
+need resident frames. It does not load bytes, close runs, or mutate player
+state. Pending and follow-on departures are both represented explicitly in the
+plan and outrank completion or loop speculation.
+
+A `PreparedRunScheduler` owns asynchronous byte loading and decoder admission.
+Byte loads may proceed concurrently, but decoder admission is serialized by the
+latest ordered plan: a ready speculative load cannot call `createRun()` while a
+higher-priority required load is unresolved. Reconciliation cancels removed
+loads and closes removed scheduler-owned runs. This makes decoder order a
+scheduler guarantee rather than a consequence of promise resolution timing.
+
+After retiring the active owner, advancement holds the last submitted frame
+until the required route reports ready. It does not mutate the graph or draw
+from the closed run during that handoff.
+
+The player separates these operations instead of combining them in a
+mode-bearing `prepareRoutes` method:
+
+- plan prefetch from the snapshot;
+- reconcile the scheduler and resident-frame requests;
+- retire an active run only when it blocks a required departure at its authored
+  boundary;
+- evaluate departure readiness and select `none`, `authored`, or
+  `decoder-handoff` hold behavior.
 
 ### Run ownership
 
@@ -70,13 +112,30 @@ synchronously, before any await. Reconciliation may discard only runs that are
 still wholly owned by prefetch. Once handed to active playback, the active
 consumer exclusively controls close and frame consumption.
 
+One scheduler entry is the source of truth for loading, admission, readiness,
+and ownership. A claim removes the entry synchronously and returns its run
+promise. There is no parallel map/set pair whose updates can diverge.
+
 ### Decoder terminal protocol
 
-Close, flush, and error acknowledgements are idempotent terminal signals. A
-terminal acknowledgement for the current active generation must always clear
-the active slot and schedule the next queued run, even when the local run has
-already been marked closed. Stale generations remain ignored without
-affecting the current owner.
+The host and worker share a closed, validated wire protocol. Commands and
+events use discriminated unions, positive generation identifiers, exact
+top-level shapes, and a global worker `error` event with no run identifier.
+Malformed traffic is terminal.
+
+Normal `flushed` and `closed` acknowledgements are idempotent retirement
+signals. An acknowledgement for the current closing generation clears the
+decoder lane and schedules the next queued run even when the local run is
+already closed. Worker errors are not acknowledgements: they are globally
+fatal because the single worker can no longer certify any queued run.
+
+Both sides use explicit lifecycle states rather than inferring protocol state
+from resource-retention collections or independent booleans. The host lane is
+idle, running, closing, or terminal. The worker is unconfigured, configuring,
+idle, ready, accepting, flushing, closing, or terminal. A monotonic retirement
+floor makes delayed close commands for any older generation harmless, not only
+for the most recently retired run. Impossible stale start, acceptance, or frame
+traffic remains a protocol failure; a transferred stale frame is closed first.
 
 ### Abort handling
 
@@ -96,7 +155,15 @@ Unit tests will cover:
 - synchronous transfer of a taken prefetch out of discardable ownership;
 - the exact `flush sent → local close → late flushed acknowledgement` order,
   proving that the queued run starts;
+- the inverse `flush pending → close wins → one closed acknowledgement` order;
+- delayed close for generations older than the most recently retired run;
+- strict rejection of stale nonterminal and malformed protocol traffic;
 - supersession without graph/media divergence or leaked decoder ownership.
+
+Pure planner/scheduler tests cover pending, follow-on, and speculative plans,
+including deliberately inverted byte-load completion. A small player
+integration test proves the planner is wired to the real graph boundary without
+recreating the complete graph, asset, decoder, and renderer stack in one fake.
 
 The kinetic-orb browser regression will use actual pointer hover and pointer
 leave, without compensating `send("hover.leave")` calls. It will run at least
@@ -110,6 +177,16 @@ leave, without compensating `send("hover.leave")` calls. It will run at least
 
 The test must fail if input events become unrouteable no-ops, so accepted event
 results and real automatic engagement routing are observed separately.
+
+The browser regression is split into artifact, interaction, and rapid-hover
+tests with shared black-box helpers. The rapid test verifies every generated
+pointer edge reached the public send boundary, then proves settlement,
+post-stress reuse, and consecutive rendered-frame progress. It does not assert
+private runtime trace record kinds.
+
+`npm run test:kinetic-orb` builds the graph and element distributions it serves,
+so a fresh checkout cannot accidentally test stale ignored output. Chromium is
+headless under CI, and a required CI job installs Chromium and runs the suite.
 
 ## Scope
 
