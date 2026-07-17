@@ -12,6 +12,13 @@ export class AvalNotReadyError extends Error {
   }
 }
 
+export class ElementCleanupIncompleteError extends Error {
+  public constructor() {
+    super("aval-player element cleanup was incomplete");
+    this.name = "OperationError";
+  }
+}
+
 export function avalAbortError(message = "aval-player operation was aborted"): Error {
   const error = new Error(message);
   error.name = "AbortError";

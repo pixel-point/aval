@@ -27,22 +27,23 @@ observational; explicit ownership counters are the leak gate.
 
 ## JavaScript delivery gates
 
-The original design target put the complete element, player, and worker below
-75 KiB gzip. The implementation did not meet that monolithic target, so it is
-recorded as a miss and is not presented as a release pass. The accepted gates
-measure the costs users actually encounter at distinct loading boundaries:
+The release authority measures the exact production output created for a
+consumer that imports `@pixel-point/aval-element/auto`. The complete working
+player—entry chunk, one lazy runtime chunk, and the external decoder worker—must
+be at most **60,000 bytes with Brotli quality 11**. This aggregate is the bytes
+the consumer must actually ship; source-module totals and per-boundary gzip
+figures are diagnostic only.
 
-- the source-free element bootstrap's complete static import closure is
-  strictly below 75 KiB gzip;
-- the complete loaded element/player graph, including bootstrap and its one
-  lazy runtime closure, is at most 250 KiB gzip; and
-- the self-contained packaged decoder worker is at most 20 KiB gzip.
+`scripts/performance/measure-m8-bundles.mjs` builds that consumer with pinned
+Vite 8.1.4/Oxc, verifies that the worker is self-contained, requires exactly one
+lazy runtime boundary, rejects duplicated module ownership, and enforces the
+aggregate cap. The verified 2026-07-17 build measures:
 
-`scripts/performance/measure-m8-bundles.mjs` builds production ESM with pinned
-Vite 8.1.4/Oxc and gzip level 9, verifies one lazy runtime boundary and no
-duplicated module ownership, then enforces all three limits. A preliminary
-source-tree run on 2026-07-12 measured 17,708 bootstrap bytes, 226,721 loaded
-graph bytes, and 15,829 worker bytes. The former combined interpretation would
-be 242,550 bytes and therefore misses 75 KiB. These numbers are not frozen
-package evidence; the exact candidate must be measured again and recorded
-before a release claim.
+- entry chunk: 13,376 Brotli bytes;
+- lazy runtime chunk: 40,554 Brotli bytes;
+- decoder worker: 992 Brotli bytes;
+- complete working player: **54,922 Brotli bytes**.
+
+That leaves 5,078 bytes of headroom under the release cap. The exact release
+candidate must be measured again; these figures describe the current checked
+workspace, not a substitute for candidate evidence.

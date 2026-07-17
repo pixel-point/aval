@@ -4,13 +4,6 @@
 
 ```ts
 
-import type { Binding } from '@pixel-point/aval-player-web';
-import type { MotionPolicy } from '@pixel-point/aval-player-web';
-import type { RuntimeFailureCode } from '@pixel-point/aval-player-web';
-import type { RuntimeReadiness } from '@pixel-point/aval-player-web';
-import type { RuntimeReadinessResult } from '@pixel-point/aval-player-web';
-import type { StaticReason } from '@pixel-point/aval-player-web';
-
 // @public (undocumented)
 export const AVAL_ELEMENT_API_MAJOR: 1;
 
@@ -320,7 +313,7 @@ export type AvalFit = "contain" | "cover" | "fill" | "none";
 export type AvalMode = "animated" | "static" | null;
 
 // @public (undocumented)
-export type AvalMotion = MotionPolicy;
+export type AvalMotion = "auto" | "reduce" | "full";
 
 // @public (undocumented)
 export class AvalNotReadyError extends Error {
@@ -337,6 +330,7 @@ export interface AvalPrepareOptions {
 
 // @public (undocumented)
 export interface AvalPublicFailure {
+    // Warning: (ae-forgotten-export) The symbol "RuntimeFailureCode" needs to be exported by the entry point index.d.ts
     // Warning: (ae-forgotten-export) The symbol "AvalElementFailureCode" needs to be exported by the entry point index.d.ts
     //
     // (undocumented)
@@ -491,16 +485,39 @@ export interface AvalVisualStateChangeDetail {
     readonly to: string;
 }
 
-export { Binding }
+// @public (undocumented)
+export interface Binding {
+    // (undocumented)
+    readonly event: string;
+    // Warning: (ae-forgotten-export) The symbol "BindingSource" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly source: BindingSource;
+}
 
 // @public (undocumented)
 export function defineAvalElement(): AvalElementConstructor;
 
-export { RuntimeReadiness }
+// @public (undocumented)
+export type RuntimeReadiness = "unready" | "metadataReady" | "visualReady" | "interactiveReady" | "staticReady" | "disposed" | "error";
 
-export { RuntimeReadinessResult }
+// @public (undocumented)
+export type RuntimeReadinessResult = {
+    readonly mode: "animated";
+    readonly assurance: "best-effort";
+    readonly report: Readonly<RuntimeReadinessReport>;
+} | {
+    readonly mode: "static";
+    readonly reason: StaticReason;
+    readonly report: Readonly<RuntimeReadinessReport>;
+};
 
-export { StaticReason }
+// @public (undocumented)
+export type StaticReason = "reduced-motion" | "no-video-rendition" | "worker-unavailable" | "renderer-unavailable" | "codec-unsupported" | "resource-budget" | "readiness-failed" | "preparation-timeout" | "animation-failure" | "fallback-failure" | "visibility-suspended" | "decoder-queued";
+
+// Warnings were encountered during analysis:
+//
+// dist/public-types.d.ts:66:5 - (ae-forgotten-export) The symbol "RuntimeReadinessReport" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

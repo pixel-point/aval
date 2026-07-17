@@ -579,13 +579,14 @@ function matchesDecodedBt709ColorSpace(
     (actual.matrix === null || actual.matrix === "bt709") &&
     (actual.primaries === null || actual.primaries === "bt709") &&
     (actual.transfer === null || actual.transfer === "bt709");
-  const webkitNormalized = actual.fullRange === true &&
+  const browserNormalized =
+    (actual.fullRange === false || actual.fullRange === true) &&
     actual.matrix === "bt709" &&
     actual.primaries === "bt709" &&
     actual.transfer === "iec61966-2-1";
-  if (!nonContradictory && !webkitNormalized) return false;
+  if (!nonContradictory && !browserNormalized) return false;
   if (expected === null) return true;
-  if (webkitNormalized) {
+  if (browserNormalized) {
     return expected.fullRange === false &&
       expected.matrix === "bt709" &&
       expected.primaries === "bt709" &&

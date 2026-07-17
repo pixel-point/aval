@@ -1,56 +1,37 @@
 import { describe, expect, it } from "vitest";
 
+import { ElementAttributeReflection } from "../src/element-attribute-reflection.js";
 import {
-  diffElementConfiguration,
   normalizeAutoplay,
+  normalizeAutoplayAttribute,
   normalizeBindings,
+  normalizeBindingsAttribute,
   normalizeCrossOrigin,
+  normalizeCrossOriginAttribute,
   normalizeFit,
+  normalizeFitAttribute,
   normalizeIntegrity,
   normalizeInteractionFor,
+  normalizeInteractionForAttribute,
   normalizeMotion,
+  normalizeMotionAttribute,
   normalizeSize,
+  normalizeSizeAttribute,
   normalizeSource,
   normalizeState,
-  readElementConfiguration
+  normalizeStateAttribute
 } from "../src/element-configuration.js";
 
 describe("element configuration", () => {
   it("normalizes the exact declarative defaults", () => {
-    const read = readElementConfiguration(() => null);
-    expect(read.configuration).toEqual({
-      sourceCandidates: [],
-      crossOrigin: "anonymous",
-      motion: "auto",
-      autoplay: "visible",
-      fit: null,
-      bindings: "auto",
-      state: null,
-      interactionFor: "",
-      width: null,
-      height: null
-    });
-    expect(read.failures).toEqual([]);
-  });
-
-  it("keeps retrieval identity limited to ordered source snapshots and credentials", () => {
-    const first = readElementConfiguration(
-      (name) => name === "state" ? "idle" : null,
-      sourceRead("/a.avl", "avc1.640028")
-    ).configuration;
-    const stateOnly = Object.freeze({ ...first, state: "active" });
-    expect(diffElementConfiguration(first, stateOnly)).toMatchObject({
-      retrievalIdentity: false,
-      state: true
-    });
-    expect(diffElementConfiguration(first, Object.freeze({
-      ...first,
-      crossOrigin: "use-credentials" as const
-    })).retrievalIdentity).toBe(true);
-    expect(diffElementConfiguration(first, Object.freeze({
-      ...first,
-      sourceCandidates: sourceRead("/b.avl", "avc1.640028").candidates
-    })).retrievalIdentity).toBe(true);
+    expect(normalizeCrossOriginAttribute(null)).toBe("anonymous");
+    expect(normalizeMotionAttribute(null)).toBe("auto");
+    expect(normalizeAutoplayAttribute(null)).toBe("visible");
+    expect(normalizeFitAttribute(null)).toBeNull();
+    expect(normalizeBindingsAttribute(null)).toBe("auto");
+    expect(normalizeStateAttribute(null)).toBeNull();
+    expect(normalizeInteractionForAttribute(null)).toBe("");
+    expect(normalizeSizeAttribute(null)).toBeNull();
   });
 
   it("enforces every closed property and bound", () => {
@@ -78,96 +59,43 @@ describe("element configuration", () => {
     expect(() => normalizeInteractionFor("x".repeat(257))).toThrow();
   });
 
-  it("accepts safe-integer size hints above the former element cap", () => {
-    const read = readElementConfiguration((name) => ({
-      width: "1048576",
-      height: String(Number.MAX_SAFE_INTEGER)
-    } as Record<string, string>)[name] ?? null);
-
-    expect(read.configuration).toMatchObject({
-      width: 1_048_576,
-      height: Number.MAX_SAFE_INTEGER
-    });
-    expect(read.failures).toEqual([]);
-
-    const padded = readElementConfiguration((name) =>
-      name === "width" ? "000000000000000001048576" : null
-    );
-    expect(padded.configuration.width).toBe(1_048_576);
-    expect(padded.failures).toEqual([]);
+  it("accepts safe-integer size attributes above the former element cap", () => {
+    expect(normalizeSizeAttribute("1048576")).toBe(1_048_576);
+    expect(normalizeSizeAttribute(String(Number.MAX_SAFE_INTEGER)))
+      .toBe(Number.MAX_SAFE_INTEGER);
+    expect(normalizeSizeAttribute("000000000000000001048576")).toBe(1_048_576);
   });
 
-  it("defaults hostile attributes and records bounded failures", () => {
-    const values: Record<string, string> = {
-      motion: "maybe",
-      crossorigin: "credentialed",
-      width: "1.5",
-      state: "<script>"
-    };
-    const read = readElementConfiguration((name) => values[name] ?? null);
-    expect(read.configuration).toMatchObject({
-      motion: "auto",
-      crossOrigin: "anonymous",
-      width: null,
-      state: null
-    });
-    expect(read.failures.map(({ attribute }) => attribute)).toEqual([
-      "crossorigin",
-      "motion",
-      "state",
-      "width"
+  it("rejects hostile reflected attribute values", () => {
+    expect(() => normalizeMotionAttribute("maybe")).toThrow();
+    expect(() => normalizeCrossOriginAttribute("credentialed")).toThrow();
+    expect(() => normalizeSizeAttribute("1.5")).toThrow();
+    expect(() => normalizeStateAttribute("<script>")).toThrow();
+  });
+
+  it("keeps reflected getters safe when markup contains hostile values", () => {
+    const values = new Map<string, string>([
+      ["motion", "maybe"],
+      ["crossorigin", "credentialed"],
+      ["width", "1.5"],
+      ["state", "<script>"]
     ]);
+    const host = {
+      getAttribute: (name: string) => values.get(name) ?? null,
+      setAttribute: (name: string, value: string) => { values.set(name, value); },
+      removeAttribute: (name: string) => { values.delete(name); }
+    } as unknown as HTMLElement;
+    const reflection = new ElementAttributeReflection(host);
+
+    expect(reflection.motion).toBe("auto");
+    expect(reflection.crossOrigin).toBe("anonymous");
+    expect(reflection.width).toBeNull();
+    expect(reflection.state).toBeNull();
   });
 
-  it("publishes frozen source snapshots and source-local failure identities", () => {
-    const mutableCandidate = {
-      src: "/a.avl",
-      type: 'application/vnd.aval; codecs="avc1.640028"' as const,
-      codec: "avc1.640028",
-      integrity: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    };
-    const read = readElementConfiguration(() => null, {
-      candidates: [mutableCandidate],
-      failures: [
-        { sourceIndex: 1, attribute: "type", code: "invalid-configuration" }
-      ]
-    });
-
-    mutableCandidate.src = "/mutated.avl";
-    expect(read.configuration.sourceCandidates[0]?.src).toBe("/a.avl");
-    expect(Object.isFrozen(read.configuration.sourceCandidates)).toBe(true);
-    expect(Object.isFrozen(read.configuration.sourceCandidates[0])).toBe(true);
-    expect(read.failures).toEqual([{
-      attribute: "source[1].type",
-      code: "invalid-configuration"
-    }]);
-  });
-
-  it("rejects huge host scalar attributes without numeric conversion", () => {
+  it("rejects huge host scalars before numeric conversion", () => {
     const huge = "9".repeat(1_048_576);
-    const read = readElementConfiguration((name) => ({
-      motion: huge,
-      width: huge
-    } as Record<string, string>)[name] ?? null);
-    expect(read.configuration).toMatchObject({
-      motion: "auto",
-      width: null
-    });
-    expect(read.failures.map(({ attribute }) => attribute)).toEqual([
-      "motion",
-      "width"
-    ]);
+    expect(() => normalizeMotionAttribute(huge)).toThrow();
+    expect(() => normalizeSizeAttribute(huge)).toThrow();
   });
 });
-
-function sourceRead(src: string, codec: string) {
-  return Object.freeze({
-    candidates: Object.freeze([Object.freeze({
-      src,
-      type: `application/vnd.aval; codecs="${codec}"` as const,
-      codec,
-      integrity: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    })]),
-    failures: Object.freeze([])
-  });
-}

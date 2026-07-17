@@ -261,7 +261,7 @@ Expected: new formerly-over-limit cases pass, ordinary fixtures remain stable, a
 - Modify: `packages/player-web/src/runtime/browser-static-canvas-plane.ts`
 - Modify: `packages/player-web/src/runtime/frame-renderer-browser.ts`
 - Modify: `packages/player-web/src/runtime/browser-presentation-planes.ts`
-- Modify: `packages/element/src/browser-runtime-factory.ts`
+- Verify: the public element's exact-geometry presentation and fallback behavior
 - Test: corresponding `*.test.ts` files in `packages/player-web/src/runtime/` and `packages/player-web/src/experimental/`
 
 - [x] **Step 1: Add failing runtime policy tests**

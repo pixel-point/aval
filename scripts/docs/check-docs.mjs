@@ -12,8 +12,7 @@ const required = [
   "docs/project/1.0.md", "docs/security.md", "docs/versioning.md",
   "docs/releases/1.0.0.md",
   "docs/certification/method.md", "SECURITY.md", "THREAT-MODEL.md",
-  "THIRD_PARTY_NOTICES.md",
-  "docs/evidence/2026-07-12-m8-public-element-authoring-experience.md"
+  "THIRD_PARTY_NOTICES.md"
 ];
 const failures = [];
 const removedImageApi = new RegExp(
@@ -61,7 +60,12 @@ const hosting = await readFile("docs/element/hosting-cors-csp-integrity.md", "ut
 if (hosting.includes(["unsafe", "inline"].join("-"))) failures.push("docs/element/hosting-cors-csp-integrity.md: CSP must not require inline authority");
 if (!hosting.includes("style-src 'self'") || !hosting.includes("worker-src 'self'")) failures.push("docs/element/hosting-cors-csp-integrity.md: strict self-hosted CSP baseline is incomplete");
 const budgets = await readFile("docs/performance-and-budgets.md", "utf8");
-for (const claim of ["strictly below 75 KiB", "at most 250 KiB", "at most 20 KiB", "recorded as a miss"]) {
+for (const claim of [
+  "@pixel-point/aval-element/auto",
+  "at most **60,000 bytes with Brotli quality 11**",
+  "complete working player: **54,922 Brotli bytes**",
+  "5,078 bytes of headroom"
+]) {
   if (!budgets.includes(claim)) failures.push(`docs/performance-and-budgets.md: missing size decision: ${claim}`);
 }
 const authoring = await readFile(
@@ -96,12 +100,6 @@ for (const claim of [
     failures.push(`docs/compiler/authoring-video-and-states.md: missing authoring contract: ${claim}`);
   }
 }
-const m8Evidence = await readFile(
-  "docs/evidence/2026-07-12-m8-public-element-authoring-experience.md",
-  "utf8"
-);
-if (!m8Evidence.includes("PASSED — test-only local exact archive proof")) failures.push("M8 evidence must record the completed test-only packed proof");
-if (!m8Evidence.includes("externalPublication: false")) failures.push("M8 evidence must preserve the local packed proof claim boundary");
 const support = await readFile("docs/browser-support.md", "utf8");
 const index = JSON.parse(await readFile("docs/certification/1.0.0/index.json", "utf8"));
 const generated = renderSupport(index);

@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { build as viteBuild, preview as vitePreview } from "vite";
 
+import { ELEMENT_RELEASE_WORKER } from "./element-release-contract.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const packageDirectory = resolve(root, option("--packages") ?? "artifacts/1.0.0/packages");
 const policy = JSON.parse(await readFile(
@@ -33,6 +35,9 @@ const expectedCodecPrefixes = Object.freeze({
   h265: "hvc1.",
   h264: "avc1."
 });
+const STRICT_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; " +
+  "connect-src 'self'; worker-src 'self'; img-src 'self'; object-src 'none'; " +
+  "base-uri 'none'; frame-ancestors 'none'";
 const archives = (await readdir(packageDirectory))
   .filter((name) => name.endsWith(".tgz"))
   .sort()
@@ -147,7 +152,12 @@ try {
     root: project,
     configFile: false,
     logLevel: "silent",
-    preview: { host: "127.0.0.1", port: 0, strictPort: true }
+    preview: {
+      host: "127.0.0.1",
+      port: 0,
+      strictPort: true,
+      headers: { "Content-Security-Policy": STRICT_CSP }
+    }
   });
   const starterUrl = viteServer.resolvedUrls?.local[0];
   assert(typeof starterUrl === "string" && /^http:\/\/127\.0\.0\.1:[0-9]+\/$/u.test(starterUrl), "generated production starter preview omitted its loopback URL");
@@ -157,7 +167,14 @@ try {
   await installWorkerEvidence(starterContext);
   const starterPage = await starterContext.newPage();
   const starterFailures = monitorBrowser(starterPage, starterUrl, [root, project]);
-  await starterPage.goto(starterUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  const starterResponse = await starterPage.goto(starterUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000
+  });
+  assert(
+    starterResponse?.headers()["content-security-policy"] === STRICT_CSP,
+    "generated production starter preview omitted its strict CSP"
+  );
   await assertPinnedChromiumCapabilities(starterPage);
   await waitForElementReady(starterPage, "interactiveReady");
   const starterSnapshot = await publicSnapshot(starterPage);
@@ -323,7 +340,7 @@ async function verifyInstalledGraph(projectRoot, version) {
     graph: [],
     format: ["graph"],
     "player-web": ["graph", "format"],
-    element: ["player-web"],
+    element: ["graph"],
     compiler: ["graph", "format", "player-web", "element"]
   };
   for (const [name, expected] of Object.entries(expectedDependencies)) {
@@ -343,9 +360,9 @@ async function verifyHttpSurface(url, build, forbiddenPaths) {
   const moduleResponse = await checkedFetch(new URL("modules/element/auto.js", url));
   assert(moduleResponse.status === 200, `packed element module returned ${moduleResponse.status}`);
   const moduleText = await moduleResponse.text();
-  const workerResponse = await checkedFetch(new URL("modules/player-web/decoder-worker/entry.js", url));
-  assert(workerResponse.status === 200, `packed decoder worker entry returned ${workerResponse.status}`);
-  assert(workerResponse.headers.get("content-security-policy")?.includes("default-src 'none'") === true, "packed decoder worker entry omitted its closed CSP");
+  const workerResponse = await checkedFetch(new URL(`modules/element/${ELEMENT_RELEASE_WORKER.output}`, url));
+  assert(workerResponse.status === 200, `packed element decoder worker returned ${workerResponse.status}`);
+  assert(workerResponse.headers.get("content-security-policy")?.includes("default-src 'none'") === true, "packed element decoder worker omitted its closed CSP");
   const workerText = await workerResponse.text();
   const originRoot = new URL("/", url);
   const unscoped = await checkedFetch(originRoot);
@@ -400,7 +417,7 @@ function monitorBrowser(page, baseUrl, forbiddenPaths = []) {
     consoleErrors.push(`${message.text()}${location === "" ? "" : ` (${location})`}`);
   });
   page.on("response", (response) => {
-    if (response.request().resourceType() === "worker" || response.url().includes("/decoder-worker/entry.js")) workerResponses.push({ status: response.status(), url: response.url() });
+    if (response.request().resourceType() === "worker" || response.url().includes(`/${ELEMENT_RELEASE_WORKER.output}`)) workerResponses.push({ status: response.status(), url: response.url() });
     if (response.status() >= 400 && !response.url().endsWith("/favicon.ico")) {
       failedResponses.push(`${String(response.status())} ${response.url()}`);
     }

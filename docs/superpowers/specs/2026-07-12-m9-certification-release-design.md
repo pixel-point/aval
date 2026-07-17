@@ -12,7 +12,7 @@ slice
 - [M5.5 Integrated Scheduler and Readiness Design](2026-07-12-m55-integrated-scheduler-readiness-design.md)
 - [M6 Transparency and Static Fallback Design](2026-07-12-m6-transparency-static-fallback-design.md)
 - [M7 Loader, Integrity, and Resource Manager Design](2026-07-12-m7-loader-integrity-resource-manager-design.md)
-- [M8 Public Element and Authoring Experience Design](2026-07-12-m8-public-element-authoring-experience-design.md)
+- [Public element contract](../../element-api.md)
 
 ## 1. Outcome and Claim Boundary
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 import { validatePublishManifest } from "./publish-manifest.mjs";
+import { ELEMENT_RELEASE_WORKER } from "./element-release-contract.mjs";
 
 const TAR_BLOCK_BYTES = 512;
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -149,12 +150,14 @@ function validatePackageContents(entries, manifest, label) {
   for (const required of ["package/package.json", "package/README.md", "package/LICENSE", "package/THIRD_PARTY_NOTICES.md", "package/dist/index.js", "package/dist/index.d.ts"]) {
     if (!filePaths.has(required)) throw new Error(`${label} is missing ${required.slice("package/".length)}`);
   }
-  const specialEntry = {
+  const specialEntries = {
     "@pixel-point/aval-compiler": "package/dist/cli.js",
     "@pixel-point/aval-player-web": "package/dist/decoder-worker/entry.js",
-    "@pixel-point/aval-element": "package/dist/auto.js"
+    "@pixel-point/aval-element": ["package/dist/auto.js", `package/dist/${ELEMENT_RELEASE_WORKER.output}`]
   }[manifest.name];
-  if (specialEntry !== undefined && !filePaths.has(specialEntry)) throw new Error(`${label} is missing ${specialEntry.slice("package/".length)}`);
+  for (const specialEntry of Array.isArray(specialEntries) ? specialEntries : specialEntries === undefined ? [] : [specialEntries]) {
+    if (!filePaths.has(specialEntry)) throw new Error(`${label} is missing ${specialEntry.slice("package/".length)}`);
+  }
   validateTargets(manifest.exports, "exports", filePaths, manifest.name);
   validateTargets(manifest.bin, "bin", filePaths, manifest.name);
 }

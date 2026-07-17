@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { inspectTarballBytes } from "../../scripts/release/inspect-tarball.mjs";
+import { ELEMENT_RELEASE_WORKER } from "../../scripts/release/element-release-contract.mjs";
 import { validatePublishManifest } from "../../scripts/release/publish-manifest.mjs";
 import {
   RELEASE_PACKAGE_NAMES,
@@ -23,9 +24,9 @@ describe("verified five-package release set", () => {
   it("derives the one safe publication order and rejects graph drift", () => {
     expect(RELEASE_PACKAGE_NAMES).toEqual([
       "@pixel-point/aval-graph",
+      "@pixel-point/aval-element",
       "@pixel-point/aval-format",
       "@pixel-point/aval-player-web",
-      "@pixel-point/aval-element",
       "@pixel-point/aval-compiler"
     ]);
     expect(RELEASE_PACKAGE_SPECS.map(({ directory }) => directory)).toEqual(["graph", "format", "player-web", "element", "compiler"]);
@@ -116,6 +117,12 @@ describe("bounded tar inspection", () => {
       ...baseEntries(manifest),
       { path: "package/dist/private.ts", bytes: Buffer.from("export {};\n") }
     ]))).toThrow(/TypeScript source/u);
+  });
+
+  it("rejects an element archive that omits its URL-referenced worker", () => {
+    const manifest = packageManifest("@pixel-point/aval-element", ["@pixel-point/aval-graph"]);
+    const withoutWorker = baseEntries(manifest).filter(({ path }) => path !== `package/dist/${ELEMENT_RELEASE_WORKER.output}`);
+    expect(() => inspectTarballBytes(tarGzip(withoutWorker))).toThrow(new RegExp(`missing dist/${ELEMENT_RELEASE_WORKER.output.replace(".", "\\.")}`, "u"));
   });
 
   it("rejects lifecycle hooks, publish redirection, and decompression bombs", () => {
@@ -221,7 +228,8 @@ function baseEntries(manifest: TestManifest): TarEntry[] {
   if (manifest.name === "@pixel-point/aval-player-web") entries.push({ path: "package/dist/decoder-worker/entry.js", bytes: Buffer.from("export {};\n") });
   if (manifest.name === "@pixel-point/aval-element") entries.push(
     { path: "package/dist/auto.js", bytes: Buffer.from("export {};\n") },
-    { path: "package/dist/auto.d.ts", bytes: Buffer.from("export {};\n") }
+    { path: "package/dist/auto.d.ts", bytes: Buffer.from("export {};\n") },
+    { path: `package/dist/${ELEMENT_RELEASE_WORKER.output}`, bytes: Buffer.from("export {};\n") }
   );
   return entries;
 }

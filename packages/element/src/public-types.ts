@@ -1,12 +1,3 @@
-import type {
-  Binding,
-  MotionPolicy,
-  RuntimeFailureCode,
-  RuntimeReadiness,
-  RuntimeReadinessResult,
-  StaticReason
-} from "@pixel-point/aval-player-web";
-
 export const AVAL_TAG_NAME = "aval-player" as const;
 export const AVAL_ELEMENT_API_MAJOR = 1 as const;
 
@@ -14,8 +5,126 @@ export type AvalAutoplay = "visible" | "manual";
 export type AvalBindings = "auto" | "none";
 export type AvalCrossOrigin = "anonymous" | "use-credentials";
 export type AvalFit = "contain" | "cover" | "fill" | "none";
-export type AvalMotion = MotionPolicy;
+export type AvalMotion = "auto" | "reduce" | "full";
 export type AvalMode = "animated" | "static" | null;
+
+export type BindingSource =
+  | "activate"
+  | "engagement.off"
+  | "engagement.on"
+  | "focus.in"
+  | "focus.out"
+  | "hidden"
+  | "pointer.enter"
+  | "pointer.leave"
+  | "visible";
+
+export interface Binding {
+  readonly source: BindingSource;
+  readonly event: string;
+}
+
+export type RuntimeReadiness =
+  | "unready"
+  | "metadataReady"
+  | "visualReady"
+  | "interactiveReady"
+  | "staticReady"
+  | "disposed"
+  | "error";
+
+export type StaticReason =
+  | "reduced-motion"
+  | "no-video-rendition"
+  | "worker-unavailable"
+  | "renderer-unavailable"
+  | "codec-unsupported"
+  | "resource-budget"
+  | "readiness-failed"
+  | "preparation-timeout"
+  | "animation-failure"
+  | "fallback-failure"
+  | "visibility-suspended"
+  | "decoder-queued";
+
+export type RuntimeFailureCode =
+  | "invalid-asset"
+  | "load-failure"
+  | "range-response-invalid"
+  | "entity-changed"
+  | "integrity-mismatch"
+  | "unsupported-profile"
+  | "resource-rejection"
+  | "readiness-failure"
+  | "worker-decode-failure"
+  | "renderer-failure"
+  | "context-loss"
+  | "watchdog-timeout"
+  | "underflow"
+  | "abort"
+  | "disposed";
+
+interface RuntimeFailureContext {
+  readonly rendition?: string;
+  readonly profile?: string;
+  readonly codec?: string;
+  readonly unit?: string;
+  readonly state?: string;
+  readonly edge?: string;
+  readonly path?: string;
+  readonly operation?: string;
+  readonly sourceCode?: string;
+  readonly sourcePath?: string;
+  readonly alphaStatistic?: string;
+  readonly policyPhase?: string;
+  readonly lifecyclePhase?: string;
+  readonly offset?: number;
+  readonly width?: number;
+  readonly height?: number;
+  readonly generation?: number;
+  readonly ordinal?: number;
+  readonly decodeIndex?: number;
+  readonly localFrame?: number;
+  readonly rank?: number;
+  readonly requestOrdinal?: number;
+  readonly httpStatus?: number;
+  readonly expectedBytes?: number;
+  readonly observedBytes?: number;
+  readonly declaredTotalBytes?: number;
+  readonly playerBytes?: number;
+  readonly pageBytes?: number;
+}
+
+interface RuntimeFailure {
+  readonly code: RuntimeFailureCode;
+  readonly message: string;
+  readonly context: Readonly<RuntimeFailureContext>;
+}
+
+interface RuntimeCandidateReport {
+  readonly rendition: string;
+  readonly rank: number;
+  readonly outcome: "eligible" | "selected" | "rejected";
+  readonly failure: Readonly<RuntimeFailure> | null;
+}
+
+interface RuntimeReadinessReport {
+  readonly readiness: "interactiveReady" | "staticReady";
+  readonly selectedRendition: string | null;
+  readonly candidates: readonly Readonly<RuntimeCandidateReport>[];
+}
+
+export type RuntimeReadinessResult =
+  | {
+      readonly mode: "animated";
+      readonly assurance: "best-effort";
+      readonly report: Readonly<RuntimeReadinessReport>;
+    }
+  | {
+      readonly mode: "static";
+      readonly reason: StaticReason;
+      readonly report: Readonly<RuntimeReadinessReport>;
+    };
 
 export interface AvalSourceCandidate {
   readonly src: string;
@@ -396,10 +505,3 @@ declare global {
     "aval-player": AvalElement;
   }
 }
-
-export type {
-  Binding,
-  RuntimeReadiness,
-  RuntimeReadinessResult,
-  StaticReason
-};

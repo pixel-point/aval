@@ -126,6 +126,43 @@ describe("codec-neutral decoder worker", () => {
     }
   );
 
+  it.each([
+    ["Chromium", false],
+    ["WebKit", true]
+  ] as const)(
+    "accepts %s sRGB transfer normalization of limited BT.709",
+    (_browser, fullRange) => {
+      const frame = decodedFrame({
+        fullRange,
+        matrix: "bt709",
+        primaries: "bt709",
+        transfer: "iec61966-2-1"
+      });
+
+      expect(validateDecodedFrame(frame, {
+        ...expectedOutput(),
+        colorSpace: {
+          fullRange: false,
+          matrix: "bt709",
+          primaries: "bt709",
+          transfer: "bt709"
+        }
+      }, 0, 1_000)).toBe(16);
+    }
+  );
+
+  it("rejects contradictory metadata with an sRGB transfer normalization", () => {
+    const frame = decodedFrame({
+      fullRange: false,
+      matrix: "bt709",
+      primaries: "smpte170m",
+      transfer: "iec61966-2-1"
+    });
+
+    expect(() => validateDecodedFrame(frame, expectedOutput(), 0, 1_000))
+      .toThrow(/color space/iu);
+  });
+
   it("probes before configuration without consuming configure-once state", async () => {
     const fixture = createFixture("vp9", 8);
     await fixture.handle({
@@ -600,6 +637,19 @@ function expectedOutput() {
     visibleRect: { x: 0, y: 0, width: 2, height: 2 },
     colorSpace: null
   } as const;
+}
+
+function decodedFrame(colorSpace: VideoColorSpaceInit): VideoFrame {
+  return {
+    timestamp: 0,
+    duration: 1_000,
+    codedWidth: 2,
+    codedHeight: 2,
+    displayWidth: 2,
+    displayHeight: 2,
+    visibleRect: { x: 0, y: 0, width: 2, height: 2 },
+    colorSpace
+  } as unknown as VideoFrame;
 }
 
 function limits(

@@ -3,40 +3,57 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  RuntimePlaybackError,
-  normalizeRuntimeFailure
-} from "@pixel-point/aval-player-web";
-
-import { normalizePublicFailure } from "../src/public-failure.js";
+  publicFailureCode,
+  readSources
+} from "../src/aval-element.js";
 
 describe("element trust boundary", () => {
-  it("never copies raw thrown text or secret transport data", () => {
+  it("never copies secret transport data into source failures", () => {
     const secret = "https://user:password@example.test/private.avl?token=SECRET";
-    const failure = normalizePublicFailure(new Error(secret));
-    expect(JSON.stringify(failure)).not.toContain("SECRET");
-    expect(JSON.stringify(failure)).not.toContain("password");
-    expect(Object.isFrozen(failure)).toBe(true);
+    const source = {
+      nodeType: 1,
+      localName: "source",
+      namespaceURI: "http://www.w3.org/1999/xhtml",
+      parentElement: null,
+      getAttribute: (name: string) => ({
+        src: secret,
+        type: "video/mp4",
+        integrity: "sha256-secret"
+      })[name] ?? null
+    } as unknown as Element;
+    const read = readSources({
+      children: {
+        length: 1,
+        item: () => source
+      } as unknown as HTMLCollection
+    } as HTMLElement);
+    expect(read.sources).toEqual([]);
+    expect(read.failures).toEqual([
+      { sourceIndex: 0, attribute: "type" },
+      { sourceIndex: 0, attribute: "integrity" }
+    ]);
+    expect(JSON.stringify(read.failures)).not.toContain("SECRET");
+    expect(JSON.stringify(read.failures)).not.toContain("password");
+    expect(Object.isFrozen(read.failures)).toBe(true);
   });
 
-  it("preserves a thrown runtime failure code without copying its cause", () => {
-    const runtime = new RuntimePlaybackError(normalizeRuntimeFailure(
-      "load-failure",
-      new Error("https://example.test/private.avl?token=SECRET"),
-      { operation: "open-asset" }
-    ));
-    expect(normalizePublicFailure(runtime)).toEqual({
-      code: "load-failure",
-      message: "AVAL operation failed (load-failure)",
-      operation: "open-asset"
-    });
+  it("maps internal failures only onto documented public codes", () => {
+    expect(publicFailureCode("load-failure")).toBe("load-failure");
+    expect(publicFailureCode("resource-budget")).toBe("resource-rejection");
+    expect(publicFailureCode("animation-failure")).toBe("worker-decode-failure");
+    expect(publicFailureCode("fallback-failure")).toBe("renderer-failure");
   });
 
   it("does not use generated markup, dynamic code, video seeking, or console hooks", async () => {
     const root = resolve(process.cwd(), "packages/element/src");
     const files = [
       "aval-element.ts",
+      "player.ts",
+      "decoder.ts",
+      "decoder-worker.ts",
+      "renderer.ts",
       "shadow-layers.ts",
-      "browser-runtime-factory.ts"
+      "shadow-style.ts"
     ];
     const source = (await Promise.all(files.map((file) =>
       readFile(resolve(root, file), "utf8")

@@ -11,6 +11,7 @@ import { prepareImmutableReleaseSetOutput } from "./immutable-release-output.mjs
 import { createPublishManifest } from "./publish-manifest.mjs";
 import { validateApprovedPublicationMetadata } from "./publication-metadata.mjs";
 import { buildFreshPublicDistributions } from "./fresh-public-build.mjs";
+import { ELEMENT_RELEASE_WORKER } from "./element-release-contract.mjs";
 import { computeReleaseSetDigest, loadVerifiedReleaseSet, releasePackageDirectory, releaseSetSummary, validateReleasePackageManifests, validateReleasePolicy } from "./release-set.mjs";
 import { assertTestOnlyArchiveOutput, testOnlyPublicationMetadata } from "./test-only-archive-proof.mjs";
 
@@ -56,7 +57,10 @@ try {
         requireEntry(copied, "cli.js", name);
         await chmod(join(staging, "dist", "cli.js"), 0o755);
       }
-      if (name === "@pixel-point/aval-element") requireEntry(copied, "auto.js", name);
+      if (name === "@pixel-point/aval-element") {
+        requireEntry(copied, "auto.js", name);
+        requireEntry(copied, ELEMENT_RELEASE_WORKER.output, name);
+      }
       if (name === "@pixel-point/aval-player-web") requireEntry(copied, "decoder-worker/entry.js", name);
       const first = join(work, "first", short);
       const second = join(work, "second", short);

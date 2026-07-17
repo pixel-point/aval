@@ -4,10 +4,11 @@ import { describe, expect, it } from "vitest";
 
 describe("accessibility contract", () => {
   it("does not inject control semantics or keyboard activation", async () => {
-    const source = await readFile(
-      resolve(process.cwd(), "packages/element/src/aval-element.ts"),
-      "utf8"
-    );
+    const root = resolve(process.cwd(), "packages/element/src");
+    const source = (await Promise.all([
+      "aval-element.ts",
+      "shadow-layers.ts"
+    ].map((file) => readFile(resolve(root, file), "utf8")))).join("\n");
     for (const prohibited of [
       "keydown",
       "keyup",

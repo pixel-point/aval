@@ -1,9 +1,16 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "composite": false,
+    "incremental": true,
     "emitDeclarationOnly": false,
     "declarationMap": false,
     "sourceMap": false,
     "tsBuildInfoFile": "dist/element.release.tsbuildinfo"
-  }
+  },
+  "files": [
+    "src/index.ts",
+    "src/auto.ts"
+  ],
+  "include": []
 }

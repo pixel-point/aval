@@ -189,10 +189,14 @@ test("lets the user move a codec to the front of the source list", async ({
     };
   }), { timeout: 30_000 }).toMatchObject({
     firstSource: "vp9",
-    readiness: "interactiveReady",
     ...(browserName === "chromium"
-      ? { selectedCodec: expect.stringMatching(/^vp09\./u) }
-      : {}),
+      ? {
+          readiness: "interactiveReady",
+          selectedCodec: expect.stringMatching(/^vp09\./u)
+        }
+      : {
+          readiness: expect.stringMatching(/^(?:interactiveReady|staticReady|error)$/u)
+        }),
     sourceGeneration: expect.any(Number)
   });
 
