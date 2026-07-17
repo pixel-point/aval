@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -8,6 +9,7 @@ const EXAMPLE_PATH = resolve("examples/kinetic-orb");
 const PROJECT_PATH = resolve(EXAMPLE_PATH, "motion.json");
 const BUILD_PATH = resolve(EXAMPLE_PATH, "public/kinetic-orb/build.json");
 const ASSET_PATH = resolve(EXAMPLE_PATH, "public/kinetic-orb/h264.avl");
+const HTML_PATH = resolve(EXAMPLE_PATH, "index.html");
 
 test("preserves the phase-locked H.264 graph", async () => {
   const project = JSON.parse(await readFile(PROJECT_PATH, "utf8")) as {
@@ -23,9 +25,16 @@ test("preserves the phase-locked H.264 graph", async () => {
     }[];
   };
   const report = JSON.parse(await readFile(BUILD_PATH, "utf8")) as {
-    assets: { codec: string; path: string; bytes: number }[];
+    assets: {
+      codec: string;
+      path: string;
+      bytes: number;
+      integrity: string;
+      sha256: string;
+    }[];
   };
-  const bytes = new Uint8Array(await readFile(ASSET_PATH));
+  const bytes = await readFile(ASSET_PATH);
+  const html = await readFile(HTML_PATH, "utf8");
   const front = parseFrontIndex(bytes);
 
   expect(project.encodings.map(({ codec }) => codec)).toEqual(["h264"]);
@@ -53,6 +62,10 @@ test("preserves the phase-locked H.264 graph", async () => {
   expect(report.assets).toHaveLength(1);
   expect(report.assets[0]).toMatchObject({ codec: "h264", path: "h264.avl" });
   expect(report.assets[0]?.bytes).toBe(bytes.byteLength);
+  const digest = createHash("sha256").update(bytes).digest();
+  expect(report.assets[0]?.sha256).toBe(digest.toString("hex"));
+  expect(report.assets[0]?.integrity).toBe(`sha256-${digest.toString("base64")}`);
+  expect(html).toContain(`integrity="${report.assets[0]?.integrity}"`);
   expect(front.manifest.canvas).toMatchObject({ width: 512, height: 512 });
   expect(front.manifest.frameRate).toEqual({ numerator: 24, denominator: 1 });
   expect(front.manifest.units).toHaveLength(5);

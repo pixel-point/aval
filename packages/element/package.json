@@ -22,6 +22,7 @@
   "license": "MIT",
   "engines": { "node": ">=22.12.0" },
   "dependencies": {
+    "@pixel-point/aval-format": "1.0.0",
     "@pixel-point/aval-graph": "1.0.0"
   },
   "scripts": {

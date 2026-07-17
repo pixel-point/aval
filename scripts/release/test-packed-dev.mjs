@@ -340,7 +340,7 @@ async function verifyInstalledGraph(projectRoot, version) {
     graph: [],
     format: ["graph"],
     "player-web": ["graph", "format"],
-    element: ["graph"],
+    element: ["graph", "format"],
     compiler: ["graph", "format", "player-web", "element"]
   };
   for (const [name, expected] of Object.entries(expectedDependencies)) {

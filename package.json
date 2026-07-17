@@ -23,7 +23,7 @@
     "compile:grass-rabbit": "npm run build:public-packages && npm run compile -w @pixel-point/aval-grass-rabbit-example",
     "grass-rabbit-codecs": "npm run dev -w @pixel-point/aval-grass-rabbit-codecs-example --",
     "compile:grass-rabbit-codecs": "npm run build:public-packages && npm run compile -w @pixel-point/aval-grass-rabbit-codecs-example",
-    "kinetic-orb": "npm run dev -w @pixel-point/aval-kinetic-orb-example --",
+    "kinetic-orb": "npm run build:public-packages && npm run dev -w @pixel-point/aval-kinetic-orb-example --",
     "render:kinetic-orb": "npm run render -w @pixel-point/aval-kinetic-orb-example",
     "compile:kinetic-orb": "npm run build:public-packages && npm run compile -w @pixel-point/aval-kinetic-orb-example",
     "avl": "npm run build:public-packages && node --enable-source-maps packages/compiler/dist/cli.js",

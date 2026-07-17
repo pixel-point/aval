@@ -308,7 +308,7 @@ export interface AvalCleanupReceipt {
   readonly stalePublicationCount: number;
   readonly pagePhysicalBytes: number;
   readonly pageParticipantCount: number;
-  readonly pageActiveDecoderLeaseCount: number;
+  readonly pageActiveDecoderSlotCount: number;
   readonly pageQueuedDecoderTicketCount: number;
   readonly pageParkedDecoderTicketCount: number;
 }
@@ -374,10 +374,15 @@ export interface AvalDiagnostics {
     activeTransportBodies: number;
     pendingLoads: number;
     interestedWaiters: number;
+    stalePublicationCount: number;
     playerTrackedBytes: number;
     pagePhysicalBytes: number;
     activeLeaseCount: number;
     decoderLeaseState: string | null;
+    pageActiveDecoderSlotCount: number;
+    pageQueuedDecoderTicketCount: number;
+    pageParkedDecoderTicketCount: number;
+    pageParticipantCount: number;
     reclamationCount: number;
     contextLossCount: number;
     contextRecoveryCount: number;

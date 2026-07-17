@@ -127,6 +127,7 @@ export function compileProjectEncoding(
     readiness: deriveReadiness(input.project),
     limits: estimateRuntimeLimits(
       input.project,
+      input.encoding.codec,
       chunks,
       input.renditions.map(({ geometry }) => geometry)
     )

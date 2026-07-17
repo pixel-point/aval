@@ -16,6 +16,70 @@ export type AvalAutoplay = "visible" | "manual";
 // @public (undocumented)
 export type AvalBindings = "auto" | "none";
 
+// @public
+export interface AvalCleanupReceipt {
+    // (undocumented)
+    readonly activeTransportBodies: number;
+    // (undocumented)
+    readonly completed: boolean;
+    // (undocumented)
+    readonly contextListenerCount: number;
+    // (undocumented)
+    readonly elementGeneration: number;
+    // (undocumented)
+    readonly failureCount: number;
+    // (undocumented)
+    readonly interestedWaiters: number;
+    // (undocumented)
+    readonly openFrames: number;
+    // (undocumented)
+    readonly pageActiveDecoderSlotCount: number;
+    // (undocumented)
+    readonly pageParkedDecoderTicketCount: number;
+    // (undocumented)
+    readonly pageParticipantCount: number;
+    // (undocumented)
+    readonly pagePhysicalBytes: number;
+    // (undocumented)
+    readonly pageQueuedDecoderTicketCount: number;
+    // (undocumented)
+    readonly participantActiveLeaseCount: number;
+    // (undocumented)
+    readonly participantDecoderState: string | null;
+    // (undocumented)
+    readonly participantDecoderTicketCount: number;
+    // (undocumented)
+    readonly participantDisposed: boolean;
+    // (undocumented)
+    readonly participantLogicalBytes: number;
+    // (undocumented)
+    readonly participantPendingWaitCount: number;
+    // (undocumented)
+    readonly participantRegistered: boolean;
+    // (undocumented)
+    readonly participantRegisteredCleanupCount: number;
+    // (undocumented)
+    readonly participantTrackedWorkCount: number;
+    // (undocumented)
+    readonly pendingLoads: number;
+    // (undocumented)
+    readonly pendingRuntimeOperations: number;
+    // (undocumented)
+    readonly playerDisposed: boolean;
+    // (undocumented)
+    readonly rendererResourceCount: number;
+    // (undocumented)
+    readonly rendererStagingBytes: number;
+    // (undocumented)
+    readonly sourceCopiesInFlight: number;
+    // (undocumented)
+    readonly sourceGeneration: number;
+    // (undocumented)
+    readonly stalePublicationCount: number;
+    // (undocumented)
+    readonly workerCount: number;
+}
+
 // @public (undocumented)
 export type AvalCrossOrigin = "anonymous" | "use-credentials";
 
@@ -25,8 +89,6 @@ export interface AvalDiagnostics {
     readonly assurance: "best-effort" | null;
     // (undocumented)
     readonly autoplay: AvalAutoplay;
-    // Warning: (ae-forgotten-export) The symbol "AvalCleanupReceipt" needs to be exported by the entry point index.d.ts
-    //
     // (undocumented)
     readonly cleanup: Readonly<AvalCleanupReceipt> | null;
     // (undocumented)
@@ -117,10 +179,15 @@ export interface AvalDiagnostics {
         activeTransportBodies: number;
         pendingLoads: number;
         interestedWaiters: number;
+        stalePublicationCount: number;
         playerTrackedBytes: number;
         pagePhysicalBytes: number;
         activeLeaseCount: number;
         decoderLeaseState: string | null;
+        pageActiveDecoderSlotCount: number;
+        pageQueuedDecoderTicketCount: number;
+        pageParkedDecoderTicketCount: number;
+        pageParticipantCount: number;
         reclamationCount: number;
         contextLossCount: number;
         contextRecoveryCount: number;

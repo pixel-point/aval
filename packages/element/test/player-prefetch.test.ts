@@ -2,20 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const media = vi.hoisted(() => ({
   runs: [] as Array<{
+    id: number;
+    lane: number;
     label: number;
     closed: boolean;
     ready: boolean;
     taken: number[];
   }>,
-  holding: null as {
-    label: number;
-    closed: boolean;
-    ready: boolean;
-    taken: number[];
-  } | null,
-  releaseBlocked: [] as Array<() => void>,
-  autoReleaseBlocked: true,
-  forceBlockedTransitions: false
+  blocked: new Set<number>(),
+  releaseBlocked: [] as Array<{ runId: number; release: () => void }>,
+  operations: [] as string[],
+  decoderCount: 0
 }));
 
 vi.mock("../src/asset.js", () => {
@@ -27,7 +24,9 @@ vi.mock("../src/asset.js", () => {
     body("other-body", 4, 16),
     { id: "idle-other", kind: "bridge", frameCount: 16, chunks: [span(5)] },
     body("later-body", 6, 16),
-    { id: "idle-later", kind: "bridge", frameCount: 16, chunks: [span(7)] }
+    { id: "idle-later", kind: "bridge", frameCount: 16, chunks: [span(7)] },
+    body("last-body", 8, 16),
+    { id: "idle-last", kind: "bridge", frameCount: 16, chunks: [span(9)] }
   ];
   const records = units.map((unit, index) => ({
     offset: 1_000 + index,
@@ -65,7 +64,8 @@ vi.mock("../src/asset.js", () => {
         { id: "idle", bodyUnit: "idle-body", initialUnit: "idle-intro" },
         { id: "hover", bodyUnit: "hover-body" },
         { id: "other", bodyUnit: "other-body" },
-        { id: "later", bodyUnit: "later-body" }
+        { id: "later", bodyUnit: "later-body" },
+        { id: "last", bodyUnit: "last-body" }
       ],
       edges: [
         {
@@ -74,7 +74,7 @@ vi.mock("../src/asset.js", () => {
           to: "hover",
           start: {
             type: "portal",
-            sourcePort: "entry",
+            sourcePort: "later",
             targetPort: "entry",
             maxWaitFrames: 16
           },
@@ -108,6 +108,20 @@ vi.mock("../src/asset.js", () => {
           },
           transition: { kind: "locked", unit: "idle-later" },
           trigger: { type: "event", name: "later" },
+          continuity: "exact-authored"
+        },
+        {
+          id: "idle-last-edge",
+          from: "idle",
+          to: "last",
+          start: {
+            type: "portal",
+            sourcePort: "last",
+            targetPort: "entry",
+            maxWaitFrames: 16
+          },
+          transition: { kind: "locked", unit: "idle-last" },
+          trigger: { type: "event", name: "last" },
           continuity: "exact-authored"
         }
       ],
@@ -157,7 +171,8 @@ vi.mock("../src/asset.js", () => {
       frameCount,
       ports: [
         { id: "entry", entryFrame: 0, portalFrames: [0] },
-        { id: "later", entryFrame: 0, portalFrames: [8] }
+        { id: "later", entryFrame: 0, portalFrames: [8] },
+        { id: "last", entryFrame: 0, portalFrames: [frameCount - 1] }
       ],
       chunks: [span(chunkStart)]
     };
@@ -174,48 +189,60 @@ vi.mock("../src/codec-validator.js", () => ({
 vi.mock("../src/decoder.js", () => ({
   Decoder: class {
     public encodedBytes = 0;
+    public readonly lane = media.decoderCount++;
+    public get available(): boolean { return true; }
     public async supported(): Promise<boolean> { return true; }
     public createRun(samples: readonly { timestamp: number; displayedFrames: number }[]) {
       const label = samples[0]!.timestamp;
-      const holds = label === 0 && media.holding === null;
-      const block = (label === 300 || label === 500 || label === 700) && (
-        media.forceBlockedTransitions || media.holding?.closed === false
-      );
-      const tracked = { label, closed: false, ready: false, taken: [] as number[] };
+      const tracked = {
+        id: media.runs.length + 1,
+        lane: this.lane,
+        label,
+        closed: false,
+        ready: false,
+        taken: [] as number[]
+      };
       media.runs.push(tracked);
-      if (holds) media.holding = tracked;
-      let rejectReadiness: ((reason?: unknown) => void) | undefined;
-      const readiness = block
-        ? new Promise<void>((resolve, reject) => {
-            rejectReadiness = reject;
-            media.releaseBlocked.push(() => {
-              tracked.ready = true;
-              resolve();
-            });
-          })
-        : Promise.resolve().then(() => { tracked.ready = true; });
+      media.operations.push(`create:${String(tracked.id)}:${String(label)}`);
+      let settled = false;
+      let resolveReadiness!: () => void;
+      let rejectReadiness!: (reason?: unknown) => void;
+      const readiness = new Promise<void>((resolve, reject) => {
+        resolveReadiness = resolve;
+        rejectReadiness = reject;
+      });
+      const releaseReadiness = () => {
+        if (settled) return;
+        settled = true;
+        tracked.ready = true;
+        media.operations.push(`ready:${String(tracked.id)}`);
+        resolveReadiness();
+      };
+      if (media.blocked.has(label)) {
+        media.releaseBlocked.push({ runId: tracked.id, release: releaseReadiness });
+      } else {
+        queueMicrotask(releaseReadiness);
+      }
       return {
         generation: media.runs.length,
         frameCount: samples[0]!.displayedFrames,
         openFrames: 0,
         outstanding: 0,
-        closed: false,
+        get closed() { return tracked.closed; },
         ready: () => readiness,
         take: async (index: number) => {
           tracked.taken.push(index);
-          return { index };
+          return { index, runId: tracked.id };
         },
         release: () => undefined,
         complete: async () => undefined,
         close: () => {
           if (tracked.closed) return;
           tracked.closed = true;
-          rejectReadiness?.(new DOMException("closed", "AbortError"));
-          if (media.holding === tracked) {
-            media.holding = null;
-            if (media.autoReleaseBlocked) {
-              for (const release of media.releaseBlocked.splice(0)) release();
-            }
+          media.operations.push(`close:${String(tracked.id)}`);
+          if (!settled) {
+            settled = true;
+            rejectReadiness(new DOMException("closed", "AbortError"));
           }
         }
       };
@@ -248,7 +275,11 @@ vi.mock("../src/renderer.js", () => ({
         contextListenerCount: 2
       };
     }
-    public async draw(): Promise<void> {}
+    public async draw(frame: { index: number; runId: number }): Promise<void> {
+      media.operations.push(
+        `draw:${String(frame.runId)}:${String(frame.index)}`
+      );
+    }
     public async store(): Promise<void> {}
     public async drawStored(): Promise<void> {}
     public resize(): void {}
@@ -261,10 +292,10 @@ import { createPlayer } from "../src/player.js";
 
 afterEach(() => {
   media.runs.length = 0;
-  media.holding = null;
+  media.blocked.clear();
   media.releaseBlocked.length = 0;
-  media.autoReleaseBlocked = true;
-  media.forceBlockedTransitions = false;
+  media.operations.length = 0;
+  media.decoderCount = 0;
   vi.unstubAllGlobals();
 });
 
@@ -308,7 +339,251 @@ describe("player multi-route prefetch", () => {
     await player.dispose();
   });
 
-  it("preempts and restarts a >RING intro body behind a pending departure", async () => {
+  it("holds intro exhaustion until its body candidate is ready", async () => {
+    vi.stubGlobal("Worker", class {});
+    vi.stubGlobal("VideoDecoder", class {});
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    media.blocked.add(0);
+    const events: string[] = [];
+    const player = await createPlayer({
+      canvas: new EventTarget() as HTMLCanvasElement,
+      platform: testPlatform(),
+      initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
+      baseUrl: "https://example.test/",
+      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      credentials: "same-origin",
+      signal: new AbortController().signal,
+      preparationTimeoutMs: 5_000,
+      motion: "full",
+      reduced: false,
+      initialState: null,
+      initialBody: false,
+      visible: true,
+      decoderReady: () => true,
+      onResourceBytes: () => undefined,
+      onMetadata: () => undefined,
+      onReadiness: () => undefined,
+      onAnimationResourcesRetired: () => undefined,
+      onDraw: () => undefined,
+      onRestart: () => undefined,
+      onEvent: (type) => events.push(type),
+      onFailure: (code) => events.push(`failure:${code}`)
+    });
+    player.activate();
+    await player.prepare();
+    await eventually(() => lastRun(0) !== undefined);
+    const intro = lastRun(100)!;
+    const body = lastRun(0)!;
+    const bodyDraw = `draw:${String(body.id)}:0`;
+
+    await driveFrames(frames, () => intro.taken.includes(1));
+    expect(intro.taken).toEqual([0, 1]);
+    const committedTicks = player.snapshot(true).trace.length;
+    await driveFrames(frames, () => false, 3);
+
+    expect(player.snapshot(true).trace).toHaveLength(committedTicks);
+    expect(body.ready).toBe(false);
+    expect(body.taken).toEqual([]);
+    expect(media.operations).not.toContain(bodyDraw);
+    expect(intro.closed).toBe(false);
+
+    releaseRun(body);
+    await driveFrames(frames, () => false, 1);
+
+    expect(media.operations, JSON.stringify(media.operations)).toContain(bodyDraw);
+    expect(intro.closed).toBe(true);
+    expect(player.snapshot(true).trace).toHaveLength(committedTicks + 1);
+    expect(media.operations.indexOf(`ready:${String(body.id)}`)).toBeLessThan(
+      media.operations.indexOf(bodyDraw)
+    );
+    expect(media.operations.indexOf(bodyDraw)).toBeLessThan(
+      media.operations.indexOf(`close:${String(intro.id)}`)
+    );
+    expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
+
+    await player.dispose();
+  });
+
+  it("reprioritizes loop wrap after a pending route misses its last portal", async () => {
+    vi.stubGlobal("Worker", class {});
+    vi.stubGlobal("VideoDecoder", class {});
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const events: string[] = [];
+    const player = await createPlayer({
+      canvas: new EventTarget() as HTMLCanvasElement,
+      platform: testPlatform(),
+      initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
+      baseUrl: "https://example.test/",
+      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      credentials: "same-origin",
+      signal: new AbortController().signal,
+      preparationTimeoutMs: 5_000,
+      motion: "full",
+      reduced: false,
+      initialState: null,
+      initialBody: false,
+      visible: true,
+      decoderReady: () => true,
+      onResourceBytes: () => undefined,
+      onMetadata: () => undefined,
+      onReadiness: () => undefined,
+      onAnimationResourcesRetired: () => undefined,
+      onDraw: () => undefined,
+      onRestart: () => undefined,
+      onEvent: (type) => events.push(type),
+      onFailure: (code) => events.push(`failure:${code}`)
+    });
+    player.activate();
+    await player.prepare();
+    await eventually(() => lastRun(0) !== undefined);
+    const originalBody = lastRun(0)!;
+    await driveFrames(
+      frames,
+      () => media.operations.includes(`draw:${String(originalBody.id)}:0`)
+    );
+    expect(originalBody.closed).toBe(false);
+
+    media.blocked.add(300);
+    const request = player.setState("hover");
+    void request.catch(() => undefined);
+    await eventually(() => lastRun(300) !== undefined);
+    const staleTransition = lastRun(300)!;
+    const originalBodyRuns = media.runs.filter(({ label }) => label === 0).length;
+    await driveFrames(frames, () => originalBody.taken.includes(9), 20);
+    expect(originalBody.taken).toContain(8);
+    expect(originalBody.taken).toContain(9);
+    expect(staleTransition.ready).toBe(false);
+    expect(staleTransition.closed).toBe(true);
+    expect(events).not.toContain("transitionstart");
+
+    await driveFrames(
+      frames,
+      () => media.runs.filter(({ label }) => label === 0).length > originalBodyRuns,
+      20
+    );
+    const freshBody = lastRun(0)!;
+    const freshDraw = `draw:${String(freshBody.id)}:0`;
+
+    expect(freshBody).not.toBe(originalBody);
+    expect(staleTransition.closed).toBe(true);
+    expect(originalBody.closed).toBe(false);
+    expect(freshBody.ready).toBe(true);
+    expect(freshBody.taken).toEqual([]);
+    expect(media.operations).not.toContain(freshDraw);
+    expect(media.runs.filter(({ label }) => label === 300)).toEqual([
+      staleTransition
+    ]);
+    expect(
+      media.runs.filter((run) => run.lane === freshBody.lane && !run.closed)
+    ).toEqual([freshBody]);
+    expect(media.operations.indexOf(`close:${String(staleTransition.id)}`)).toBeLessThan(
+      media.operations.indexOf(`create:${String(freshBody.id)}:0`)
+    );
+
+    await driveFrames(frames, () => media.operations.includes(freshDraw), 12);
+
+    expect(media.operations, JSON.stringify(media.operations)).toContain(freshDraw);
+    expect(originalBody.closed).toBe(true);
+    expect(media.operations.indexOf(`ready:${String(freshBody.id)}`)).toBeLessThan(
+      media.operations.indexOf(freshDraw)
+    );
+    expect(media.operations.indexOf(freshDraw)).toBeLessThan(
+      media.operations.indexOf(`close:${String(originalBody.id)}`)
+    );
+    expect(events).not.toContain("transitionstart");
+    expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
+
+    await player.dispose();
+    await expect(request).rejects.toBeInstanceOf(Error);
+  });
+
+  it("prepares loop continuation before an unready final-frame portal wraps", async () => {
+    vi.stubGlobal("Worker", class {});
+    vi.stubGlobal("VideoDecoder", class {});
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const events: string[] = [];
+    const player = await createPlayer({
+      canvas: new EventTarget() as HTMLCanvasElement,
+      platform: testPlatform(),
+      initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
+      baseUrl: "https://example.test/",
+      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      credentials: "same-origin",
+      signal: new AbortController().signal,
+      preparationTimeoutMs: 5_000,
+      motion: "full",
+      reduced: false,
+      initialState: null,
+      initialBody: false,
+      visible: true,
+      decoderReady: () => true,
+      onResourceBytes: () => undefined,
+      onMetadata: () => undefined,
+      onReadiness: () => undefined,
+      onAnimationResourcesRetired: () => undefined,
+      onDraw: () => undefined,
+      onRestart: () => undefined,
+      onEvent: (type) => events.push(type),
+      onFailure: (code) => events.push(`failure:${code}`)
+    });
+    player.activate();
+    await player.prepare();
+    await eventually(() => lastRun(0) !== undefined);
+    const originalBody = lastRun(0)!;
+    await driveFrames(
+      frames,
+      () => media.operations.includes(`draw:${String(originalBody.id)}:0`)
+    );
+
+    media.blocked.add(900);
+    const request = player.setState("last");
+    void request.catch(() => undefined);
+    await eventually(() => lastRun(900) !== undefined);
+    const blockedTarget = lastRun(900)!;
+    const bodyRuns = media.runs.filter(({ label }) => label === 0).length;
+
+    await driveFrames(frames, () => originalBody.taken.includes(15), 24);
+    await driveFrames(
+      frames,
+      () => media.runs.filter(({ label }) => label === 0).length > bodyRuns,
+      4
+    );
+    const continuation = lastRun(0)!;
+    const continuationDraw = `draw:${String(continuation.id)}:0`;
+    await driveFrames(frames, () => media.operations.includes(continuationDraw), 4);
+
+    expect(continuation).not.toBe(originalBody);
+    expect(blockedTarget.closed).toBe(true);
+    expect(media.operations).toContain(continuationDraw);
+    expect(media.operations.indexOf(`ready:${String(continuation.id)}`)).toBeLessThan(
+      media.operations.indexOf(continuationDraw)
+    );
+    expect(media.operations.indexOf(continuationDraw)).toBeLessThan(
+      media.operations.indexOf(`close:${String(originalBody.id)}`)
+    );
+    expect(events).not.toContain("underflow");
+    expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
+
+    await player.dispose();
+    await expect(request).rejects.toBeInstanceOf(Error);
+  });
+
+  it("keeps the foreground running until a ready candidate draws", async () => {
     vi.stubGlobal("Worker", class {});
     vi.stubGlobal("VideoDecoder", class {});
     const frames: FrameRequestCallback[] = [];
@@ -350,6 +625,13 @@ describe("player multi-route prefetch", () => {
     await player.prepare();
     await eventually(() => lastRun(0) !== undefined);
     const originalBody = lastRun(0)!;
+    await driveFrames(
+      frames,
+      () => media.operations.includes(`draw:${String(originalBody.id)}:0`)
+    );
+    expect(originalBody.closed).toBe(false);
+    const originalTaken = originalBody.taken.length;
+    media.blocked.add(300);
     const bridgeRuns = media.runs.filter(({ label }) => label === 300).length;
     const request = player.setState("hover");
     await eventually(() =>
@@ -357,20 +639,40 @@ describe("player multi-route prefetch", () => {
     );
 
     const prioritizedBridge = lastRun(300)!;
+    const bridgeDraw = `draw:${String(prioritizedBridge.id)}:0`;
     expect(originalBody.closed).toBe(false);
     expect(prioritizedBridge.ready).toBe(false);
     expect(prioritizedBridge.closed).toBe(false);
+    expect(prioritizedBridge.lane).not.toBe(originalBody.lane);
     expect(media.runs.indexOf(originalBody)).toBeLessThan(
       media.runs.indexOf(prioritizedBridge)
     );
     expect(frames.length, JSON.stringify(player.snapshot(false))).toBeGreaterThan(0);
-    await driveFrames(frames, () => transitionStarted);
-    expect(originalBody.closed).toBe(true);
+    await driveFrames(
+      frames,
+      () => originalBody.taken.length >= originalTaken + 3,
+      12
+    );
+    expect(originalBody.taken.length).toBeGreaterThanOrEqual(originalTaken + 3);
+    expect(originalBody.closed).toBe(false);
+    expect(media.operations).not.toContain(bridgeDraw);
+    expect(transitionStarted).toBe(false);
+
+    releaseRun(prioritizedBridge);
+    await driveFrames(frames, () => media.operations.includes(bridgeDraw));
     expect(prioritizedBridge.ready).toBe(true);
+    expect(originalBody.closed).toBe(true);
     expect(
       transitionStarted,
       `${events.join(",")}:${JSON.stringify(player.snapshot(true))}`
     ).toBe(true);
+    expect(media.operations, JSON.stringify(media.operations)).toContain(bridgeDraw);
+    expect(media.operations.indexOf(`ready:${String(prioritizedBridge.id)}`)).toBeLessThan(
+      media.operations.indexOf(bridgeDraw)
+    );
+    expect(media.operations.indexOf(bridgeDraw)).toBeLessThan(
+      media.operations.indexOf(`close:${String(originalBody.id)}`)
+    );
     expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
     expect(events).not.toContain("underflow");
 
@@ -378,7 +680,7 @@ describe("player multi-route prefetch", () => {
     await expect(request).rejects.toMatchObject({ name: "AbortError" });
   });
 
-  it("holds same-boundary replacement and resumes before a later route", async () => {
+  it("cancels stale rapid routes and promotes only the latest candidate", async () => {
     vi.stubGlobal("Worker", class {});
     vi.stubGlobal("VideoDecoder", class {});
     const frames: FrameRequestCallback[] = [];
@@ -387,9 +689,11 @@ describe("player multi-route prefetch", () => {
       return frames.length;
     });
     vi.stubGlobal("cancelAnimationFrame", () => undefined);
-    media.autoReleaseBlocked = false;
-    media.forceBlockedTransitions = true;
+    media.blocked.add(300);
+    media.blocked.add(500);
+    media.blocked.add(700);
     const events: string[] = [];
+    const transitions: string[] = [];
     const player = await createPlayer({
       canvas: new EventTarget() as HTMLCanvasElement,
       platform: testPlatform(),
@@ -411,59 +715,79 @@ describe("player multi-route prefetch", () => {
       onAnimationResourcesRetired: () => undefined,
       onDraw: () => undefined,
       onRestart: () => undefined,
-      onEvent: (type) => events.push(type),
+      onEvent: (type, detail) => {
+        events.push(type);
+        if (type === "transitionstart") {
+          transitions.push(String((detail as { edge: string }).edge));
+        }
+      },
       onFailure: (code) => events.push(`failure:${code}`)
     });
     player.activate();
     await player.prepare();
     await eventually(() => lastRun(0) !== undefined);
     const originalBody = lastRun(0)!;
+    await driveFrames(
+      frames,
+      () => media.operations.includes(`draw:${String(originalBody.id)}:0`)
+    );
+    expect(originalBody.closed).toBe(false);
+    const originalTaken = originalBody.taken.length;
     const outgoing = player.setState("hover");
     void outgoing.catch(() => undefined);
     await eventually(() => lastRun(300) !== undefined);
-    await driveFrames(frames, () => originalBody.closed);
-    expect(originalBody.closed).toBe(true);
-    expect(lastRun(300)?.ready).toBe(false);
-    await driveFrames(frames, () => false, 4);
-    expect(events).not.toContain("underflow");
+    const hoverBridge = lastRun(300)!;
+    expect(hoverBridge.ready).toBe(false);
 
     const replacement = player.setState("other");
     void replacement.catch(() => undefined);
     await eventually(() => lastRun(500) !== undefined);
-    await driveFrames(frames, () => false, 4);
-    expect(lastRun(500)?.ready).toBe(false);
-    expect(media.runs.filter(({ label }) => label === 0)).toHaveLength(1);
-    expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
-    expect(events).not.toContain("underflow");
+    const otherBridge = lastRun(500)!;
+    expect(hoverBridge.closed).toBe(true);
+    expect(otherBridge.ready).toBe(false);
 
     const laterReplacement = player.setState("later");
     void laterReplacement.catch(() => undefined);
     await eventually(() => lastRun(700) !== undefined);
-    await driveFrames(frames, () => (
-      media.runs.filter(({ label }) => label === 0).length >= 2 &&
-      (lastRun(0)?.taken.length ?? 0) >= 2
-    ));
-    const resumed = lastRun(0)!;
-    expect(resumed).not.toBe(originalBody);
-    expect(resumed.taken.slice(0, 2)).toEqual([0, 1]);
-    expect(lastRun(700)?.ready).toBe(false);
+    const laterBridge = lastRun(700)!;
+    const laterDraw = `draw:${String(laterBridge.id)}:0`;
+    expect(otherBridge.closed).toBe(true);
+    expect(laterBridge.ready).toBe(false);
+    await driveFrames(
+      frames,
+      () => originalBody.taken.length >= originalTaken + 3,
+      12
+    );
+    expect(originalBody.taken.length).toBeGreaterThanOrEqual(originalTaken + 3);
+    expect(originalBody.closed).toBe(false);
+    expect(media.operations).not.toContain(`draw:${String(hoverBridge.id)}:0`);
+    expect(media.operations).not.toContain(`draw:${String(otherBridge.id)}:0`);
+    expect(media.operations).not.toContain(laterDraw);
+
+    let latestSettled = false;
+    void laterReplacement.then(() => { latestSettled = true; });
+    releaseRun(laterBridge);
+    await driveFrames(frames, () => media.operations.includes(laterDraw));
+    expect(media.operations, JSON.stringify(media.operations)).toContain(laterDraw);
+    expect(originalBody.closed).toBe(true);
+    expect(media.operations.indexOf(laterDraw)).toBeLessThan(
+      media.operations.indexOf(`close:${String(originalBody.id)}`)
+    );
+    await driveFrames(frames, () => latestSettled, 60);
+    await expect(laterReplacement).resolves.toBeUndefined();
+    expect(player.snapshot(false)).toMatchObject({
+      requestedState: "later",
+      visualState: "later"
+    });
+    expect(transitions).toEqual(["idle-later-edge"]);
     expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
     expect(events).not.toContain("underflow");
 
-    const returnToIdle = player.setState("idle");
-    await driveFrames(frames, () => false, 4);
     await player.dispose();
-    const outcomes = await Promise.allSettled([
-      outgoing,
-      replacement,
-      laterReplacement,
-      returnToIdle
-    ]);
+    const outcomes = await Promise.allSettled([outgoing, replacement]);
     expect(outcomes.map(({ status }) => status)).toEqual([
       "rejected",
-      "rejected",
-      "rejected",
-      "fulfilled"
+      "rejected"
     ]);
   });
 
@@ -519,6 +843,16 @@ describe("player multi-route prefetch", () => {
 
 function lastRun(label: number) {
   return [...media.runs].reverse().find((run) => run.label === label);
+}
+
+function releaseRun(run: { id: number; label: number }): void {
+  media.blocked.delete(run.label);
+  for (let index = media.releaseBlocked.length - 1; index >= 0; index -= 1) {
+    const blocked = media.releaseBlocked[index]!;
+    if (blocked.runId !== run.id) continue;
+    media.releaseBlocked.splice(index, 1);
+    blocked.release();
+  }
 }
 
 async function driveFrames(

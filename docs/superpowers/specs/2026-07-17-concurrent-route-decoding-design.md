@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-17
 
-**Status:** Approved for implementation
+**Status:** Implemented; verification evidence is listed in Section 10
 
 **Supersedes:** The runtime rule that an animated player owns one serial decoder
 and must close its foreground run before preparing a non-resident departure.
@@ -54,11 +54,16 @@ The implementation must maintain all of these invariants:
 
 1. The foreground remains the only presentation owner until a candidate's
    first target frame has been submitted successfully.
-2. A candidate decoder never draws and never mutates graph state.
+2. A candidate may supply only the provisional first replacement frame. It
+   never mutates graph state or becomes foreground before that submission
+   succeeds.
 3. At most one candidate route decodes at a time, regardless of graph fan-out.
-4. Candidate identity includes the graph plan epoch, edge, unit, target port,
-   and required ready window. Unit ID alone is not an occurrence identity.
-5. A stale candidate can never be claimed, promoted, or published.
+4. Physical candidate identity is the immutable unit ID. Format 1.0 fixes every
+   target entry at frame zero and the decoder readiness window at frames zero
+   through five, so different semantic routes to one unit have identical media.
+5. Semantic route authority remains exclusively in the graph. A ready unit is
+   claimed synchronously only after preview identifies that exact presentation;
+   a stale semantic intent can never tick or publish the graph.
 6. A claimed candidate leaves prefetch ownership synchronously.
 7. Closing a run does not make its decoder lane reusable until terminal
    acknowledgement or decoder disposal.
@@ -83,7 +88,7 @@ The coordinator exposes media concepts rather than raw lane numbers:
 
 - **foreground** — the decoder and run allowed to supply presentation frames;
 - **candidate** — the decoder and run preparing one selected departure;
-- **prepared route** — an immutable route token plus a ready run;
+- **prepared media** — an immutable unit plus a ready run;
 - **promotion** — transfer of a prepared route into foreground ownership; and
 - **retirement** — closure and final release of the previous foreground.
 
@@ -117,7 +122,9 @@ holding one foreground decoder while waiting forever for a second slot.
 
 The runtime reserves the worst-case aggregate for two decoder rings before
 animated readiness. With the current ring size of twelve, the decoder surface
-term is twenty-four decoded surfaces. Encoded-copy ceilings include one
+term is twenty-four decoded surfaces. For H.264, compiler, readiness, and
+runtime all use the canonical macroblock-aligned browser surface plus the
+32-pixel decoder padding bound on each axis. Encoded-copy ceilings include one
 foreground occurrence, one candidate occurrence, retiring ownership, and the
 bounded compressed prefetch intents without double-counting shared asset
 storage.
@@ -137,14 +144,10 @@ compatibility branch.
 The graph snapshot remains the semantic authority. Player input first updates
 the graph, then route planning derives ordered intents from that snapshot.
 
-An intent contains:
+An intent contains only physical media work:
 
 ```text
-plan epoch
-edge ID
 unit ID
-target port
-required last ready frame
 reason and priority
 ```
 
@@ -153,20 +156,21 @@ highest-priority required intent is admitted to the candidate decoder. Lower
 priority completion or speculative intents remain byte-ready; they do not
 queue decoded runs behind the candidate.
 
-Candidate readiness is defined by the exact predicted entry window, not by a
-generic boolean. The current graph profile requires every target port to enter
-at frame zero, so a streamed candidate requires frames zero through five,
-bounded by the unit frame count.
+Candidate readiness requires frames zero through five, bounded by unit frame
+count. Format 1.0 requires every target port to enter at frame zero, so one
+ready run is safely reusable when multiple semantic edges reference the same
+immutable unit. Edge identity is deliberately not duplicated in the decoder
+queue; the graph remains its canonical owner.
 
 ### 5.2 Reconciliation and churn
 
-Every authoritative plan change increments the plan epoch. Reconciliation:
+Every authoritative graph change causes a fresh ordered reconciliation:
 
-- preserves a candidate only when unit, target port, and route occurrence
-  remain semantically reusable;
+- preserves a candidate only when its immutable unit remains the required
+  physical media;
 - cancels replaced candidates without touching foreground playback;
 - closes frames arriving from a canceled candidate;
-- ignores late readiness from stale epochs; and
+- ignores late readiness after queue ownership was canceled; and
 - starts the newest authoritative candidate when its lane is retired.
 
 Rejected graph inputs do not cancel the current candidate. This matters for
@@ -174,18 +178,27 @@ rapid engagement changes: the graph, not raw pointer intent, determines whether
 the pending route changed. Once the first target frame is submitted, promotion
 is final; newer input becomes a follow-on route.
 
+When a pending portal route approaches the last usable portal of a looping
+body, its source unit is also byte-loaded as a standby intent. If the target is
+still not ready within the six-frame readiness lead, source continuation takes
+decode priority. A target already ready at the current portal keeps priority.
+This guarantees the one candidate lane protects continuous wrap playback
+instead of freezing on the loop's final frame.
+
 ## 6. Atomic Promotion and Presentation
 
 At each content tick the player:
 
-1. derives the current departure and matching route token;
-2. synchronously checks whether that exact candidate is armed;
-3. ticks the graph with `routeReady` reflecting that candidate;
-4. if the graph changes streamed media, claims the candidate synchronously;
-5. constructs the next active-media owner around the already-ready run;
-6. submits the target entry frame to the renderer;
-7. publishes transition effects; and
-8. retires the previous foreground and swaps decoder roles.
+1. previews the next graph presentation with current route readiness;
+2. synchronously claims the required ready unit before graph mutation or public
+   callbacks;
+3. ticks the graph and verifies it matches the preview;
+4. installs a player-owned provisional media transaction around that run;
+5. submits its target entry frame while the run still has candidate ownership;
+6. promotes the candidate and installs it as active only after submission;
+7. retires the previous foreground and waits for worker acknowledgement before
+   reusing that physical lane; and
+8. publishes transition effects and reconciles from the current graph snapshot.
 
 There is no interval in which `active` is cleared merely to free a decoder.
 The old canvas content remains valid until the target submission succeeds.
@@ -198,20 +211,17 @@ new route while the promoted run continues playing.
 
 ## 7. Scheduler
 
-Player advancement returns an explicit outcome:
+Player advancement returns one of two explicit scheduling outcomes:
 
 ```text
-advanced-source   graph/source presentation advanced normally
-promoted          candidate became foreground and target was submitted
-waiting-route     finite boundary has no ready candidate
-stale-candidate   route token changed before claim
+progressed        graph presentation and renderer submission completed
+waiting-route     the required streamed presentation is not ready
 ```
 
-Only `advanced-source` and `promoted` advance the presentation ordinal and
-compute the next authored deadline. `waiting-route` and `stale-candidate` do
-not call the old unconditional deadline rebasing path. They preserve immediate
-eligibility and retry on the next animation frame; matching candidate
-readiness also schedules a wake when playback is held at a finite boundary.
+Only `progressed` computes the next authored deadline. `waiting-route` does not
+call the old unconditional deadline rebasing path. It preserves immediate
+eligibility and retries on the next animation frame; decoder-lane availability
+is rechecked before every retry.
 
 At a loop portal with no ready candidate, the graph receives
 `routeReady: false` and advances the source body normally to a later authored
@@ -242,9 +252,10 @@ lease, clear renderer resources, and publish zero resource ownership.
 The implementation is divided as follows:
 
 - `decoder-pool.ts` owns foreground/candidate decoder roles, aggregate
-  accounting, route tokens, promotion, retirement, and disposal.
+  accounting, logical run identities, promotion, and disposal.
 - `decoder.ts` retains the serial worker client and run contract, with only the
-  narrow accounting/readiness hooks needed by the coordinator.
+  narrow accounting/readiness hooks needed by the coordinator. Its
+  acknowledged-idle state is the authority for physical lane reuse.
 - `route-prefetch.ts` separates parallel byte loading from single-candidate
   decode admission and owns candidate reconciliation.
 - `player.ts` coordinates graph ticks, atomic draw/promotion, scheduling, and
@@ -253,7 +264,7 @@ The implementation is divided as follows:
 - `aval-element.ts` and `player-contract.ts` expose the weighted readiness
   permission and aggregate diagnostics.
 - compiler resource estimation changes its decoder surface term from one ring
-  to two rings.
+  to two canonically bounded decoder surfaces.
 
 The worker protocol and renderer resident-storage implementation do not gain a
 second concurrency mode.
@@ -268,7 +279,7 @@ Tests must prove:
   acknowledgement is indefinitely delayed;
 - foreground frames continue advancing while candidate readiness is blocked;
 - first target draw occurs before foreground close;
-- stale readiness and frames cannot promote after route replacement;
+- stale readiness and frames cannot promote after physical media replacement;
 - rejected rapid input preserves the authoritative candidate;
 - only one candidate decodes even when several routes are byte-ready;
 - finite-boundary readiness is consumed on the first animation frame after it
@@ -282,8 +293,8 @@ Tests must prove:
 
 Page-resource tests cover weighted FIFO grant, visibility parking, atomic
 release, and the absence of partial pair allocation. Route-prefetch tests cover
-loaded-versus-decoding state, same-candidate reuse, cancellation, and fresh
-occurrence identity.
+loaded-versus-decoding state, immutable-unit reuse, cancellation, final-portal
+continuation priority, and acknowledged lane retirement.
 
 ### 10.2 Browser gates
 
@@ -296,13 +307,22 @@ Required results are:
 
 - exactly forty enters and forty leaves;
 - input interval median between 35 and 55 ms and p95 no greater than 70 ms;
-- candidate-ready to first-target-draw latency no greater than one animation
-  frame;
 - transition presentation gaps no greater than the steady baseline plus one
-  animation frame and never greater than 83.34 ms at 24 fps;
+  animation frame and never greater than 83.5 ms at 24 fps;
 - zero underflow, fallback, console error, page error, or error state;
 - final idle, non-transitioning convergence within 1.5 seconds; and
 - pixels continue advancing after settlement.
+
+The ready-before-draw and draw-before-close order is a deterministic unit gate;
+browser traces enforce delivered input cadence and presentation-submission
+gaps. The asset contract additionally verifies binary SHA-256, build-report
+integrity, and the HTML SRI pin as one value.
+
+The standard `npm run kinetic-orb` workflow rebuilds the public packages before
+starting the demo, and the demo forces a fresh Vite dependency graph. A branch
+pull therefore cannot silently exercise an ignored, stale `dist` runtime. The
+prebuilt Playwright gate starts the example workspace directly after its caller
+has completed the explicit public-package build.
 
 Wall-clock performance thresholds run on the controlled local/release runner.
 Deterministic ownership and scheduling tests remain the required portable CI

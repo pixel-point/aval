@@ -12,7 +12,7 @@ type PlayerDiagnostics = Readonly<{
   outstanding: Readonly<Record<string, number>>;
   runtime: Readonly<{
     pageParticipantCount: number;
-    pageActiveDecoderLeaseCount: number;
+    pageActiveDecoderSlotCount: number;
     pageQueuedDecoderTicketCount: number;
     activeLeaseCount: number;
     decoderLeaseState: string | null;
@@ -201,7 +201,7 @@ test("decoder limits and accounting follow the captured window across adoption",
         decoderState: diagnostics.runtime.decoderLeaseState,
         page: {
           participants: diagnostics.runtime.pageParticipantCount,
-          active: diagnostics.runtime.pageActiveDecoderLeaseCount,
+          active: diagnostics.runtime.pageActiveDecoderSlotCount,
           queued: diagnostics.runtime.pageQueuedDecoderTicketCount
         }
       };

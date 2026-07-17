@@ -18,7 +18,7 @@ export default defineConfig({
     viewport: { width: 1280, height: 900 }
   },
   webServer: {
-    command: `npm run kinetic-orb -- --port ${port} --strictPort`,
+    command: `npm run dev -w @pixel-point/aval-kinetic-orb-example -- --port ${port} --strictPort`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000

@@ -16,7 +16,8 @@ describe("route prefetch planning", () => {
       manifest,
       snapshot(),
       stream("entering-body"),
-      12
+      12,
+      false
     );
     const pending = planRoutePrefetch(
       manifest,
@@ -27,7 +28,8 @@ describe("route prefetch planning", () => {
         pendingEdgeId: "entering.exiting"
       }),
       stream("entering-body"),
-      12
+      12,
+      false
     );
     const followOn = planRoutePrefetch(
       manifest,
@@ -37,7 +39,8 @@ describe("route prefetch planning", () => {
         followOnEdgeId: "entering.exiting"
       }),
       stream("entering-body"),
-      12
+      12,
+      false
     );
 
     expect(reasons(completion)).toEqual([["hover-loop", "completion"]]);
@@ -61,7 +64,8 @@ describe("route prefetch planning", () => {
         pendingEdgeId: "entering.exiting"
       }),
       stream("entering-intro"),
-      12
+      12,
+      false
     );
 
     expect(reasons(plan)).toEqual([
@@ -70,7 +74,7 @@ describe("route prefetch planning", () => {
     ]);
   });
 
-  it("prioritizes a detached body restart ahead of its pending route", () => {
+  it("does not synthesize a detached-body resume lane", () => {
     const plan = planRoutePrefetch(
       fixture(),
       snapshot({
@@ -81,23 +85,115 @@ describe("route prefetch planning", () => {
       }),
       null,
       12,
-      "entering-body"
+      false
     );
 
-    expect(reasons(plan)).toEqual([
-      ["entering-body", "resume-body"],
+    expect(reasons(plan)).toEqual([["exit-body", "pending-route"]]);
+  });
+
+  it("protects a loop wrap when the final portal route is not ready", () => {
+    const manifest = loopPortalFixture();
+    const beforeLead = planRoutePrefetch(
+      manifest,
+      snapshot({
+        phase: "waiting",
+        requestedState: "exiting",
+        isTransitioning: true,
+        presentation: {
+          kind: "body",
+          state: "entering",
+          unitId: "entering-body",
+          frameIndex: 16
+        },
+        pendingEdgeId: "entering.exiting"
+      }),
+      stream("entering-body"),
+      12,
+      false
+    );
+    const atLead = planRoutePrefetch(
+      manifest,
+      snapshot({
+        phase: "waiting",
+        requestedState: "exiting",
+        isTransitioning: true,
+        presentation: {
+          kind: "body",
+          state: "entering",
+          unitId: "entering-body",
+          frameIndex: 17
+        },
+        pendingEdgeId: "entering.exiting"
+      }),
+      stream("entering-body"),
+      12,
+      false
+    );
+    const readyAtPortal = planRoutePrefetch(
+      manifest,
+      snapshot({
+        phase: "waiting",
+        requestedState: "exiting",
+        isTransitioning: true,
+        presentation: {
+          kind: "body",
+          state: "entering",
+          unitId: "entering-body",
+          frameIndex: 23
+        },
+        pendingEdgeId: "entering.exiting"
+      }),
+      stream("entering-body"),
+      12,
+      true
+    );
+
+    expect(reasons(beforeLead)).toEqual([
+      ["exit-body", "pending-route"],
+      ["entering-body", "presentation-continuation"]
+    ]);
+    expect(reasons(atLead)).toEqual([
+      ["entering-body", "presentation-continuation"],
       ["exit-body", "pending-route"]
+    ]);
+    expect(reasons(readyAtPortal)).toEqual([
+      ["exit-body", "pending-route"],
+      ["entering-body", "presentation-continuation"]
     ]);
   });
 });
 
 describe("route prefetch ownership", () => {
-  it("admits in plan order when lower-priority bytes load first", async () => {
+  it("loads while admission is gated and wakes when the lane retires", async () => {
+    let available = false;
+    let admissions = 0;
+    const manifest = fixture();
+    const queue = new RoutePrefetchQueue<FakeRun>({
+      signal: new AbortController().signal,
+      preload: async () => undefined,
+      admit: (value) => {
+        admissions += 1;
+        return new FakeRun(value.id);
+      },
+      canAdmit: () => available,
+      onFailure: () => undefined
+    });
+
+    queue.reconcile([intent(unit(manifest, "entering-body"), "pending-route")]);
+    await microtasks();
+    expect(admissions).toBe(0);
+
+    available = true;
+    queue.wake();
+    await eventually(() => admissions === 1);
+    await queue.retire();
+  });
+
+  it("loads every intent but admits only the current head", async () => {
     const harness = queueHarness();
-    harness.queue.reconcile([
-      harness.intent("entering-body", "pending-route"),
-      harness.intent("hover-loop", "completion")
-    ]);
+    const entering = harness.intent("entering-body", "pending-route");
+    const hover = harness.intent("hover-loop", "completion");
+    harness.queue.reconcile([entering, hover]);
     await eventually(() => harness.loads.length === 2);
 
     harness.releaseLoad("hover-loop");
@@ -105,84 +201,140 @@ describe("route prefetch ownership", () => {
     expect(harness.admitted).toEqual([]);
 
     harness.releaseLoad("entering-body");
+    await eventually(() => harness.admitted.length === 1);
+    expect(harness.admitted).toEqual(["entering-body"]);
+
+    harness.runs[0]!.releaseReady();
+    await eventually(() => harness.queue.isReady("entering-body"));
+    const claimed = harness.claim("entering-body")!;
+    harness.queue.reconcile([hover]);
     await eventually(() => harness.admitted.length === 2);
     expect(harness.admitted).toEqual(["entering-body", "hover-loop"]);
+    claimed.cancel();
     await harness.queue.retire();
     expect(harness.failures).toEqual([]);
   });
 
-  it("reorders from [A, B] to [B] while A is still loading", async () => {
+  it("reuses loaded B when reordering from [A, B] to [B]", async () => {
     const harness = queueHarness();
-    harness.queue.reconcile([
-      harness.intent("entering-body", "pending-route"),
-      harness.intent("hover-loop", "completion")
-    ]);
+    const entering = harness.intent("entering-body", "pending-route");
+    const hover = harness.intent("hover-loop", "completion");
+    harness.queue.reconcile([entering, hover]);
     await eventually(() => harness.loads.length === 2);
     harness.releaseLoad("hover-loop");
 
-    harness.queue.reconcile([
-      harness.intent("hover-loop", "pending-route")
-    ]);
-    await eventually(() => harness.loadCount("hover-loop") === 2);
-    harness.releaseLoad("hover-loop", 1);
+    harness.queue.reconcile([hover]);
     await eventually(() => harness.admitted.length === 1);
 
     expect(harness.admitted).toEqual(["hover-loop"]);
+    expect(harness.loadCount("hover-loop")).toBe(1);
     await harness.queue.retire();
     expect(harness.failures).toEqual([]);
   });
 
   it("closes an admitted A before replacing [A, B] with [B]", async () => {
     const harness = queueHarness();
-    harness.queue.reconcile([
-      harness.intent("entering-body", "pending-route"),
-      harness.intent("hover-loop", "completion")
-    ]);
+    const entering = harness.intent("entering-body", "pending-route");
+    const hover = harness.intent("hover-loop", "completion");
+    harness.queue.reconcile([entering, hover]);
     await eventually(() => harness.loads.length === 2);
     harness.releaseLoad("entering-body");
     await eventually(() => harness.admitted.length === 1);
     const first = harness.runs[0]!;
 
-    harness.queue.reconcile([
-      harness.intent("hover-loop", "pending-route")
-    ]);
-    await eventually(() => harness.loadCount("hover-loop") === 2);
-    harness.releaseLoad("hover-loop", 1);
+    harness.releaseLoad("hover-loop");
+    harness.queue.reconcile([hover]);
     await eventually(() => harness.admitted.length === 2);
 
     expect(first.closed).toBe(true);
     expect(harness.admitted).toEqual(["entering-body", "hover-loop"]);
+    expect(harness.loadCount("hover-loop")).toBe(1);
+    await harness.queue.retire();
+    expect(harness.failures).toEqual([]);
+  });
+
+  it("cancels the admitted head before rotating [A, B] to [B, A]", async () => {
+    const harness = queueHarness();
+    const entering = harness.intent("entering-body", "pending-route");
+    const hover = harness.intent("hover-loop", "completion");
+    harness.queue.reconcile([entering, hover]);
+    await eventually(() => harness.loads.length === 2);
+    harness.releaseLoad("entering-body");
+    harness.releaseLoad("hover-loop");
+    await eventually(() => harness.admitted.length === 1);
+    const first = harness.runs[0]!;
+
+    harness.queue.reconcile([hover, entering]);
+    await eventually(() => harness.admitted.length === 2);
+
+    expect(first.closed).toBe(true);
+    expect(harness.admitted).toEqual(["entering-body", "hover-loop"]);
+    expect(harness.loadCount("entering-body")).toBe(2);
+    expect(harness.loadCount("hover-loop")).toBe(1);
+    expect(harness.unpromotedCount).toBe(1);
+    expect(harness.maximumUnpromoted).toBe(1);
+    await harness.queue.retire();
+    expect(harness.failures).toEqual([]);
+  });
+
+  it("deduplicates shared media into one physical candidate", async () => {
+    const manifest = fixture();
+    const plan = planRoutePrefetch(
+      manifest,
+      snapshot({
+        phase: "waiting",
+        requestedState: "exiting",
+        isTransitioning: true,
+        pendingEdgeId: "entering.exiting",
+        followOnEdgeId: "hover.exiting"
+      }),
+      stream("entering-body"),
+      12,
+      false
+    );
+    expect(plan.decode).toHaveLength(1);
+    expect(plan.decode[0]).toMatchObject({
+      unit: { id: "exit-body" }
+    });
+
+    const harness = queueHarness(manifest);
+    harness.queue.reconcile(plan.decode);
+    await eventually(() => harness.loads.length === 1);
+    harness.releaseLoad("exit-body");
+    await eventually(() => harness.admitted.length === 1);
+
+    expect(harness.loadCount("exit-body")).toBe(1);
+    expect(harness.admitted).toEqual(["exit-body"]);
+    expect(harness.maximumUnpromoted).toBe(1);
     await harness.queue.retire();
     expect(harness.failures).toEqual([]);
   });
 
   it("transfers a head claim atomically and preserves its admission priority", async () => {
     const harness = queueHarness();
-    harness.queue.reconcile([
-      harness.intent("entering-body", "pending-route")
-    ]);
+    const enteringIntent = harness.intent("entering-body", "pending-route");
+    const hoverIntent = harness.intent("hover-loop", "completion");
+    harness.queue.reconcile([enteringIntent]);
     await eventually(() => harness.loads.length === 1);
-    const claimed = harness.queue.claim("entering-body")!;
-
-    harness.queue.reconcile([
-      harness.intent("hover-loop", "completion")
-    ]);
-    await eventually(() => harness.loads.length === 2);
-    harness.releaseLoad("hover-loop");
-    await microtasks();
-    expect(harness.admitted).toEqual([]);
-
     harness.releaseLoad("entering-body");
-    await eventually(() => harness.admitted.length === 2);
+    await eventually(() => harness.admitted.length === 1);
     const entering = harness.runs.find(({ unit }) => unit === "entering-body")!;
     entering.releaseReady();
+    await eventually(() => harness.queue.isReady("entering-body"));
+    const claimed = harness.claim("entering-body")!;
     await expect(claimed.ready).resolves.toBe(entering);
     expect(entering.closed).toBe(false);
+
+    harness.queue.reconcile([hoverIntent]);
+    await eventually(() => harness.loads.length === 2);
+    harness.releaseLoad("hover-loop");
+    await eventually(() => harness.admitted.length === 2);
     expect(harness.admitted).toEqual(["entering-body", "hover-loop"]);
+    claimed.cancel();
     await harness.queue.retire();
   });
 
-  it("transfers an admitted not-ready claim to a cancellable owner", async () => {
+  it("does not transfer an admitted candidate before it is ready", async () => {
     const harness = queueHarness();
     harness.queue.reconcile([
       harness.intent("entering-body", "pending-route")
@@ -191,10 +343,7 @@ describe("route prefetch ownership", () => {
     harness.releaseLoad("entering-body");
     await eventually(() => harness.runs.length === 1);
     const run = harness.runs[0]!;
-    const claimed = harness.queue.claim("entering-body")!;
-
-    claimed.cancel();
-    await expect(claimed.ready).rejects.toMatchObject({ name: "AbortError" });
+    expect(harness.claim("entering-body")).toBeUndefined();
     await expect(harness.queue.retire()).resolves.toBeUndefined();
     expect(run.closed).toBe(true);
     expect(harness.failures).toEqual([]);
@@ -202,20 +351,26 @@ describe("route prefetch ownership", () => {
 
   it("admits a successor after a claimed predecessor is canceled", async () => {
     const harness = queueHarness();
-    harness.queue.reconcile([
-      harness.intent("entering-body", "pending-route"),
-      harness.intent("hover-loop", "completion")
-    ]);
+    const entering = harness.intent("entering-body", "pending-route");
+    const hover = harness.intent("hover-loop", "completion");
+    harness.queue.reconcile([entering, hover]);
     await eventually(() => harness.loads.length === 2);
-    const predecessor = harness.queue.claim("entering-body")!;
+    harness.releaseLoad("entering-body");
+    await eventually(() => harness.runs.length === 1);
+    harness.runs[0]!.releaseReady();
+    await eventually(() => harness.queue.isReady("entering-body"));
+    const predecessor = harness.claim("entering-body")!;
     predecessor.cancel();
-    await expect(predecessor.ready).rejects.toMatchObject({ name: "AbortError" });
+    await expect(predecessor.ready).resolves.toBe(harness.runs[0]);
+    expect(harness.runs[0]!.closed).toBe(true);
 
+    harness.queue.reconcile([hover]);
     harness.releaseLoad("hover-loop");
     await eventually(() => harness.admitted.includes("hover-loop"));
-    const successor = harness.queue.claim("hover-loop")!;
     const run = harness.runs.find(({ unit }) => unit === "hover-loop")!;
     run.releaseReady();
+    await eventually(() => harness.queue.isReady("hover-loop"));
+    const successor = harness.claim("hover-loop")!;
     await expect(successor.ready).resolves.toBe(run);
     successor.cancel();
     await harness.queue.retire();
@@ -229,8 +384,55 @@ describe("route prefetch ownership", () => {
       harness.intent("hover-loop", "completion")
     ]);
 
-    expect(() => harness.queue.claim("hover-loop")).toThrow(/claim invariant/u);
+    expect(() => harness.claim("hover-loop")).toThrow(/claim invariant/u);
     await harness.queue.retire();
+  });
+
+  it("returns no claim when the requested unit is absent from the queue", async () => {
+    const harness = queueHarness();
+    harness.queue.reconcile([
+      harness.intent("entering-body", "pending-route"),
+      harness.intent("hover-loop", "completion")
+    ]);
+
+    expect(harness.claim("exit-body")).toBeUndefined();
+    await harness.queue.retire();
+    expect(harness.failures).toEqual([]);
+  });
+
+  it("never admits more than one unpromoted candidate", async () => {
+    const harness = queueHarness();
+    const entering = harness.intent("entering-body", "pending-route");
+    const hover = harness.intent("hover-loop", "completion");
+    harness.queue.reconcile([entering, hover]);
+    await eventually(() => harness.loads.length === 2);
+    harness.releaseLoad("entering-body");
+    harness.releaseLoad("hover-loop");
+    await eventually(() => harness.admitted.length === 1);
+    await microtasks();
+
+    expect(harness.admitted).toEqual(["entering-body"]);
+    expect(harness.unpromotedCount).toBe(1);
+    const enteringRun = harness.runs[0]!;
+    enteringRun.releaseReady();
+    await eventually(() => harness.queue.isReady("entering-body"));
+    const claimedEntering = harness.claim("entering-body")!;
+    expect(harness.unpromotedCount).toBe(0);
+
+    harness.queue.reconcile([hover]);
+    await eventually(() => harness.admitted.length === 2);
+    expect(harness.unpromotedCount).toBe(1);
+    expect(harness.maximumUnpromoted).toBe(1);
+    const hoverRun = harness.runs[1]!;
+    hoverRun.releaseReady();
+    await eventually(() => harness.queue.isReady("hover-loop"));
+    const claimedHover = harness.claim("hover-loop")!;
+    expect(harness.unpromotedCount).toBe(0);
+
+    claimedEntering.cancel();
+    claimedHover.cancel();
+    await harness.queue.retire();
+    expect(harness.failures).toEqual([]);
   });
 
   it("waits for canceled operations removed from the owned registry", async () => {
@@ -272,9 +474,15 @@ describe("route prefetch ownership", () => {
 
 class FakeRun {
   readonly #readiness = deferred<void>();
+  readonly #onClose: () => void;
   public closed = false;
 
-  public constructor(public readonly unit: string) {}
+  public constructor(
+    public readonly unit: string,
+    onClose: () => void = () => undefined
+  ) {
+    this.#onClose = onClose;
+  }
 
   public async ready(): Promise<void> { await this.#readiness.promise; }
   public releaseReady(): void { this.#readiness.resolve(); }
@@ -282,16 +490,18 @@ class FakeRun {
   public close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.#onClose();
     this.#readiness.reject(abortError());
   }
 }
 
-function queueHarness() {
-  const manifest = fixture();
+function queueHarness(manifest = fixture()) {
   const loads: Array<Readonly<{ unit: string; gate: Deferred<void> }>> = [];
   const runs: FakeRun[] = [];
   const admitted: string[] = [];
   const failures: unknown[] = [];
+  const unpromoted = new Set<FakeRun>();
+  let maximumUnpromoted = 0;
   const queue = new RoutePrefetchQueue<FakeRun>({
     signal: new AbortController().signal,
     preload: (value, signal) => {
@@ -303,8 +513,11 @@ function queueHarness() {
     },
     admit: (value) => {
       admitted.push(value.id);
-      const run = new FakeRun(value.id);
+      let run!: FakeRun;
+      run = new FakeRun(value.id, () => unpromoted.delete(run));
       runs.push(run);
+      unpromoted.add(run);
+      maximumUnpromoted = Math.max(maximumUnpromoted, unpromoted.size);
       return run;
     },
     onFailure: (error) => failures.push(error)
@@ -317,6 +530,18 @@ function queueHarness() {
     failures,
     intent: (id: string, reason: PrefetchReason) =>
       intent(unit(manifest, id), reason),
+    claim: (id: string) => {
+      const claimed = queue.claim(id);
+      if (claimed === undefined) return undefined;
+      const candidates = [...unpromoted].filter(({ unit: value }) => value === id);
+      if (candidates.length !== 1) {
+        throw new Error("test candidate ownership invariant failed");
+      }
+      unpromoted.delete(candidates[0]!);
+      return claimed;
+    },
+    get unpromotedCount() { return unpromoted.size; },
+    get maximumUnpromoted() { return maximumUnpromoted; },
     loadCount: (id: string) => loads.filter(({ unit: value }) => value === id).length,
     releaseLoad: (id: string, occurrence = 0) => {
       const load = loads.filter(({ unit: value }) => value === id)[occurrence];
@@ -420,6 +645,14 @@ function fixture(): Manifest {
         start: { type: "finish", targetPort: "default", maxWaitFrames: 11 },
         trigger: { type: "event", name: "leave" },
         continuity: "exact-authored"
+      },
+      {
+        id: "hover.exiting",
+        from: "hover",
+        to: "exiting",
+        start: { type: "finish", targetPort: "default", maxWaitFrames: 11 },
+        trigger: { type: "event", name: "leave-hover" },
+        continuity: "exact-authored"
       }
     ],
     bindings: [],
@@ -431,6 +664,41 @@ function fixture(): Manifest {
       persistentCacheBytes: 0,
       runtimeWorkingSetBytes: Number.MAX_SAFE_INTEGER
     }
+  };
+}
+
+function loopPortalFixture(): Manifest {
+  const manifest = fixture();
+  return {
+    ...manifest,
+    units: manifest.units.map((value) => value.id !== "entering-body"
+      ? value
+      : {
+          ...value,
+          kind: "body" as const,
+          playback: "loop" as const,
+          frameCount: 24,
+          ports: [{
+            id: "default",
+            entryFrame: 0 as const,
+            portalFrames: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23]
+          }]
+        }),
+    edges: manifest.edges.map((value) => value.id !== "entering.exiting"
+      ? value
+      : {
+          id: "entering.exiting",
+          from: "entering",
+          to: "exiting",
+          start: {
+            type: "portal" as const,
+            sourcePort: "default",
+            targetPort: "default",
+            maxWaitFrames: 11
+          },
+          trigger: { type: "event" as const, name: "leave" },
+          continuity: "exact-authored" as const
+        })
   };
 }
 

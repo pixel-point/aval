@@ -43,6 +43,7 @@ import type {
 
 let runtimeModule: Promise<typeof import("./player.js")> | null = null;
 const PREPARATION_MS = 5_000;
+const PLAYER_DECODER_WEIGHT = 2;
 type IntersectionGate = {
   readonly promise: Promise<void>;
   readonly resolve: () => void;
@@ -1651,7 +1652,7 @@ export function createAvalElementClass(
       if (this.#decoderLease !== null) return true;
       if (this.#decoderTicket !== null) return false;
       const epoch = this.#sourceRequestEpoch;
-      const ticket = this.#ensurePageParticipant().request();
+      const ticket = this.#ensurePageParticipant().request(PLAYER_DECODER_WEIGHT);
       const lease = ticket.take();
       if (lease !== null) {
         this.#decoderLease = lease;
@@ -1819,7 +1820,7 @@ export function createAvalElementClass(
           pagePhysicalBytes: page.physicalBytes,
           activeLeaseCount: Number(this.#decoderLease !== null),
           decoderLeaseState: this.#decoderState(),
-          pageActiveDecoderLeaseCount: page.active,
+          pageActiveDecoderSlotCount: page.active,
           pageQueuedDecoderTicketCount: page.queued,
           pageParkedDecoderTicketCount: page.parked,
           pageParticipantCount: page.participants,
@@ -2089,7 +2090,10 @@ export function outstandingDecoder(
   workerCount: number,
   ticketState: string | null
 ): number {
-  return Math.max(workerCount, ticketState === null ? 0 : 1);
+  return Math.max(
+    workerCount,
+    ticketState === null ? 0 : PLAYER_DECODER_WEIGHT
+  );
 }
 
 export function contextRecoveryCount(
@@ -2290,7 +2294,7 @@ export function createCleanupReceipt(
     stalePublicationCount,
     pagePhysicalBytes: page.physicalBytes,
     pageParticipantCount: page.participants,
-    pageActiveDecoderLeaseCount: page.active,
+    pageActiveDecoderSlotCount: page.active,
     pageQueuedDecoderTicketCount: page.queued,
     pageParkedDecoderTicketCount: page.parked,
     terminal,

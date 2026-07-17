@@ -165,8 +165,11 @@ afterEach(() => {
 });
 
 describe("player rendition selection", () => {
-  it("selects the second authored rendition when the first decoder is unsupported", async () => {
-    const Worker = fakeWorker([false, true]);
+  it("selects the second authored rendition when the first decoder pair is unsupported", async () => {
+    const Worker = fakeWorker([
+      [false, false],
+      [true, true]
+    ]);
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const controller = new AbortController();
@@ -203,7 +206,7 @@ describe("player rendition selection", () => {
 
     expect(player.snapshot(false).selectedRendition).toBe("low");
     expect(selection.opens).toBe(1);
-    expect(Worker.instances()).toHaveLength(2);
+    expect(Worker.instances()).toHaveLength(4);
     expect(selection.rendererCreations).toBe(1);
     await player.dispose();
   });
@@ -242,7 +245,7 @@ describe("player rendition selection", () => {
   });
 
   it("publishes recovery effects in graph order before resource retirement", async () => {
-    const Worker = fakeWorker([true]);
+    const Worker = fakeWorker([[true, true]]);
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const observed: string[] = [];
@@ -292,12 +295,16 @@ describe("player rendition selection", () => {
       "fallback:staticReady:static",
       "retired:staticReady:static"
     ]);
+    expect(Worker.instances()).toHaveLength(2);
     await player.dispose();
   });
 
   it("selects the lower rendition when the high plan cannot fit renderer resources", async () => {
     selection.rejectHighResources = true;
-    const Worker = fakeWorker([true, true]);
+    const Worker = fakeWorker([
+      [true, true],
+      [true, true]
+    ]);
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const controller = new AbortController();
@@ -329,7 +336,7 @@ describe("player rendition selection", () => {
 
     expect(player.snapshot(false).selectedRendition).toBe("low");
     expect(selection.opens).toBe(1);
-    expect(Worker.instances()).toHaveLength(2);
+    expect(Worker.instances()).toHaveLength(4);
     expect(selection.rendererCreations).toBe(2);
     expect(selection.presentations).toEqual([
       [16, 16, 1, "contain"],
@@ -339,7 +346,10 @@ describe("player rendition selection", () => {
   });
 
   it("reports every authored rendition rejection in ladder order", async () => {
-    const Worker = fakeWorker([false, false]);
+    const Worker = fakeWorker([
+      [false, false],
+      [false, false]
+    ]);
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const controller = new AbortController();
@@ -380,11 +390,12 @@ describe("player rendition selection", () => {
       }
     });
     expect(selection.opens).toBe(1);
+    expect(Worker.instances()).toHaveLength(4);
     await player.dispose();
   });
 
   it("treats a decoder support-probe exception as terminal for source selection", async () => {
-    const Worker = fakeWorker(["error"]);
+    const Worker = fakeWorker([["error", true]]);
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const controller = new AbortController();
@@ -418,33 +429,41 @@ describe("player rendition selection", () => {
 
     await expect(creation).rejects.toThrow("AVAL decoder failed");
     expect(selection.opens).toBe(1);
-    expect(Worker.instances()).toHaveLength(1);
+    expect(Worker.instances()).toHaveLength(2);
   });
 
   it("treats asset-wide readiness declaration failure as terminal", async () => {
     selection.invalidPlan = true;
-    vi.stubGlobal("Worker", fakeWorker([true]));
+    const Worker = fakeWorker([[true, true]]);
+    vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     await expect(createPlayer(selectionInput([
       { src: "first.avl", codec: "avc1.640028", integrity: "" },
       { src: "second.avl", codec: "avc1.640028", integrity: "" }
     ]))).rejects.toThrow(/resource declarations/u);
     expect(selection.opens).toBe(1);
+    expect(Worker.instances()).toHaveLength(0);
   });
 
   it("treats a general renderer construction exception as source-terminal", async () => {
     selection.rendererConstructionError = true;
-    vi.stubGlobal("Worker", fakeWorker([true]));
+    const Worker = fakeWorker([[true, true]]);
+    vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     await expect(createPlayer(selectionInput([
       { src: "first.avl", codec: "avc1.640028", integrity: "" },
       { src: "second.avl", codec: "avc1.640028", integrity: "" }
     ]))).rejects.toThrow("WebGL construction failed");
     expect(selection.opens).toBe(1);
+    expect(Worker.instances()).toHaveLength(2);
   });
 
   it("opens the next source after every boolean codec probe is unsupported", async () => {
-    const Worker = fakeWorker([false, false, true]);
+    const Worker = fakeWorker([
+      [false, false],
+      [false, false],
+      [true, true]
+    ]);
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const player = await createPlayer(selectionInput([
@@ -453,12 +472,18 @@ describe("player rendition selection", () => {
     ]));
     expect(selection.opens).toBe(2);
     expect(player.snapshot(false).selectedRendition).toBe("high");
+    expect(Worker.instances()).toHaveLength(6);
     await player.dispose();
   });
 
   it("opens the next source only after all pure renderer admissions reject", async () => {
     selection.rejectResourceCreations = 2;
-    vi.stubGlobal("Worker", fakeWorker([true, true, true]));
+    const Worker = fakeWorker([
+      [true, true],
+      [true, true],
+      [true, true]
+    ]);
+    vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const player = await createPlayer(selectionInput([
       { src: "first.avl", codec: "avc1.640028", integrity: "" },
@@ -466,6 +491,7 @@ describe("player rendition selection", () => {
     ]));
     expect(selection.opens).toBe(2);
     expect(player.snapshot(false).selectedRendition).toBe("high");
+    expect(Worker.instances()).toHaveLength(6);
     await player.dispose();
   });
 });
@@ -497,7 +523,10 @@ function selectionInput(sources: readonly { src: string; codec: string; integrit
   };
 }
 
-function fakeWorker(support: readonly (boolean | "error")[]) {
+type WorkerSupport = boolean | "error";
+type DecoderPairSupport = readonly [WorkerSupport, WorkerSupport];
+
+function fakeWorker(support: readonly DecoderPairSupport[]) {
   const all: FakeWorker[] = [];
   class FakeWorker extends EventTarget {
     public constructor() {
@@ -506,7 +535,8 @@ function fakeWorker(support: readonly (boolean | "error")[]) {
     }
     public postMessage(message: unknown): void {
       if ((message as { t?: string }).t !== "configure") return;
-      const supported = support[all.indexOf(this)] ?? false;
+      const index = all.indexOf(this);
+      const supported = support[Math.floor(index / 2)]?.[index % 2] ?? false;
       queueMicrotask(() => {
         if (supported === "error") this.dispatchEvent(new Event("error"));
         else this.dispatchEvent(new MessageEvent("message", {

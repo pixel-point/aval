@@ -3,14 +3,21 @@ import type {
   EncodedChunkInput,
   VideoRenditionGeometry
 } from "@pixel-point/aval-format";
-import { FORMAT_DEFAULT_BUDGETS } from "@pixel-point/aval-format";
+import {
+  FORMAT_DEFAULT_BUDGETS,
+  maximumH264DecodedRgbaBytes
+} from "@pixel-point/aval-format";
 
 import { CompilerError } from "../diagnostics.js";
-import type { NormalizedSourceProject } from "../model.js";
+import type { NormalizedSourceProject, VideoCodec } from "../model.js";
+
+const DECODED_SURFACES_PER_RING = 12;
+const CONCURRENT_DECODER_RING_COUNT = 2;
 
 /** Compute diagnostic runtime terms without inventing a hard host policy. */
 export function estimateRuntimeLimits(
   project: NormalizedSourceProject,
+  codec: VideoCodec,
   accessUnits: readonly EncodedChunkInput[],
   geometries: readonly Readonly<VideoRenditionGeometry>[]
 ): DeclaredLimits {
@@ -23,6 +30,11 @@ export function estimateRuntimeLimits(
   const decodedPixelBytes = Math.max(
     ...geometries.map(({ codedRgbaBytes }) => codedRgbaBytes)
   );
+  const decoderSurfaceBytes = Math.max(...geometries.map((geometry) =>
+    codec === "h264"
+      ? maximumH264DecodedRgbaBytes(geometry.codedWidth, geometry.codedHeight)
+      : geometry.codedRgbaBytes
+  ));
   const reversibleFrames = project.units.reduce((total, unit) =>
     checkedSum(
       total,
@@ -71,13 +83,17 @@ export function estimateRuntimeLimits(
     [project.canvas.width, project.canvas.height, 4],
     "canvas pixel bytes"
   );
-  const decoderRingBytes = checkedProduct(
-    [12, decodedPixelBytes],
-    "decoder ring bytes"
+  const decoderWorkingSetBytes = checkedProduct(
+    [
+      CONCURRENT_DECODER_RING_COUNT,
+      DECODED_SURFACES_PER_RING,
+      decoderSurfaceBytes
+    ],
+    "decoder working-set bytes"
   );
   const runtimeWorkingSetBytes = [
     persistentCacheBytes,
-    decoderRingBytes,
+    decoderWorkingSetBytes,
     largestEncodedRendition,
     canvasPixelBytes
   ].reduce((total, value) =>

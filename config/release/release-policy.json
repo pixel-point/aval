@@ -5,8 +5,8 @@
   "projectSchemaVersion": "0.2",
   "publicPackages": [
     "@pixel-point/aval-graph",
-    "@pixel-point/aval-element",
     "@pixel-point/aval-format",
+    "@pixel-point/aval-element",
     "@pixel-point/aval-player-web",
     "@pixel-point/aval-compiler"
   ],

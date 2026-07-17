@@ -4,6 +4,7 @@ import type {
   Manifest,
   Unit
 } from "./asset.js";
+import { maximumH264DecodedRgbaBytes } from "@pixel-point/aval-format";
 
 type Body = Extract<Unit, { readonly kind: "body" }>;
 
@@ -41,7 +42,8 @@ export interface ReadinessPlan {
   readonly declaredWorkingSetBytes: number;
 }
 
-const RING = 12;
+const DECODED_SURFACES_PER_RING = 12;
+const CONCURRENT_DECODER_RING_COUNT = 2;
 
 /** Expand the complete format-1.0 all-routes set for one selected rendition. */
 export function createReadinessPlan(
@@ -106,7 +108,7 @@ export function createReadinessPlan(
       count = endpointFrames(edge, endpoints);
     } else {
       kind = "stream";
-      count = RING;
+      count = DECODED_SURFACES_PER_RING;
     }
     const targetFrames = runway(body, port.entryFrame, count);
     if (edge.start.type === "cut") {
@@ -126,6 +128,10 @@ export function createReadinessPlan(
   const decodedFrameBytes = product(rendition.codedWidth, rendition.codedHeight, 4);
   const maximumDecodedFrameBytes = Math.max(...manifest.renditions.map(({ codedWidth, codedHeight }) =>
     product(codedWidth, codedHeight, 4)));
+  const maximumDecoderSurfaceBytes = Math.max(...manifest.renditions.map((candidate) =>
+    manifest.codec === "h264"
+      ? maximumH264DecodedRgbaBytes(candidate.codedWidth, candidate.codedHeight)
+      : product(candidate.codedWidth, candidate.codedHeight, 4)));
   const encodedByRendition = new Map<string, number>();
   for (const blob of blobs) encodedByRendition.set(
     blob.rendition,
@@ -142,7 +148,11 @@ export function createReadinessPlan(
   const uniquePersistentBytes = product(uniqueFrames, decodedFrameBytes);
   const declaredWorkingSetBytes = [
     semanticPersistentBytes,
-    product(RING, maximumDecodedFrameBytes),
+    product(
+      CONCURRENT_DECODER_RING_COUNT,
+      DECODED_SURFACES_PER_RING,
+      maximumDecoderSurfaceBytes
+    ),
     Math.max(0, ...encodedByRendition.values()),
     product(manifest.canvas.width, manifest.canvas.height, 4)
   ].reduce(add, 0);

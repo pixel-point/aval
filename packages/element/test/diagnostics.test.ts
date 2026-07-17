@@ -46,7 +46,7 @@ describe("diagnostics", () => {
       participantDecoderTicketCount: 0,
       pagePhysicalBytes: 12_345,
       pageParticipantCount: 3,
-      pageActiveDecoderLeaseCount: 1,
+      pageActiveDecoderSlotCount: 1,
       pageQueuedDecoderTicketCount: 1,
       pageParkedDecoderTicketCount: 1,
       retiredDeclaredFileBytes: 98_765
@@ -229,9 +229,10 @@ describe("diagnostics", () => {
   });
 
   it("reports queued/granted decoder ownership without fabricating presentation state", () => {
-    expect(outstandingDecoder(0, "parked")).toBe(1);
-    expect(outstandingDecoder(0, "queued")).toBe(1);
-    expect(outstandingDecoder(1, "granted")).toBe(1);
+    expect(outstandingDecoder(0, "parked")).toBe(2);
+    expect(outstandingDecoder(0, "queued")).toBe(2);
+    expect(outstandingDecoder(1, "granted")).toBe(2);
+    expect(outstandingDecoder(2, "granted")).toBe(2);
     expect(outstandingDecoder(0, null)).toBe(0);
     expect(resolutionScale(0, 0)).toBe(0);
     expect(resolutionScale(100, 50)).toBe(1);

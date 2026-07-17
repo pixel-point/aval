@@ -124,17 +124,13 @@ export class Decoder {
     return this.#support.promise;
   }
 
-  public createRun(
-    samples: readonly Readonly<DecodeSample>[],
-    persistent = false
-  ): DecodeRun {
+  public createRun(samples: readonly Readonly<DecodeSample>[]): DecodeRun {
     if (this.#disposed) throw abortError();
     if (this.#error !== undefined) throw this.#error;
     const id = ++this.#sequence;
     const run = new DecodeRun(
       id,
       samples,
-      persistent,
       this.#expectation,
       (message, transfer) => {
         if (this.#disposed || this.#error !== undefined) throw abortError();
@@ -180,6 +176,12 @@ export class Decoder {
   }
 
   public get encodedBytes(): number { return this.#encodedBytes; }
+
+  /** True only when the worker has acknowledged retirement and can start now. */
+  public get available(): boolean {
+    return this.#configured && !this.#disposed && this.#error === undefined &&
+      this.#lane.phase === "idle" && this.#queue.length === 0;
+  }
 
   public dispose(): void {
     if (this.#disposed) return;
@@ -446,7 +448,6 @@ export class DecodeRun {
   public constructor(
     id: number,
     samples: readonly Readonly<DecodeSample>[],
-    persistent: boolean,
     expectation: Readonly<DecoderOutputExpectation>,
     post: (message: DecoderCommand, transfer?: Transferable[]) => void,
     credit: () => number,
@@ -461,9 +462,6 @@ export class DecodeRun {
     if (!Number.isSafeInteger(id) || id < 1) throw new RangeError("invalid decoder run");
     this.#id = id;
     this.#samples = Object.freeze(samples.map((sample) => Object.freeze({ ...sample })));
-    // Kept in the call shape for compatibility. Persistent pixels live in the
-    // renderer's resident textures; decoded frames remain single-consumption.
-    void persistent;
     this.#expectation = expectation;
     this.#post = post;
     this.#credit = credit;

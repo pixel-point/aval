@@ -24,8 +24,8 @@ describe("verified five-package release set", () => {
   it("derives the one safe publication order and rejects graph drift", () => {
     expect(RELEASE_PACKAGE_NAMES).toEqual([
       "@pixel-point/aval-graph",
-      "@pixel-point/aval-element",
       "@pixel-point/aval-format",
+      "@pixel-point/aval-element",
       "@pixel-point/aval-player-web",
       "@pixel-point/aval-compiler"
     ]);
@@ -120,7 +120,10 @@ describe("bounded tar inspection", () => {
   });
 
   it("rejects an element archive that omits its URL-referenced worker", () => {
-    const manifest = packageManifest("@pixel-point/aval-element", ["@pixel-point/aval-graph"]);
+    const manifest = packageManifest(
+      "@pixel-point/aval-element",
+      ["@pixel-point/aval-graph", "@pixel-point/aval-format"]
+    );
     const withoutWorker = baseEntries(manifest).filter(({ path }) => path !== `package/dist/${ELEMENT_RELEASE_WORKER.output}`);
     expect(() => inspectTarballBytes(tarGzip(withoutWorker))).toThrow(new RegExp(`missing dist/${ELEMENT_RELEASE_WORKER.output.replace(".", "\\.")}`, "u"));
   });

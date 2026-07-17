@@ -13,11 +13,12 @@ import type {
   MotionGraphResult,
   MotionGraphSnapshot
 } from "@pixel-point/aval-graph";
+import { maximumH264DecodedRgbaBytes } from "@pixel-point/aval-format";
 import {
-  Decoder,
   type DecodeRun,
   type DecodeSample
 } from "./decoder.js";
+import { DecoderPool } from "./decoder-pool.js";
 import {
   createCodecValidator,
   type CodecValidator
@@ -54,6 +55,7 @@ interface ActiveMedia {
   readonly unit: Unit;
   run: DecodeRun | null;
   readonly starting: DecodeRunStart | null;
+  promoted: boolean;
   readonly resident: string | null;
   lastIndex: number;
   drainedIndex: number;
@@ -62,6 +64,7 @@ interface ActiveMedia {
 
 interface DecodeRunStart {
   readonly ready: Promise<DecodeRun>;
+  readonly candidate: boolean;
   cancel(): void;
 }
 
@@ -76,13 +79,7 @@ interface StateRequest {
 const PREPARE_MS = 5_000;
 const RING = 12;
 
-type RouteHold = "authored" | "decoder-handoff" | null;
-
-type DecoderHandoff = Readonly<{
-  edgeId: string;
-  unitId: string;
-  frameIndex: number;
-}> | null;
+type AdvanceOutcome = "progressed" | "waiting-route";
 
 const COLOR = Object.freeze({
   fullRange: false as const,
@@ -222,7 +219,7 @@ async function selectPlayer(
           throw error;
         }
       };
-      const decoder = new Decoder(config, {
+      const decoders = new DecoderPool(config, {
         codedWidth: rendition.codedWidth,
         codedHeight: rendition.codedHeight,
         displayWidth: layout.storageWidth,
@@ -244,9 +241,9 @@ async function selectPlayer(
         clearTimeout: input.platform.clearTimeout
       });
       let supported = false;
-      try { supported = await limit(decoder.supported(), deadline.signal); }
+      try { supported = await limit(decoders.supported(), deadline.signal); }
       catch (error) {
-        decoder.dispose();
+        decoders.dispose();
         if (deadline.timedOut) {
           return new PlayerImpl(
             input, asset, rendition, null, null, deadline, publications, "preparation-timeout",
@@ -258,7 +255,7 @@ async function selectPlayer(
         throw error;
       }
       if (!supported) {
-        decoder.dispose();
+        decoders.dispose();
         unavailable = "codec-unsupported";
         reports.push(candidateReport(rendition.id, rank, unavailable));
         continue;
@@ -284,7 +281,7 @@ async function selectPlayer(
         });
         rendererRef = renderer;
       } catch (error) {
-        decoder.dispose();
+        decoders.dispose();
         rendererRef?.dispose();
         rendererRef = null;
         await asset.dispose();
@@ -296,7 +293,7 @@ async function selectPlayer(
         assertCandidateBudget(asset, rendition, renderer, plan);
       }
       catch (error) {
-        decoder.dispose();
+        decoders.dispose();
         renderer.dispose();
         rendererRef = null;
         reportResourceBytes(input, asset);
@@ -310,7 +307,7 @@ async function selectPlayer(
         continue;
       }
       const player = new PlayerImpl(
-        input, asset, rendition, decoder, renderer, deadline, publications, null, reports, rank
+        input, asset, rendition, decoders, renderer, deadline, publications, null, reports, rank
       );
       contextChange = (state) => player.contextChanged(state);
       return player;
@@ -334,7 +331,7 @@ class PlayerImpl implements Player {
   readonly #candidateRank: number;
   readonly #candidateReports: readonly Readonly<CandidateReport>[];
   readonly #reportCurrent: boolean;
-  #decoder: Decoder | null;
+  #decoders: DecoderPool | null;
   #renderer: Renderer | null;
   #retiredRenderer: Renderer | null = null;
   readonly #validator: CodecValidator;
@@ -356,7 +353,8 @@ class PlayerImpl implements Player {
   #plan: Readonly<ReadinessPlan> | null = null;
   #initialMedia: Readonly<{ unit: Unit; run: DecodeRun }> | null = null;
   #active: ActiveMedia | null = null;
-  #advanceWork: Promise<void> | null = null;
+  #provisional: ActiveMedia | null = null;
+  #advanceWork: Promise<AdvanceOutcome> | null = null;
   #preparationMediaWork: Promise<Readonly<{
     unit: Unit;
     run: DecodeRun;
@@ -382,7 +380,6 @@ class PlayerImpl implements Player {
   #underflows = 0;
   #incidents = 0;
   #inUnderflow = false;
-  #decoderHandoff: DecoderHandoff = null;
   #awaitingContextRestore = false;
   #restartRequested = false;
   #contextLosses = 0;
@@ -393,7 +390,7 @@ class PlayerImpl implements Player {
     input: Readonly<PlayerInput>,
     asset: Asset,
     rendition: Readonly<Rendition>,
-    decoder: Decoder | null,
+    decoders: DecoderPool | null,
     renderer: Renderer | null,
     deadline: PreparationDeadline,
     publications: PublicationGate,
@@ -413,7 +410,7 @@ class PlayerImpl implements Player {
     this.#candidateRank = candidateRank;
     this.#candidateReports = Object.freeze([...candidateReports]);
     this.#reportCurrent = reportCurrent;
-    this.#decoder = decoder;
+    this.#decoders = decoders;
     this.#renderer = renderer;
     const layout = renderLayout(this.#manifest, rendition);
     this.#validator = createCodecValidator({
@@ -434,7 +431,8 @@ class PlayerImpl implements Player {
     this.#routePrefetch = new RoutePrefetchQueue({
       signal: deadline.signal,
       preload: (unit, signal) => this.#preloadRun(unit, signal),
-      admit: (unit) => this.#createLoadedRun(unit),
+      admit: (unit) => this.#createLoadedRun(unit, "candidate"),
+      canAdmit: () => this.#decoders?.candidateAvailable === true,
       onFailure: (error) => this.#fail(error)
     });
     this.#visible = input.visible;
@@ -490,7 +488,7 @@ class PlayerImpl implements Player {
     const result = this.#requireGraph().request(state);
     const promise = this.#register(result);
     this.#applyWithoutDraw(result);
-    this.#prepareRoutes(result.snapshot);
+    this.#prepareRoutes(this.#requireGraph().snapshot());
     this.#schedule();
     return promise;
   }
@@ -500,7 +498,7 @@ class PlayerImpl implements Player {
     if (!this.#activated || this.#disposed || graph === null) return false;
     const result = graph.send(event);
     this.#applyWithoutDraw(result);
-    if (this.#prepared) this.#prepareRoutes(result.snapshot);
+    if (this.#prepared) this.#prepareRoutes(graph.snapshot());
     this.#schedule();
     return result.accepted === true;
   }
@@ -614,7 +612,7 @@ class PlayerImpl implements Player {
 
   public snapshot(trace: boolean): Readonly<PlayerSnapshot> {
     const asset = this.#asset.snapshot();
-    const decoder = this.#decoder?.snapshot() ?? { workerCount: 0, openFrames: 0 };
+    const decoders = this.#decoders?.snapshot() ?? { workerCount: 0, openFrames: 0 };
     const presentation = (this.#renderer ?? this.#retiredRenderer)?.snapshot() ?? {
       cssWidth: 0,
       cssHeight: 0,
@@ -649,8 +647,8 @@ class PlayerImpl implements Player {
       activeTransportBodies: asset.activeTransportBodies,
       pendingLoads: asset.pendingLoads,
       interestedWaiters: asset.interestedWaiters,
-      workerCount: decoder.workerCount,
-      openFrames: decoder.openFrames,
+      workerCount: decoders.workerCount,
+      openFrames: decoders.openFrames,
       contextLossCount: Math.max(this.#contextLosses, presentation.contextLossCount),
       contextRecoveryCount: Math.max(
         this.#contextRecoveries,
@@ -750,7 +748,7 @@ class PlayerImpl implements Player {
     this.#preparationDeadline.signal.throwIfAborted();
     const animated = graph.beginAnimated();
     await this.#applyWithDraw(animated, true, this.#input.platform.now(), null);
-    this.#prepareRoutes(animated.snapshot);
+    this.#prepareRoutes(graph.snapshot());
     this.#input.onReadiness("visualReady");
     this.#input.onReadiness("interactiveReady");
     this.#resetClock();
@@ -798,9 +796,9 @@ class PlayerImpl implements Player {
     unit: Unit;
     run: DecodeRun;
   }>> {
-    const decoder = this.#decoder;
+    const decoders = this.#decoders;
     const renderer = this.#renderer;
-    if (decoder === null || renderer === null) {
+    if (decoders === null || renderer === null) {
       throw new Error("AVAL animation resources are unavailable");
     }
     const generation = this.#animationGeneration;
@@ -808,7 +806,7 @@ class PlayerImpl implements Player {
       this.#preparationDeadline.signal.throwIfAborted();
       const unit = this.#unit(resident.unit);
       await this.#cacheResidentFrames(unit, new Set(resident.frames));
-      this.#assertAnimation(generation, renderer, decoder);
+      this.#assertAnimation(generation, renderer, decoders);
       if (unit.kind === "reversible") this.#residentReady.add(unit.id);
       this.#reportResourceBytes();
     }
@@ -823,7 +821,7 @@ class PlayerImpl implements Player {
     const run = await this.#newRun(initial, this.#preparationDeadline.signal);
     try {
       await run.ready();
-      this.#assertAnimation(generation, renderer, decoder);
+      this.#assertAnimation(generation, renderer, decoders);
       this.#assertRuntimeBudget();
       return Object.freeze({ unit: initial, run });
     } catch (error) {
@@ -837,23 +835,23 @@ class PlayerImpl implements Player {
     keep: ReadonlySet<number>
   ): Promise<void> {
     const renderer = this.#renderer;
-    const decoder = this.#decoder;
-    if (renderer === null || decoder === null) {
+    const decoders = this.#decoders;
+    if (renderer === null || decoders === null) {
       throw new Error("AVAL animation resources are unavailable");
     }
     const generation = this.#animationGeneration;
     const run = await this.#newRun(unit, this.#preparationDeadline.signal);
-    this.#assertAnimation(generation, renderer, decoder);
+    this.#assertAnimation(generation, renderer, decoders);
     try {
       for (let index = 0; index < run.frameCount; index += 1) {
         this.#preparationDeadline.signal.throwIfAborted();
         const frame = await run.take(index);
-        this.#assertAnimation(generation, renderer, decoder);
+        this.#assertAnimation(generation, renderer, decoders);
         try {
           if (keep.has(index)) {
             if (!this.#hasResident(unit.id, index)) {
               await renderer.store(unit.id, index, frame);
-              this.#assertAnimation(generation, renderer, decoder);
+              this.#assertAnimation(generation, renderer, decoders);
               this.#reportResourceBytes();
               const resident = this.#residentFrames.get(unit.id) ?? new Set<number>();
               resident.add(index);
@@ -863,7 +861,7 @@ class PlayerImpl implements Player {
         } finally { this.#release(run, frame); }
       }
       await run.complete();
-      this.#assertAnimation(generation, renderer, decoder);
+      this.#assertAnimation(generation, renderer, decoders);
     } finally { run.close(); }
   }
 
@@ -871,7 +869,7 @@ class PlayerImpl implements Player {
     const asset = this.#asset.snapshot();
     const renderer = this.#renderer?.snapshot();
     if (renderer === undefined) throw new Error("AVAL renderer is unavailable");
-    const decoder = this.#decoder?.snapshot();
+    const decoders = this.#decoders?.snapshot();
     const encodedBytes = encodedCopyCeiling(this.#asset, this.#rendition);
     const surfaceBytes = decodedSurfaceBytes(this.#manifest, this.#rendition);
     const aggregate = checkedTotal([
@@ -879,8 +877,8 @@ class PlayerImpl implements Player {
       asset.residentBlobBytes,
       encodedBytes,
       Math.max(
-        decoder?.openFrameBytes ?? 0,
-        checkedTotal(Array.from({ length: RING }, () => surfaceBytes))
+        decoders?.openFrameBytes ?? 0,
+        checkedTotal(Array.from({ length: RING * 2 }, () => surfaceBytes))
       ),
       renderer.runtimeBytes
     ]);
@@ -891,12 +889,14 @@ class PlayerImpl implements Player {
 
   async #retireAnimationResources(): Promise<void> {
     this.#cancelFrame();
-    this.#decoderHandoff = null;
     this.#preparationDeadline.cancel(abortError());
     const active = this.#active;
+    const provisional = this.#provisional;
+    this.#provisional = null;
     const initialMedia = this.#initialMedia;
     this.#initialMedia = null;
     initialMedia?.run.close();
+    this.#closeActive(provisional);
     this.#closeActive(active);
     if (this.#active === active) this.#active = null;
     const prefetched = this.#routePrefetch.retire();
@@ -907,12 +907,15 @@ class PlayerImpl implements Player {
       ...(active?.starting === null || active?.starting === undefined
         ? [] : [active.starting.ready]),
       ...(active === null ? [] : [active.drain]),
+      ...(provisional?.starting === null || provisional?.starting === undefined
+        ? [] : [provisional.starting.ready]),
+      ...(provisional === null ? [] : [provisional.drain]),
       prefetched,
       ...this.#resident.values(),
       ...(renderer === null ? [] : [renderer.settled()])
     ]);
-    this.#decoder?.dispose();
-    this.#decoder = null;
+    this.#decoders?.dispose();
+    this.#decoders = null;
     renderer?.dispose();
     this.#renderer = null;
     if (renderer !== null) this.#retiredRenderer = renderer;
@@ -929,8 +932,8 @@ class PlayerImpl implements Player {
       this.#input,
       this.#asset,
       checkedTotal([
-        this.#decoder?.snapshot().openFrameBytes ?? 0,
-        this.#decoder?.encodedBytes ?? 0
+        this.#decoders?.snapshot().openFrameBytes ?? 0,
+        this.#decoders?.encodedBytes ?? 0
       ]),
       this.#renderer,
       true
@@ -991,10 +994,11 @@ class PlayerImpl implements Player {
       this.#busy = true;
       const work = this.#advance();
       this.#advanceWork = work;
-      void work.catch((error) => this.#fail(error)).finally(() => {
+      void work.then((outcome) => {
+        if (outcome === "progressed") this.#nextDeadline();
+      }).catch((error) => this.#fail(error)).finally(() => {
         if (this.#advanceWork === work) this.#advanceWork = null;
         this.#busy = false;
-        this.#nextDeadline();
         this.#schedule();
       });
     });
@@ -1005,48 +1009,68 @@ class PlayerImpl implements Player {
     this.#raf = null;
   }
 
-  async #advance(): Promise<void> {
+  async #advance(): Promise<AdvanceOutcome> {
+    this.#routePrefetch.wake();
     const callbackStart = this.#input.platform.now();
     const rationalDeadlineUs = Math.round(this.#deadline * 1000);
     const graph = this.#requireGraph();
     const before = graph.snapshot();
     const departure = this.#departure(before);
-    if (departure !== null) this.#prepareRoutes(before);
     const routeReady = departure === null || this.#departureReady(departure);
-    const hold = this.#routeHold(before, departure, routeReady);
-    if (hold === "decoder-handoff") {
-      this.#inUnderflow = false;
-      const handedOff = this.#active;
-      this.#closeActive(handedOff);
-      if (this.#active === handedOff) this.#active = null;
-    }
-    if (hold !== null) {
-      if (hold === "authored" && !this.#inUnderflow) {
-        this.#inUnderflow = true;
-        this.#underflows += 1;
-        this.#incidents += 1;
-        this.#input.onEvent("underflow", Object.freeze({
-          incident: this.#incidents,
-          heldPresentationOrdinal: this.#ordinal.toString(),
-          cumulativeCount: this.#underflows,
-          isTransitioning: before.isTransitioning
-        }));
-      }
-      return;
-    }
-    this.#inUnderflow = false;
-    const result = graph.tick({
+    const waiting = !routeReady && routeWaitBlocksPresentation(
+      before.presentation,
+      departure,
+      before.presentation?.kind === "body"
+        ? this.#unit(before.presentation.unitId)
+        : null
+    );
+    if (waiting) return this.#waitForRoute(before);
+    const tick = {
       contentOrdinal: this.#ordinal,
       routeReady
-    });
-    this.#ordinal += 1n;
-    await this.#applyWithDraw(
-      result,
-      routeReady,
-      callbackStart,
-      rationalDeadlineUs
-    );
-    this.#prepareRoutes(result.snapshot);
+    };
+    const preview = graph.previewTick(tick);
+    const required = this.#requiredCandidate(preview.presentation);
+    if (required !== null && !this.#routePrefetch.isReady(required.id)) {
+      this.#prepareRoutes(before, required);
+      return this.#waitForRoute(before);
+    }
+    this.#inUnderflow = false;
+    const replacement = required === null ? null : this.#reserveStream(required);
+    try {
+      const result = graph.tick(tick);
+      if (!samePresentation(preview.presentation, result.presentation)) {
+        throw new Error("AVAL graph preview diverged from its committed tick");
+      }
+      this.#ordinal += 1n;
+      await this.#applyWithDraw(
+        result,
+        routeReady,
+        callbackStart,
+        rationalDeadlineUs,
+        replacement
+      );
+      this.#prepareRoutes(graph.snapshot());
+      return "progressed";
+    } catch (error) {
+      this.#cancelProvisional(replacement);
+      throw error;
+    }
+  }
+
+  #waitForRoute(snapshot: Readonly<MotionGraphSnapshot>): AdvanceOutcome {
+    if (!this.#inUnderflow) {
+      this.#inUnderflow = true;
+      this.#underflows += 1;
+      this.#incidents += 1;
+      this.#input.onEvent("underflow", Object.freeze({
+        incident: this.#incidents,
+        heldPresentationOrdinal: this.#ordinal.toString(),
+        cumulativeCount: this.#underflows,
+        isTransitioning: snapshot.isTransitioning
+      }));
+    }
+    return "waiting-route";
   }
 
   #needsTick(snapshot: Readonly<MotionGraphSnapshot>): boolean {
@@ -1125,36 +1149,48 @@ class PlayerImpl implements Player {
     result: Readonly<MotionGraphResult>,
     routeReady: boolean,
     callbackStart: number,
-    rationalDeadlineUs: number | null
+    rationalDeadlineUs: number | null,
+    preparedReplacement: ActiveMedia | null | undefined = undefined
   ): Promise<void> {
     const generation = this.#animationGeneration;
     const renderer = this.#renderer;
-    const decoder = this.#decoder;
-    if (renderer === null || decoder === null) {
+    const decoders = this.#decoders;
+    if (renderer === null || decoders === null) {
       throw new Error("AVAL animation resources are unavailable");
-    }
-    const post: Readonly<MotionGraphEffect>[] = [];
-    for (const effect of result.effects) {
-      if (postDraw(effect)) post.push(effect);
-      else this.#applyEffect(effect, result.snapshot);
     }
     const presentation = result.presentation;
     if (presentation === null) throw new Error("Invalid AVAL graph presentation");
-    await this.#draw(presentation, generation, renderer, decoder);
-    this.#assertAnimation(generation, renderer, decoder);
-    const submissionComplete = this.#input.platform.now();
-    for (const effect of post) {
-      this.#assertAnimation(generation, renderer, decoder);
-      this.#applyEffect(effect, result.snapshot);
+    const required = preparedReplacement === undefined
+      ? this.#requiredCandidate(presentation)
+      : null;
+    const replacement: ActiveMedia | null = preparedReplacement === undefined
+      ? required === null ? null : this.#reserveStream(required)
+      : preparedReplacement;
+    try {
+      const post: Readonly<MotionGraphEffect>[] = [];
+      for (const effect of result.effects) {
+        if (postDraw(effect)) post.push(effect);
+        else this.#applyEffect(effect, result.snapshot);
+      }
+      await this.#draw(presentation, generation, renderer, decoders, replacement);
+      this.#assertAnimation(generation, renderer, decoders);
+      const submissionComplete = this.#input.platform.now();
+      for (const effect of post) {
+        this.#assertAnimation(generation, renderer, decoders);
+        this.#applyEffect(effect, result.snapshot);
+      }
+      this.#assertAnimation(generation, renderer, decoders);
+      this.#record(
+        result,
+        routeReady,
+        callbackStart,
+        submissionComplete,
+        rationalDeadlineUs
+      );
+    } catch (error) {
+      this.#cancelProvisional(replacement);
+      throw error;
     }
-    this.#assertAnimation(generation, renderer, decoder);
-    this.#record(
-      result,
-      routeReady,
-      callbackStart,
-      submissionComplete,
-      rationalDeadlineUs
-    );
   }
 
   #applyEffect(
@@ -1215,67 +1251,97 @@ class PlayerImpl implements Player {
     presentation: Readonly<GraphPresentation>,
     generation: number,
     renderer: Renderer,
-    decoder: Decoder
+    decoders: DecoderPool,
+    preparedReplacement: ActiveMedia | null
   ): Promise<void> {
-    if (presentation.kind === "static") return;
-    this.#assertAnimation(generation, renderer, decoder);
+    if (presentation.kind === "static") {
+      if (preparedReplacement !== null) {
+        throw new Error("Invalid AVAL prepared replacement");
+      }
+      return;
+    }
+    this.#assertAnimation(generation, renderer, decoders);
     const key = `${presentation.kind}\0${presentation.unitId}\0${String(presentation.frameIndex)}`;
-    if (key === this.#lastDraw) return;
+    if (key === this.#lastDraw) {
+      if (preparedReplacement !== null) {
+        throw new Error("Invalid AVAL prepared replacement");
+      }
+      return;
+    }
     const unit = this.#unit(presentation.unitId);
     if (presentation.kind === "reversible") {
+      if (preparedReplacement !== null) {
+        throw new Error("Invalid AVAL prepared replacement");
+      }
       await this.#ensureResident(unit);
-      this.#assertAnimation(generation, renderer, decoder);
-      if (this.#active?.resident !== unit.id) {
-        this.#closeActive(this.#active);
-        this.#active = {
+      this.#assertAnimation(generation, renderer, decoders);
+      const previous = this.#active;
+      const replacement = previous?.resident === unit.id
+        ? previous
+        : {
           unit,
           run: null,
           starting: null,
+          promoted: false,
           resident: unit.id,
           lastIndex: -1,
           drainedIndex: -1,
           drain: Promise.resolve()
         };
-      }
       await renderer.drawStored(unit.id, presentation.frameIndex);
-      this.#assertAnimation(generation, renderer, decoder);
-    } else {
-      let active = this.#active;
-      if (
-        active === null || active.resident !== null || active.unit.id !== unit.id ||
-        presentation.frameIndex <= active.lastIndex
-      ) {
-        this.#closeActive(active);
-        active = this.#beginStream(unit);
+      this.#assertAnimation(generation, renderer, decoders);
+      if (replacement !== previous) {
+        this.#active = replacement;
+        this.#closeActive(previous);
       }
+    } else {
+      const previous = this.#active;
+      const replacing = previous === null || previous.resident !== null ||
+        previous.unit.id !== unit.id || presentation.frameIndex <= previous.lastIndex;
+      if (replacing !== (preparedReplacement !== null)) {
+        throw new Error("Invalid AVAL prepared replacement");
+      }
+      const active = preparedReplacement ?? previous;
+      if (active === null || active.unit.id !== unit.id) {
+        throw new Error("Invalid AVAL prepared replacement");
+      }
+      if (replacing) await this.#activeRun(active, true);
       if (this.#hasResident(unit.id, presentation.frameIndex)) {
         await renderer.drawStored(unit.id, presentation.frameIndex);
-        this.#assertAnimation(generation, renderer, decoder);
-        this.#drainThrough(active, presentation.frameIndex);
+        this.#assertAnimation(generation, renderer, decoders);
       } else {
         if (active.drainedIndex < presentation.frameIndex - 1) {
           this.#drainThrough(active, presentation.frameIndex - 1);
         }
         await active.drain;
-        this.#assertAnimation(generation, renderer, decoder);
+        this.#assertAnimation(generation, renderer, decoders);
         const run = await this.#activeRun(active);
-        this.#assertAnimation(generation, renderer, decoder);
+        this.#assertAnimation(generation, renderer, decoders);
         const frame = await run.take(presentation.frameIndex);
         try {
-          this.#assertAnimation(generation, renderer, decoder);
+          this.#assertAnimation(generation, renderer, decoders);
           await renderer.draw(frame);
-          this.#assertAnimation(generation, renderer, decoder);
+          this.#assertAnimation(generation, renderer, decoders);
         }
         finally { this.#release(run, frame); }
         active.drainedIndex = presentation.frameIndex;
       }
-      this.#assertAnimation(generation, renderer, decoder);
+      this.#assertAnimation(generation, renderer, decoders);
       active.lastIndex = presentation.frameIndex;
+      if (replacing) {
+        this.#promote(active);
+        this.#active = active;
+        if (this.#provisional === active) this.#provisional = null;
+        this.#closeActive(previous);
+      }
+      if (this.#hasResident(unit.id, presentation.frameIndex)) {
+        this.#drainThrough(active, presentation.frameIndex);
+      }
     }
-    this.#assertAnimation(generation, renderer, decoder);
+    this.#assertAnimation(generation, renderer, decoders);
     this.#lastDraw = key;
     if (this.#firstFrame) {
-      this.#assertAnimation(generation, renderer, decoder);
+      this.#assertAnimation(generation, renderer, decoders);
       this.#firstFrame = false;
       this.#input.onDraw();
     }
@@ -1284,47 +1350,66 @@ class PlayerImpl implements Player {
   #assertAnimation(
     generation: number,
     renderer: Renderer,
-    decoder: Decoder
+    decoders: DecoderPool
   ): void {
     if (this.#disposed || this.#staticReason !== null ||
       this.#animationGeneration !== generation || this.#renderer !== renderer ||
-      this.#decoder !== decoder) throw abortError();
+      this.#decoders !== decoders) throw abortError();
   }
 
   #beginStream(unit: Unit): ActiveMedia {
     const starting = this.#takeRun(unit);
-    const active: ActiveMedia = {
+    return {
       unit,
       run: null,
       starting,
+      promoted: !starting.candidate,
       resident: null,
       lastIndex: -1,
       drainedIndex: -1,
       drain: Promise.resolve()
     };
-    this.#active = active;
-    void starting.ready.then((run) => {
-      if (
-        this.#active === active && !this.#disposed && this.#staticReason === null
-      ) {
-        active.run = run;
-      } else run.close();
-    }, (error) => {
-      if (!isAbort(error)) this.#fail(error);
-    });
+  }
+
+  #reserveStream(unit: Unit): ActiveMedia {
+    if (this.#provisional !== null) {
+      throw new Error("AVAL replacement transaction is already active");
+    }
+    const active = this.#beginStream(unit);
+    this.#provisional = active;
     return active;
   }
 
-  async #activeRun(active: ActiveMedia): Promise<DecodeRun> {
+  #cancelProvisional(active: ActiveMedia | null): void {
+    if (active === null || this.#provisional !== active) return;
+    this.#provisional = null;
+    this.#closeActive(active);
+  }
+
+  async #activeRun(active: ActiveMedia, detached = false): Promise<DecodeRun> {
     if (active.run !== null) return active.run;
     if (active.starting === null) throw new Error("Invalid AVAL media state");
     const run = await active.starting.ready;
-    if (this.#active !== active || this.#staticReason !== null || this.#disposed) {
+    if (
+      (!detached && this.#active !== active) ||
+      this.#staticReason !== null || this.#disposed
+    ) {
       run.close();
       throw abortError();
     }
     active.run = run;
     return run;
+  }
+
+  #promote(active: ActiveMedia): void {
+    if (active.promoted) return;
+    const decoders = this.#decoders;
+    const run = active.run;
+    if (decoders === null || run === null || active.starting?.candidate !== true) {
+      throw new Error("Invalid AVAL candidate promotion");
+    }
+    decoders.promote(run);
+    active.promoted = true;
   }
 
   #drainThrough(active: ActiveMedia, index: number): void {
@@ -1354,51 +1439,27 @@ class PlayerImpl implements Player {
       return this.#resolvedRunStart(initial.run);
     }
     const prepared = this.#routePrefetch.claim(unit.id);
-    return prepared ?? this.#createRunStart(unit);
+    if (prepared === undefined) {
+      throw new Error("AVAL candidate route is unavailable");
+    }
+    return Object.freeze({ ...prepared, candidate: true });
   }
 
   #resolvedRunStart(run: DecodeRun): DecodeRunStart {
     return Object.freeze({
       ready: Promise.resolve(run),
+      candidate: false,
       cancel: () => run.close()
     });
   }
 
-  #createRunStart(unit: Unit): DecodeRunStart {
-    const controller = new AbortController();
-    const signal = AbortSignal.any([
-      this.#preparationDeadline.signal,
-      controller.signal
-    ]);
-    let run: DecodeRun | null = null;
-    const ready = this.#newRun(unit, signal).then(async (created) => {
-      run = created;
-      try {
-        await created.ready();
-        signal.throwIfAborted();
-        if (this.#disposed) throw abortError();
-        return created;
-      } catch (error) {
-        created.close();
-        throw error;
-      }
-    });
-    let canceled = false;
-    return Object.freeze({
-      ready,
-      cancel: () => {
-        if (canceled) return;
-        canceled = true;
-        controller.abort(abortError());
-        run?.close();
-        void ready.then((created) => created.close(), () => undefined);
-      }
-    });
-  }
-
-  #prepareRoutes(snapshot: Readonly<MotionGraphSnapshot>): void {
+  #prepareRoutes(
+    snapshot: Readonly<MotionGraphSnapshot>,
+    required: Unit | null = null
+  ): void {
     if (this.#staticReason !== null || this.#disposed || this.#failed) return;
     const active = this.#active;
+    const pending = this.#edge(snapshot.pendingEdgeId);
     const plan = planRoutePrefetch(
       this.#manifest,
       snapshot,
@@ -1409,110 +1470,35 @@ class PlayerImpl implements Player {
             mode: active.resident === null ? "stream" : "resident"
           },
       RING,
-      this.#handoffResumeUnit(snapshot)
+      pending !== null && this.#departureReady(pending)
     );
     for (const unit of plan.resident) void this.#ensureResident(unit);
-    this.#routePrefetch.reconcile(plan.decode);
+    if (required === null) {
+      this.#routePrefetch.reconcile(plan.decode);
+      return;
+    }
+    const planned = plan.decode.find(({ unit }) => unit.id === required.id);
+    const priority = planned ?? Object.freeze({
+      unit: required,
+      reason: "presentation-continuation" as const
+    });
+    this.#routePrefetch.reconcile([
+      priority,
+      ...plan.decode.filter(({ unit }) => unit.id !== required.id)
+    ].slice(0, MAX_ROUTE_PREFETCH_INTENTS));
   }
 
-  #handoffResumeUnit(snapshot: Readonly<MotionGraphSnapshot>): string | null {
-    const handoff = this.#decoderHandoff;
-    const presentation = snapshot.presentation;
+  #requiredCandidate(presentation: Readonly<GraphPresentation> | null): Unit | null {
     if (
-      handoff === null || presentation?.kind !== "body" ||
-      handoff.unitId !== presentation.unitId ||
-      handoff.frameIndex !== presentation.frameIndex
+      presentation === null || presentation.kind === "static" ||
+      presentation.kind === "reversible"
     ) return null;
-    const departure = this.#departure(snapshot);
-    if (
-      departure !== null && snapshot.pendingEdgeId === departure.id &&
-      this.#atDepartureBoundary(
-        departure,
-        presentation.state,
-        presentation.frameIndex
-      )
-    ) return null;
-    return presentation.unitId;
-  }
-
-  #routeHold(
-    snapshot: Readonly<MotionGraphSnapshot>,
-    departure: Readonly<Edge> | null,
-    routeReady: boolean
-  ): RouteHold {
-    if (routeReady) {
-      this.#decoderHandoff = null;
-      return null;
-    }
-    const presentation = snapshot.presentation;
-    if (
-      departure !== null && presentation?.kind === "body" &&
-      this.#decoderHandoff !== null &&
-      this.#decoderHandoff.unitId === presentation.unitId &&
-      this.#decoderHandoff.frameIndex === presentation.frameIndex &&
-      snapshot.pendingEdgeId === departure.id &&
-      this.#atDepartureBoundary(
-        departure,
-        presentation.state,
-        presentation.frameIndex
-      )
-    ) {
-      if (this.#decoderHandoff.edgeId !== departure.id) {
-        this.#decoderHandoff = Object.freeze({
-          edgeId: departure.id,
-          unitId: presentation.unitId,
-          frameIndex: presentation.frameIndex
-        });
-      }
-      return "decoder-handoff";
-    }
-    this.#decoderHandoff = null;
-    if (departure !== null &&
-      this.#activeBlocksPendingDeparture(snapshot, departure)) {
-      if (presentation?.kind !== "body") {
-        throw new Error("AVAL decoder handoff invariant failed");
-      }
-      this.#decoderHandoff = Object.freeze({
-        edgeId: departure.id,
-        unitId: presentation.unitId,
-        frameIndex: presentation.frameIndex
-      });
-      return "decoder-handoff";
-    }
-    return routeWaitBlocksPresentation(
-      presentation,
-      departure,
-      presentation?.kind === "body" ? this.#unit(presentation.unitId) : null
-    ) ? "authored" : null;
-  }
-
-  #activeBlocksPendingDeparture(
-    snapshot: Readonly<MotionGraphSnapshot>,
-    departure: Readonly<Edge>
-  ): boolean {
-    const presentation = snapshot.presentation;
-    return snapshot.pendingEdgeId === departure.id &&
-      presentation?.kind === "body" && this.#active?.resident === null &&
-      this.#active.unit.id === presentation.unitId &&
-      this.#atDepartureBoundary(
-        departure,
-        presentation.state,
-        presentation.frameIndex
-      );
-  }
-
-  #atDepartureBoundary(
-    edge: Readonly<Edge>,
-    stateId: string,
-    frameIndex: number
-  ): boolean {
-    const start = edge.start;
-    if (start.type === "cut") return true;
-    const body = this.#unit(this.#state(stateId).bodyUnit);
-    if (body.kind !== "body") return false;
-    if (start.type === "finish") return frameIndex === body.frameCount - 1;
-    return body.ports.find(({ id }) => id === start.sourcePort)
-      ?.portalFrames.includes(frameIndex) === true;
+    const key = `${presentation.kind}\0${presentation.unitId}\0${String(presentation.frameIndex)}`;
+    if (key === this.#lastDraw) return null;
+    const unit = this.#unit(presentation.unitId);
+    const active = this.#active;
+    return active === null || active.resident !== null || active.unit.id !== unit.id ||
+      presentation.frameIndex <= active.lastIndex ? unit : null;
   }
 
   #departure(snapshot: Readonly<MotionGraphSnapshot>): Readonly<Edge> | null {
@@ -1530,9 +1516,15 @@ class PlayerImpl implements Player {
   #departureReady(edge: Readonly<Edge>): boolean {
     if (edge.start.type === "cut") {
       const route = this.#plan?.routes.find(({ edge: id }) => id === edge.id);
-      return route !== undefined && route.targetFrames.every((frame) =>
-        this.#hasResident(route.targetUnit, frame)
-      );
+      if (
+        route === undefined || !route.targetFrames.every((frame) =>
+          this.#hasResident(route.targetUnit, frame)
+        )
+      ) return false;
+      const transition = edge.transition;
+      return transition?.kind === "reversible"
+        ? this.#residentReady.has(transition.unit)
+        : this.#routePrefetch.isReady(transition?.unit ?? route.targetUnit);
     }
     const transition = edge.transition;
     if (transition?.kind === "reversible") {
@@ -1550,25 +1542,28 @@ class PlayerImpl implements Player {
   ): Promise<DecodeRun> {
     await this.#preloadRun(unit, signal);
     signal.throwIfAborted();
-    return this.#createLoadedRun(unit);
+    return this.#createLoadedRun(unit, "foreground");
   }
 
   async #preloadRun(unit: Unit, signal: AbortSignal): Promise<void> {
-    if (this.#decoder === null) throw new Error("AVAL decoder is unavailable");
+    if (this.#decoders === null) throw new Error("AVAL decoder is unavailable");
     this.#unitSpan(unit);
     await this.#asset.unitBytes(this.#rendition.id, unit.id, signal);
     signal.throwIfAborted();
     this.#reportResourceBytes();
   }
 
-  #createLoadedRun(unit: Unit): DecodeRun {
-    const decoder = this.#decoder;
-    if (decoder === null) throw new Error("AVAL decoder is unavailable");
+  #createLoadedRun(
+    unit: Unit,
+    role: "foreground" | "candidate"
+  ): DecodeRun {
+    const decoders = this.#decoders;
+    if (decoders === null) throw new Error("AVAL decoder is unavailable");
     const span = this.#unitSpan(unit);
     const copyBytes = encodedUnitCopyBytes(this.#asset, span);
     const decoderBytes = checkedTotal([
-      decoder.snapshot().openFrameBytes,
-      decoder.encodedBytes,
+      decoders.snapshot().openFrameBytes,
+      decoders.encodedBytes,
       copyBytes
     ]);
     if (resourceBytes(this.#asset, decoderBytes, this.#renderer) >
@@ -1597,7 +1592,9 @@ class PlayerImpl implements Player {
       this.#validated.add(unit.id);
       if (this.#validated.size === this.#units.size) this.#validator.complete();
     }
-    const run = decoder.createRun(samples);
+    const run = role === "foreground"
+      ? decoders.createForegroundRun(samples)
+      : decoders.createCandidateRun(samples);
     this.#reportResourceBytes();
     if (run.frameCount !== unit.frameCount) {
       run.close();
@@ -1618,22 +1615,22 @@ class PlayerImpl implements Player {
     if (existing !== undefined) return existing;
     const operation = (async () => {
       const renderer = this.#renderer;
-      const decoder = this.#decoder;
-      if (renderer === null || decoder === null) {
+      const decoders = this.#decoders;
+      if (renderer === null || decoders === null) {
         throw new Error("AVAL animation resources are unavailable");
       }
       const generation = this.#animationGeneration;
       const run = await this.#newRun(unit);
-      this.#assertAnimation(generation, renderer, decoder);
+      this.#assertAnimation(generation, renderer, decoders);
       try {
         for (let index = 0; index < unit.frameCount; index += 1) {
           this.#preparationDeadline.signal.throwIfAborted();
           const frame = await run.take(index);
-          this.#assertAnimation(generation, renderer, decoder);
+          this.#assertAnimation(generation, renderer, decoders);
           try {
             if (!this.#hasResident(unit.id, index)) {
               await renderer.store(unit.id, index, frame);
-              this.#assertAnimation(generation, renderer, decoder);
+              this.#assertAnimation(generation, renderer, decoders);
               this.#reportResourceBytes();
               const resident = this.#residentFrames.get(unit.id) ?? new Set<number>();
               resident.add(index);
@@ -1643,7 +1640,7 @@ class PlayerImpl implements Player {
           finally { this.#release(run, frame); }
         }
         await run.complete();
-        this.#assertAnimation(generation, renderer, decoder);
+        this.#assertAnimation(generation, renderer, decoders);
         this.#residentReady.add(unit.id);
       } finally { run.close(); }
     })();
@@ -1665,6 +1662,8 @@ class PlayerImpl implements Player {
       ? null : Object.freeze({ ...result.presentation });
     const active = this.#active;
     if (active === null) throw new Error("Invalid AVAL media state");
+    const runId = active.run === null || this.#decoders === null
+      ? null : this.#decoders.identity(active.run).logicalId;
     const graphPresentation = result.presentation;
     const edgeId = graphPresentation !== null &&
       (graphPresentation.kind === "locked" || graphPresentation.kind === "reversible")
@@ -1698,7 +1697,7 @@ class PlayerImpl implements Player {
       routeReady,
       selectedBoundary: edge?.start.type ?? null,
       scheduler: Object.freeze({
-        generation: active.run?.generation ?? null,
+        generation: runId,
         activePath: path,
         sourceCursor: null,
         submittedCursor: null,
@@ -1706,11 +1705,11 @@ class PlayerImpl implements Player {
         displayedCursor: Object.freeze({
           path,
           unit: active.unit.id,
-          unitInstance: active.run?.generation ?? 0,
+          unitInstance: runId ?? 0,
           localFrame: frame
         }),
-        ringSize: this.#decoder?.snapshot().openFrames ?? 0,
-        ringCapacity: RING,
+        ringSize: this.#decoders?.snapshot().openFrames ?? 0,
+        ringCapacity: RING * 2,
         smoothSession: this.#incidents === 0
       }),
       submitted: Object.freeze([]),
@@ -1818,8 +1817,8 @@ function renderLayout(
 }
 
 function postDraw(effect: Readonly<MotionGraphEffect>): boolean {
-  return effect.type === "visualstatechange" || effect.type === "transitionend" ||
-    effect.type === "settle";
+  return effect.type === "transitionstart" || effect.type === "visualstatechange" ||
+    effect.type === "transitionend" || effect.type === "settle";
 }
 
 function requestError(name: string): Error {
@@ -1892,11 +1891,7 @@ function decodedSurfaceBytes(
   rendition: Readonly<Rendition>
 ): number {
   return manifest.codec === "h264"
-    ? checkedProduct([
-        Math.ceil(rendition.codedWidth / 16) * 16 + 32,
-        Math.ceil(rendition.codedHeight / 16) * 16 + 32,
-        4
-      ])
+    ? maximumH264DecodedRgbaBytes(rendition.codedWidth, rendition.codedHeight)
     : checkedProduct([rendition.codedWidth, rendition.codedHeight, 4]);
 }
 
@@ -1911,6 +1906,27 @@ export function routeWaitBlocksPresentation(
     departure.start.type !== "cut" &&
     unit?.kind === "body" && unit.playback === "finite" &&
     presentation.frameIndex === unit.frameCount - 1;
+}
+
+function samePresentation(
+  left: Readonly<GraphPresentation> | null,
+  right: Readonly<GraphPresentation> | null
+): boolean {
+  if (left === null || right === null) return left === right;
+  if (left.kind === "static") {
+    return right.kind === "static" && left.state === right.state;
+  }
+  if (left.kind === "intro" || left.kind === "body") {
+    return right.kind === left.kind && left.state === right.state &&
+      left.unitId === right.unitId && left.frameIndex === right.frameIndex;
+  }
+  if (left.kind === "locked") {
+    return right.kind === "locked" && left.edgeId === right.edgeId &&
+      left.unitId === right.unitId && left.frameIndex === right.frameIndex;
+  }
+  return right.kind === "reversible" && left.edgeId === right.edgeId &&
+    left.unitId === right.unitId && left.frameIndex === right.frameIndex &&
+    left.direction === right.direction;
 }
 
 /** Exact encoded-copy ceiling implied by four queued wants plus active and retiring runs. */
@@ -1960,7 +1976,7 @@ function assertCandidateBudget(
     assetSnapshot.metadataBytes,
     residentBlobBytes,
     encodedCopyCeiling(asset, rendition),
-    checkedProduct([RING, decodedSurfaceBytes(asset.manifest, rendition)]),
+    checkedProduct([RING * 2, decodedSurfaceBytes(asset.manifest, rendition)]),
     rendererAdmission.runtimeBytes
   ]);
   if (aggregate > asset.manifest.limits.maxRuntimeBytes) {

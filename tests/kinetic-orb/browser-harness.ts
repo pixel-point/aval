@@ -9,8 +9,10 @@ export interface BrowserFailures {
 export interface InteractionLedger {
   pointerEnters: number;
   pointerLeaves: number;
+  readonly pointerTimestamps: number[];
   readonly transitionStarts: string[];
   readonly runtimeEvents: string[];
+  readonly traceStartIndex: number;
 }
 
 type InstrumentedAvalElement = AvalElement & {
@@ -63,12 +65,20 @@ export async function installInteractionLedger(motion: Locator): Promise<void> {
     const ledger: InteractionLedger = {
       pointerEnters: 0,
       pointerLeaves: 0,
+      pointerTimestamps: [],
       transitionStarts: [],
-      runtimeEvents: []
+      runtimeEvents: [],
+      traceStartIndex: element.getDiagnostics({ trace: true }).runtimeTrace?.at(-1)?.index ?? 0
     };
     element.__kineticOrbLedger = ledger;
-    element.addEventListener("pointerenter", () => { ledger.pointerEnters += 1; });
-    element.addEventListener("pointerleave", () => { ledger.pointerLeaves += 1; });
+    element.addEventListener("pointerenter", () => {
+      ledger.pointerEnters += 1;
+      ledger.pointerTimestamps.push(performance.now());
+    });
+    element.addEventListener("pointerleave", () => {
+      ledger.pointerLeaves += 1;
+      ledger.pointerTimestamps.push(performance.now());
+    });
     element.addEventListener("transitionstart", (event) => {
       ledger.transitionStarts.push(event.detail.edge);
     });
@@ -87,9 +97,24 @@ export async function readInteractionLedger(
     return {
       pointerEnters: ledger.pointerEnters,
       pointerLeaves: ledger.pointerLeaves,
+      pointerTimestamps: [...ledger.pointerTimestamps],
       transitionStarts: [...ledger.transitionStarts],
-      runtimeEvents: [...ledger.runtimeEvents]
+      runtimeEvents: [...ledger.runtimeEvents],
+      traceStartIndex: ledger.traceStartIndex
     };
+  });
+}
+
+export async function readSubmissionTimes(motion: Locator): Promise<number[]> {
+  return motion.evaluate((node) => {
+    const element = node as InstrumentedAvalElement;
+    const start = element.__kineticOrbLedger?.traceStartIndex;
+    if (start === undefined) throw new Error("kinetic-orb ledger is unavailable");
+    return (element.getDiagnostics({ trace: true }).runtimeTrace ?? [])
+      .filter((record) => record.index > start)
+      .flatMap((record) => record.canvasSubmissionCompleteMicroseconds === null
+        ? []
+        : [record.canvasSubmissionCompleteMicroseconds / 1_000]);
   });
 }
 

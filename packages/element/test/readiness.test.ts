@@ -47,7 +47,7 @@ describe("all-routes readiness plan", () => {
     expect(plan.semanticPersistentBytes).toBe(21 * 8 * 8 * 4);
     expect(plan.uniquePersistentBytes).toBe(14 * 8 * 8 * 4);
     expect(plan.declaredWorkingSetBytes).toBe(
-      21 * 8 * 8 * 4 + 12 * 8 * 8 * 4 + 150 + 8 * 8 * 4
+      21 * 8 * 8 * 4 + 2 * 12 * 48 * 48 * 4 + 150 + 8 * 8 * 4
     );
   });
 
@@ -130,7 +130,7 @@ function fixture(): Manifest {
       maxRuntimeBytes: Number.MAX_SAFE_INTEGER,
       decodedPixelBytes: frameBytes,
       persistentCacheBytes: persistent,
-      runtimeWorkingSetBytes: persistent + 12 * frameBytes + 150 + frameBytes
+      runtimeWorkingSetBytes: persistent + 2 * 12 * 48 * 48 * 4 + 150 + frameBytes
     }
   };
 }

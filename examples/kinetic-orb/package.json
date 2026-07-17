@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "compile": "avl compile motion.json --out public/kinetic-orb --force",
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host 127.0.0.1 --force",
     "render": "bash blender/render.sh"
   },
   "dependencies": {

@@ -96,7 +96,7 @@ describe("element cleanup regressions", () => {
     connect(element);
     await element.prepare();
     expect(element.getDiagnostics().runtime).toMatchObject({
-      pageActiveDecoderLeaseCount: 1,
+      pageActiveDecoderSlotCount: 2,
       pageParticipantCount: 1,
       pagePhysicalBytes: 4_096
     });
@@ -121,7 +121,7 @@ describe("element cleanup regressions", () => {
       decoderLeaseState: "granted",
       playerTrackedBytes: 4_096,
       pagePhysicalBytes: 4_096,
-      pageActiveDecoderLeaseCount: 1,
+      pageActiveDecoderSlotCount: 2,
       pageParticipantCount: 1
     });
     expect(element.getDiagnostics().runtime).toMatchObject({
@@ -129,7 +129,7 @@ describe("element cleanup regressions", () => {
       decoderLeaseState: null,
       playerTrackedBytes: 0,
       pagePhysicalBytes: 0,
-      pageActiveDecoderLeaseCount: 0,
+      pageActiveDecoderSlotCount: 0,
       pageParticipantCount: 0
     });
   });
@@ -173,7 +173,7 @@ describe("element cleanup regressions", () => {
         activeLeaseCount: 1,
         playerTrackedBytes: 4_096,
         pagePhysicalBytes: 4_096,
-        pageActiveDecoderLeaseCount: 1,
+        pageActiveDecoderSlotCount: 2,
         pageParticipantCount: 1
       }
     });
@@ -188,7 +188,7 @@ describe("element cleanup regressions", () => {
         activeLeaseCount: 1,
         playerTrackedBytes: 4_096,
         pagePhysicalBytes: 4_096,
-        pageActiveDecoderLeaseCount: 1,
+        pageActiveDecoderSlotCount: 2,
         pageParticipantCount: 1
       }
     });
@@ -238,13 +238,13 @@ describe("element cleanup regressions", () => {
         completed: false,
         sourceCleanupCompleted: false
       },
-      outstanding: { player: 1, decoder: 1, bytes: 4_096 },
+      outstanding: { player: 1, decoder: 2, bytes: 4_096 },
       runtime: {
         declaredFileBytes: 1_024,
         activeLeaseCount: 1,
         playerTrackedBytes: 4_096,
         pagePhysicalBytes: 4_096,
-        pageActiveDecoderLeaseCount: 1,
+        pageActiveDecoderSlotCount: 2,
         pageParticipantCount: 1
       }
     });
@@ -278,7 +278,7 @@ describe("element cleanup regressions", () => {
         decoderLeaseState: null,
         playerTrackedBytes: 0,
         pagePhysicalBytes: 0,
-        pageActiveDecoderLeaseCount: 0,
+        pageActiveDecoderSlotCount: 0,
         pageParticipantCount: 0
       }
     });
@@ -693,8 +693,8 @@ function playerSnapshot(live: boolean): Readonly<PlayerSnapshot> {
     activeTransportBodies: 0,
     pendingLoads: 0,
     interestedWaiters: 0,
-    workerCount: live ? 1 : 0,
-    openFrames: live ? 1 : 0,
+    workerCount: live ? 2 : 0,
+    openFrames: live ? 2 : 0,
     contextLossCount: 0,
     contextRecoveryCount: 0,
     presentation: Object.freeze({
