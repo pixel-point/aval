@@ -2,7 +2,8 @@
 
 **Date:** 2026-07-17
 
-**Status:** Implemented; verification evidence is listed in Section 10
+**Status:** Approved; implementation must satisfy the structural remediation
+in Sections 4, 6, 9, and 10
 
 **Supersedes:** The runtime rule that an animated player owns one serial decoder
 and must close its foreground run before preparing a non-resident departure.
@@ -88,12 +89,16 @@ The coordinator exposes media concepts rather than raw lane numbers:
 
 - **foreground** — the decoder and run allowed to supply presentation frames;
 - **candidate** — the decoder and run preparing one selected departure;
-- **prepared media** — an immutable unit plus a ready run;
-- **promotion** — transfer of a prepared route into foreground ownership; and
+- **candidate transaction** — an immutable unit plus a ready run whose sole
+  owner can either commit or cancel it;
+- **promotion** — transaction commit that transfers the candidate into
+  foreground ownership and retires the previous foreground atomically; and
 - **retirement** — closure and final release of the previous foreground.
 
 Each run also receives a coordinator-wide logical ID for traces. Worker-local
-generation numbers remain valid only inside their decoder.
+generation numbers remain valid only inside their decoder. Candidate role,
+promotion state, and cancellation live only in the transaction; Player does
+not mirror them with booleans, nullable starts, or provisional lane flags.
 
 The candidate decoder is created when animated resources are prepared and
 remains configured but empty until an authoritative route exists. It holds no
@@ -103,28 +108,35 @@ avoiding a persistent frame cache.
 
 ### 4.2 Page decoder admission
 
-Page resources account for physical decoder slots, not player count. An
-animated Player requires an atomic two-slot decoder permit before it creates
-its two workers. The existing page ceiling remains the authority for how many
-physical decoders may be live.
+Page resources grant animated-player permits. One permit always represents the
+exact two physical decoder slots required before a player creates its workers.
+The existing page ceiling remains the authority for how many physical decoders
+may be live.
 
 Admission never creates a one-lane animated compatibility mode. If the pair
 cannot be granted, the candidate is reported as `decoder-queued` and the
 existing static readiness/restart behavior remains responsible for recovery
 when resources later become available.
 
-The page participant owns one weighted ticket and one weighted lease. Ticket
-grant, cancellation, visibility parking, release, diagnostics, and disposal
-operate on the lease weight atomically. This prevents two players from each
-holding one foreground decoder while waiting forever for a second slot.
+The page participant owns one ticket and one lease. There is no one-slot or
+weighted compatibility API. Grant, cancellation, visibility parking, release,
+diagnostics, and disposal operate on the two-decoder permit atomically. This
+prevents two players from each holding one foreground decoder while waiting
+forever for a second slot.
 
 ### 4.3 Resource accounting
 
 The runtime reserves the worst-case aggregate for two decoder rings before
-animated readiness. With the current ring size of twelve, the decoder surface
-term is twenty-four decoded surfaces. For H.264, compiler, readiness, and
-runtime all use the canonical macroblock-aligned browser surface plus the
-32-pixel decoder padding bound on each axis. Encoded-copy ceilings include one
+animated readiness. One exported, side-effect-free Element capacity profile is
+the sole authority for decoder count, ring size, candidate readiness depth, and
+total decoded surfaces. Compiler estimation, readiness validation, Player
+accounting, page admission, and diagnostics derive their values from that
+profile; they do not repeat `12`, `2`, or `6`.
+
+For decoded-surface geometry, Format exposes one codec-dispatching helper.
+H.264 uses the canonical macroblock-aligned browser surface plus the 32-pixel
+decoder padding bound on each axis; other codecs use exact coded RGBA geometry.
+Consumers do not repeat that codec branch. Encoded-copy ceilings include one
 foreground occurrence, one candidate occurrence, retiring ownership, and the
 bounded compressed prefetch intents without double-counting shared asset
 storage.
@@ -190,14 +202,15 @@ instead of freezing on the loop's final frame.
 At each content tick the player:
 
 1. previews the next graph presentation with current route readiness;
-2. synchronously claims the required ready unit before graph mutation or public
-   callbacks;
+2. synchronously claims the required ready candidate transaction before graph
+   mutation or public callbacks;
 3. ticks the graph and verifies it matches the preview;
-4. installs a player-owned provisional media transaction around that run;
-5. submits its target entry frame while the run still has candidate ownership;
-6. promotes the candidate and installs it as active only after submission;
-7. retires the previous foreground and waits for worker acknowledgement before
-   reusing that physical lane; and
+4. submits its target entry frame through the candidate transaction;
+5. commits the transaction only after submission, atomically promoting the
+   candidate and retiring the previous foreground;
+6. installs the committed stream as the Player's active media;
+7. waits for worker acknowledgement before reusing the retired physical lane;
+   and
 8. publishes transition effects and reconciles from the current graph snapshot.
 
 There is no interval in which `active` is cleared merely to free a decoder.
@@ -244,27 +257,31 @@ manifest or page budget and never falls back to the removed one-lane handoff.
 
 Visibility suspension, source replacement, context loss, static recovery, and
 disposal cancel route planning, close candidate and foreground runs, await
-owned asynchronous work, dispose both decoders, release the weighted page
+owned asynchronous work, dispose both decoders, release the atomic page
 lease, clear renderer resources, and publish zero resource ownership.
 
 ## 9. Code Boundaries
 
 The implementation is divided as follows:
 
-- `decoder-pool.ts` owns foreground/candidate decoder roles, aggregate
-  accounting, logical run identities, promotion, and disposal.
-- `decoder.ts` retains the serial worker client and run contract, with only the
-  narrow accounting/readiness hooks needed by the coordinator. Its
-  acknowledged-idle state is the authority for physical lane reuse.
+- `decoder-pool.ts` owns foreground/candidate decoder roles, the candidate
+  transaction, aggregate accounting, logical run identities, atomic commit,
+  cancellation, and disposal.
+- `decoder.ts` is a strict single-run worker lane with only the narrow
+  accounting/readiness hooks needed by the coordinator. It has no queued-run
+  compatibility scheduler; acknowledged idle is the authority for reuse.
 - `route-prefetch.ts` separates parallel byte loading from single-candidate
-  decode admission and owns candidate reconciliation.
-- `player.ts` coordinates graph ticks, atomic draw/promotion, scheduling, and
-  public effects without embedding decoder-pool internals.
-- `page-resources.ts` grants weighted physical decoder leases atomically.
-- `aval-element.ts` and `player-contract.ts` expose the weighted readiness
-  permission and aggregate diagnostics.
+  decode admission, represents each entry with one discriminated lifecycle,
+  and transfers a ready candidate transaction synchronously.
+- `player.ts` coordinates graph ticks, target draw, transaction commit,
+  scheduling, and public effects without mirroring decoder-pool role state.
+- `page-resources.ts` grants one atomic two-decoder player permit.
+- `aval-element.ts` and `player-contract.ts` expose readiness permission and
+  aggregate physical-slot diagnostics.
 - compiler resource estimation changes its decoder surface term from one ring
-  to two canonically bounded decoder surfaces.
+  to the canonical Element capacity profile.
+- `@pixel-point/aval-graph` owns presentation equality because it owns the
+  `GraphPresentation` union; Element and player-web import that helper.
 
 The worker protocol and renderer resident-storage implementation do not gain a
 second concurrency mode.
@@ -291,10 +308,10 @@ Tests must prove:
 - cancellation, recovery, and disposal return workers, frames, encoded bytes,
   page leases, and renderer operations to zero.
 
-Page-resource tests cover weighted FIFO grant, visibility parking, atomic
-release, and the absence of partial pair allocation. Route-prefetch tests cover
-loaded-versus-decoding state, immutable-unit reuse, cancellation, final-portal
-continuation priority, and acknowledged lane retirement.
+Page-resource tests cover FIFO grant, visibility parking, atomic release, and
+the absence of partial pair allocation. Route-prefetch tests cover its typed
+lifecycle, synchronous ready transfer, immutable-unit reuse, cancellation,
+final-portal continuation priority, and acknowledged lane retirement.
 
 ### 10.2 Browser gates
 
@@ -322,7 +339,15 @@ The standard `npm run kinetic-orb` workflow rebuilds the public packages before
 starting the demo, and the demo forces a fresh Vite dependency graph. A branch
 pull therefore cannot silently exercise an ignored, stale `dist` runtime. The
 prebuilt Playwright gate starts the example workspace directly after its caller
-has completed the explicit public-package build.
+has completed the explicit public-package build. It never silently reuses an
+existing local server; manual reuse requires an explicit opt-in plus a matching
+build fingerprint.
+
+The packed dev proof must fail immediately when the compiler emits a JSON error
+diagnostic and include bounded stdout and stderr context. Element worker URLs
+with the intentional `no-inline` query are accepted only for the canonical
+worker entry, and that entry receives the same closed worker CSP and request
+classification as every other declared worker entry.
 
 Wall-clock performance thresholds run on the controlled local/release runner.
 Deterministic ownership and scheduling tests remain the required portable CI
