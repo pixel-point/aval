@@ -1,11 +1,11 @@
 import {
-  DECODER_RING_SIZE,
   isDecoderTerminalEvent,
   isDecoderWorkerEvent,
   type DecoderChunk,
   type DecoderCommand,
   type DecoderRunEvent
 } from "./decoder-protocol.js";
+import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 
 export interface DecodeSample {
   readonly data: ArrayBuffer;
@@ -50,13 +50,12 @@ const MAX_BYTES = Number.MAX_SAFE_INTEGER;
 type DecoderLane =
   | Readonly<{ phase: "idle"; generationFloor: number }>
   | Readonly<{ phase: "running"; run: DecodeRun }>
+  | Readonly<{ phase: "retained"; run: DecodeRun }>
   | Readonly<{ phase: "closing"; run: DecodeRun }>
   | Readonly<{ phase: "terminal" }>;
 
 export class Decoder {
   readonly #worker: Worker;
-  readonly #runs = new Map<number, DecodeRun>();
-  readonly #queue: DecodeRun[] = [];
   readonly #expectation: DecoderOutputExpectation;
   readonly #maxDecodedBytes: number;
   readonly #onDecodedBytes: ((bytes: number) => void) | undefined;
@@ -65,6 +64,8 @@ export class Decoder {
   readonly #setTimeout: (callback: () => void, delay: number) => number;
   readonly #clearTimeout: (handle: number) => void;
   readonly #support = deferred<boolean>();
+  readonly #failure = deferred<never>();
+  #run: DecodeRun | null = null;
   #sequence = 0;
   #decodedBytes = 0;
   #encodedBytes = 0;
@@ -117,6 +118,7 @@ export class Decoder {
       this.#fail();
     }
     void this.#support.promise.catch(() => undefined);
+    void this.#failure.promise.catch(() => undefined);
   }
 
   /** Probes the configuration in the same worker that will decode it. */
@@ -124,9 +126,22 @@ export class Decoder {
     return this.#support.promise;
   }
 
+  /** Rejects exactly once if this physical lane becomes unusable. */
+  public failure(): Promise<never> {
+    return this.#failure.promise;
+  }
+
   public createRun(samples: readonly Readonly<DecodeSample>[]): DecodeRun {
     if (this.#disposed) throw abortError();
     if (this.#error !== undefined) throw this.#error;
+    if (
+      !this.#configured || this.#lane.phase !== "idle" || this.#run !== null
+    ) {
+      throw new Error("decoder lane is unavailable");
+    }
+    if (this.#sequence === MAX_BYTES) {
+      throw new RangeError("decoder run identity is exhausted");
+    }
     const id = ++this.#sequence;
     const run = new DecodeRun(
       id,
@@ -155,9 +170,14 @@ export class Decoder {
       this.#encodedBytes = previousEncodedBytes;
       throw error;
     }
-    this.#runs.set(id, run);
-    this.#queue.push(run);
-    this.#schedule();
+    this.#run = run;
+    this.#lane = { phase: "running", run };
+    run.activate();
+    try {
+      this.#post({ t: "start", run: run.generation });
+    } catch {
+      this.#fail();
+    }
     return run;
   }
 
@@ -166,11 +186,9 @@ export class Decoder {
     openFrames: number;
     openFrameBytes: number;
   }> {
-    let openFrames = 0;
-    for (const run of this.#runs.values()) openFrames += run.openFrames;
     return Object.freeze({
       workerCount: this.#disposed || this.#error !== undefined ? 0 : 1,
-      openFrames,
+      openFrames: this.#run?.openFrames ?? 0,
       openFrameBytes: this.#decodedBytes
     });
   }
@@ -180,18 +198,18 @@ export class Decoder {
   /** True only when the worker has acknowledged retirement and can start now. */
   public get available(): boolean {
     return this.#configured && !this.#disposed && this.#error === undefined &&
-      this.#lane.phase === "idle" && this.#queue.length === 0;
+      this.#lane.phase === "idle" && this.#run === null;
   }
 
   public dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#lane = { phase: "terminal" };
-    for (const run of [...this.#runs.values()]) run.close();
+    const run = this.#run;
+    run?.close();
     try { this.#post({ t: "dispose" }); } catch { /* terminal */ }
     this.#worker.terminate();
-    for (const run of [...this.#runs.values()]) this.#deleteRun(run);
-    this.#queue.length = 0;
+    if (run !== null) this.#deleteRun(run);
     this.#support.reject(abortError());
   }
 
@@ -216,7 +234,6 @@ export class Decoder {
         this.#fail(new Error("AVAL decoder configuration is unsupported"));
         return;
       }
-      this.#schedule();
       return;
     }
     if (value.t === "error") {
@@ -252,9 +269,14 @@ export class Decoder {
         return;
       }
       if (isDecoderTerminalEvent(event)) {
-        this.#settleActive(lane.run, true);
+        this.#settleClosed(lane.run);
       }
       // Start and acceptance may already be in flight when local close wins.
+      return;
+    }
+    if (lane.phase === "retained") {
+      if (event.t === "frame") event.frame.close();
+      this.#fail();
       return;
     }
     if (event.t === "closed") {
@@ -268,7 +290,7 @@ export class Decoder {
       this.#fail(error instanceof Error ? error : undefined);
       return;
     }
-    if (event.t === "flushed") this.#settleActive(lane.run, false);
+    if (event.t === "flushed") this.#retain(lane.run);
   }
 
   #receiveStale(event: DecoderRunEvent): void {
@@ -282,44 +304,19 @@ export class Decoder {
     this.#fail();
   }
 
-  #settleActive(run: DecodeRun, deleteRun: boolean): void {
+  #settleClosed(run: DecodeRun): void {
     this.#lane = {
       phase: "idle",
       generationFloor: run.generation
     };
-    if (deleteRun) this.#deleteRun(run);
-    this.#schedule();
+    this.#deleteRun(run);
   }
 
-  #schedule(): void {
-    if (
-      !this.#configured ||
-      this.#disposed ||
-      this.#error !== undefined ||
-      this.#lane.phase !== "idle"
-    ) return;
-    const generationFloor = this.#lane.generationFloor;
-    let run: DecodeRun | undefined;
-    while ((run = this.#queue.shift()) !== undefined && run.closed) {
-      this.#deleteRun(run);
-    }
-    if (run === undefined) return;
-    if (run.generation <= generationFloor) {
-      this.#fail();
-      return;
-    }
-    this.#lane = { phase: "running", run };
-    run.activate();
-    try {
-      this.#post({ t: "start", run: run.generation });
-    } catch {
-      this.#fail();
-    }
+  #retain(run: DecodeRun): void {
+    this.#lane = { phase: "retained", run };
   }
 
   #closeRun(run: DecodeRun): void {
-    const index = this.#queue.indexOf(run);
-    if (index >= 0) this.#queue.splice(index, 1);
     if (
       this.#disposed ||
       this.#error !== undefined ||
@@ -329,6 +326,14 @@ export class Decoder {
       return;
     }
     if (this.#lane.phase === "closing" && this.#lane.run === run) return;
+    if (this.#lane.phase === "retained" && this.#lane.run === run) {
+      this.#lane = {
+        phase: "idle",
+        generationFloor: run.generation
+      };
+      this.#deleteRun(run);
+      return;
+    }
     if (this.#lane.phase !== "running" || this.#lane.run !== run) {
       this.#deleteRun(run);
       return;
@@ -342,9 +347,10 @@ export class Decoder {
   }
 
   #availableCredit(): number {
-    let outstanding = 0;
-    for (const run of this.#runs.values()) outstanding += run.outstanding;
-    return Math.max(0, DECODER_RING_SIZE - outstanding);
+    return Math.max(
+      0,
+      ELEMENT_DECODER_CAPACITY.ringSize - (this.#run?.outstanding ?? 0)
+    );
   }
 
   #creditChanged(): void {
@@ -384,7 +390,8 @@ export class Decoder {
   }
 
   #deleteRun(run: DecodeRun): void {
-    if (!this.#runs.delete(run.generation)) return;
+    if (this.#run !== run) return;
+    this.#run = null;
     this.#encodedBytes -= run.encodedBytes;
     try { this.#onEncodedBytes?.(this.#encodedBytes); }
     catch (error) {
@@ -395,10 +402,11 @@ export class Decoder {
   #fail(error = new Error("AVAL decoder failed")): void {
     if (this.#disposed || this.#error !== undefined) return;
     this.#error = error;
+    this.#failure.reject(error);
     this.#support.reject(error);
-    for (const run of [...this.#runs.values()]) run.fail(error);
-    for (const run of [...this.#runs.values()]) this.#deleteRun(run);
-    this.#queue.length = 0;
+    const run = this.#run;
+    run?.fail(error);
+    if (run !== null) this.#deleteRun(run);
     this.#lane = { phase: "terminal" };
     this.#worker.terminate();
   }
@@ -587,7 +595,12 @@ export class DecodeRun {
     this.#wake();
   }
 
-  public async ready(minimum = Math.min(6, this.frameCount)): Promise<void> {
+  public async ready(
+    minimum = Math.min(
+      ELEMENT_DECODER_CAPACITY.candidateReadyFrames,
+      this.frameCount
+    )
+  ): Promise<void> {
     const target = Math.max(0, Math.min(minimum, this.frameCount));
     await this.#wait(() => {
       for (let index = 0; index < target; index += 1) {
@@ -666,7 +679,7 @@ export class DecodeRun {
     const available = this.#credit();
     while (
       this.#nextSample < this.#samples.length &&
-      chunks.length < DECODER_RING_SIZE
+      chunks.length < ELEMENT_DECODER_CAPACITY.ringSize
     ) {
       const sample = this.#samples[this.#nextSample]!;
       if (sample.displayedFrames > available - reserved) break;
@@ -775,7 +788,7 @@ function validateSample(sample: Readonly<DecodeSample>, buffers: Set<ArrayBuffer
     sample.duration < 0 ||
     !Number.isSafeInteger(sample.displayedFrames) ||
     sample.displayedFrames < 0 ||
-    sample.displayedFrames > DECODER_RING_SIZE ||
+    sample.displayedFrames > ELEMENT_DECODER_CAPACITY.ringSize ||
     sample.displayedFrames > 0 && sample.duration === 0 ||
     typeof sample.key !== "boolean"
   ) throw new RangeError("invalid decoder sample");

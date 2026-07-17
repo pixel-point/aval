@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
-const port = process.env.AVL_KINETIC_ORB_PORT ?? "4178";
+// Keep the regression gate isolated from the interactive demo's default 4178.
+const port = process.env.AVL_KINETIC_ORB_PORT ?? "4194";
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
@@ -20,7 +21,7 @@ export default defineConfig({
   webServer: {
     command: `npm run dev -w @pixel-point/aval-kinetic-orb-example -- --port ${port} --strictPort`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 30_000
   },
   projects: [{ name: "chromium" }]

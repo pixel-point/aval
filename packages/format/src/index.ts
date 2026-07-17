@@ -31,7 +31,6 @@ export {
   inspectH264AnnexBRendition,
   isH264Codec,
   isH264LevelIdc,
-  maximumH264DecodedRgbaBytes,
   maximumH264DecoderSurfaceDimension,
   parseH264Codec,
   prepareH264EncoderRendition
@@ -72,6 +71,7 @@ export {
   VIDEO_BITSTREAM_BY_CODEC,
   VIDEO_CODECS
 } from "./video/codec-string.js";
+export { maximumDecodedRgbaBytes } from "./video/decoder-surface.js";
 export { deriveVideoRenditionGeometry, PACKED_ALPHA_GUTTER } from "./video/geometry.js";
 export type {
   ParsedVideoCodecString

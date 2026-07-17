@@ -70,9 +70,12 @@ The implementation must maintain all of these invariants:
    acknowledgement or decoder disposal.
 8. Decoded frames, encoded copies, workers, and physical decoder permits are
    released exactly once on cancellation, failure, recovery, and disposal.
-9. Both lanes count toward one exact player and page resource total before
+9. Fatal failure of either physical lane is observable even when that lane is
+   idle or awaiting retirement acknowledgement; the pool routes that failure
+   into player recovery instead of leaving route admission permanently closed.
+10. Both lanes count toward one exact player and page resource total before
    their allocations occur.
-10. Ordinary streamed candidates never call the renderer's resident
+11. Ordinary streamed candidates never call the renderer's resident
     `store()` or `drawStored()` path.
 
 ## 4. Architecture
@@ -255,6 +258,10 @@ Resource rejection before two-lane readiness selects the next rendition when
 one is available, then static recovery. The runtime never silently exceeds the
 manifest or page budget and never falls back to the removed one-lane handoff.
 
+Lifecycle settlement drains the owned-operation registry to quiescence. Work
+admitted while an earlier byte load settles is part of the same settlement and
+cannot escape a one-time promise snapshot.
+
 Visibility suspension, source replacement, context loss, static recovery, and
 disposal cancel route planning, close candidate and foreground runs, await
 owned asynchronous work, dispose both decoders, release the atomic page
@@ -348,6 +355,14 @@ diagnostic and include bounded stdout and stderr context. Element worker URLs
 with the intentional `no-inline` query are accepted only for the canonical
 worker entry, and that entry receives the same closed worker CSP and request
 classification as every other declared worker entry.
+
+Compiler routing and release inspection derive worker paths, query policy, and
+worker-entry classification from one declarative registry. A worker cannot be
+renamed or added in one gate while silently remaining an ordinary script in
+another. The compiler package ships that registry at its one reviewed JSON
+distribution path. Fresh-build provenance, release staging, and tarball
+inspection require its canonical bytes and reject every other distribution
+JSON file.
 
 Wall-clock performance thresholds run on the controlled local/release runner.
 Deterministic ownership and scheduling tests remain the required portable CI

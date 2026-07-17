@@ -7,10 +7,14 @@ import type {
   AvalSourceCandidate,
   StaticReason
 } from "@pixel-point/aval-element";
+import { ELEMENT_DECODER_CAPACITY } from "@pixel-point/aval-element";
 
 declare const element: AvalElement;
 declare const detail: Readonly<AvalErrorDetail>;
 declare const readinessDetail: Readonly<AvalReadinessChangeDetail>;
+
+const decoderWorkers: 2 = ELEMENT_DECODER_CAPACITY.workerCount;
+void decoderWorkers;
 
 element.motion = "auto";
 element.autoplay = "manual";

@@ -318,11 +318,11 @@ describe("route prefetch ownership", () => {
     await eventually(() => harness.loads.length === 1);
     harness.releaseLoad("entering-body");
     await eventually(() => harness.admitted.length === 1);
-    const entering = harness.runs.find(({ unit }) => unit === "entering-body")!;
+    const entering = harness.runs.find(({ unitId }) => unitId === "entering-body")!;
     entering.releaseReady();
     await eventually(() => harness.queue.isReady("entering-body"));
     const claimed = harness.claim("entering-body")!;
-    await expect(claimed.ready).resolves.toBe(entering);
+    expect(claimed).toBe(entering);
     expect(entering.closed).toBe(false);
 
     harness.queue.reconcile([hoverIntent]);
@@ -361,17 +361,16 @@ describe("route prefetch ownership", () => {
     await eventually(() => harness.queue.isReady("entering-body"));
     const predecessor = harness.claim("entering-body")!;
     predecessor.cancel();
-    await expect(predecessor.ready).resolves.toBe(harness.runs[0]);
     expect(harness.runs[0]!.closed).toBe(true);
 
     harness.queue.reconcile([hover]);
     harness.releaseLoad("hover-loop");
     await eventually(() => harness.admitted.includes("hover-loop"));
-    const run = harness.runs.find(({ unit }) => unit === "hover-loop")!;
+    const run = harness.runs.find(({ unitId }) => unitId === "hover-loop")!;
     run.releaseReady();
     await eventually(() => harness.queue.isReady("hover-loop"));
     const successor = harness.claim("hover-loop")!;
-    await expect(successor.ready).resolves.toBe(run);
+    expect(successor).toBe(run);
     successor.cancel();
     await harness.queue.retire();
     expect(harness.failures).toEqual([]);
@@ -441,6 +440,7 @@ describe("route prefetch ownership", () => {
       signal: new AbortController().signal,
       preload: () => gate.promise,
       admit: () => new FakeRun("entering-body"),
+      canAdmit: () => true,
       onFailure: () => undefined
     });
     queue.reconcile([intent(unit(fixture(), "entering-body"), "pending-route")]);
@@ -454,6 +454,26 @@ describe("route prefetch ownership", () => {
     gate.resolve();
     await retirement;
     expect(settled).toBe(true);
+  });
+
+  it("waits for readiness work admitted while a preload settles", async () => {
+    const harness = queueHarness();
+    harness.queue.reconcile([
+      harness.intent("entering-body", "pending-route")
+    ]);
+    await eventually(() => harness.loads.length === 1);
+    let settled = false;
+    const settlement = harness.queue.settled().then(() => { settled = true; });
+
+    harness.releaseLoad("entering-body");
+    await eventually(() => harness.runs.length === 1);
+    await microtasks();
+    expect(settled).toBe(false);
+
+    harness.runs[0]!.releaseReady();
+    await settlement;
+    expect(settled).toBe(true);
+    await harness.queue.retire();
   });
 
   it("reports an unexpected AbortError from a run", async () => {
@@ -478,7 +498,7 @@ class FakeRun {
   public closed = false;
 
   public constructor(
-    public readonly unit: string,
+    public readonly unitId: string,
     onClose: () => void = () => undefined
   ) {
     this.#onClose = onClose;
@@ -487,7 +507,7 @@ class FakeRun {
   public async ready(): Promise<void> { await this.#readiness.promise; }
   public releaseReady(): void { this.#readiness.resolve(); }
   public fail(error: unknown): void { this.#readiness.reject(error); }
-  public close(): void {
+  public cancel(): void {
     if (this.closed) return;
     this.closed = true;
     this.#onClose();
@@ -520,6 +540,7 @@ function queueHarness(manifest = fixture()) {
       maximumUnpromoted = Math.max(maximumUnpromoted, unpromoted.size);
       return run;
     },
+    canAdmit: () => true,
     onFailure: (error) => failures.push(error)
   });
   return {
@@ -533,7 +554,7 @@ function queueHarness(manifest = fixture()) {
     claim: (id: string) => {
       const claimed = queue.claim(id);
       if (claimed === undefined) return undefined;
-      const candidates = [...unpromoted].filter(({ unit: value }) => value === id);
+      const candidates = [...unpromoted].filter(({ unitId }) => unitId === id);
       if (candidates.length !== 1) {
         throw new Error("test candidate ownership invariant failed");
       }

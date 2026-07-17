@@ -11,9 +11,9 @@ import { prepareImmutableReleaseSetOutput } from "./immutable-release-output.mjs
 import { createPublishManifest } from "./publish-manifest.mjs";
 import { validateApprovedPublicationMetadata } from "./publication-metadata.mjs";
 import { buildFreshPublicDistributions } from "./fresh-public-build.mjs";
-import { ELEMENT_RELEASE_WORKER } from "./element-release-contract.mjs";
 import { computeReleaseSetDigest, loadVerifiedReleaseSet, releasePackageDirectory, releaseSetSummary, validateReleasePackageManifests, validateReleasePolicy } from "./release-set.mjs";
 import { assertTestOnlyArchiveOutput, testOnlyPublicationMetadata } from "./test-only-archive-proof.mjs";
+import { COMPILER_WORKER_REGISTRY_ENTRY, RELEASE_WORKER_ENTRIES } from "./worker-entry-contract.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const policy = JSON.parse(await readFile(resolve(root, "config/release/release-policy.json"), "utf8"));
@@ -50,18 +50,20 @@ try {
       const publishManifest = createPublishManifest(manifest, publicationMetadata);
       await writeFile(join(staging, "package.json"), `${JSON.stringify(publishManifest, null, 2)}\n`, { flag: "wx", mode: 0o444 });
       const copied = [];
-      await copyDistribution(join(source, "dist"), join(staging, "dist"), copied);
+      await copyDistribution(join(source, "dist"), join(staging, "dist"), copied, name);
       requireEntry(copied, "index.js", name);
       requireEntry(copied, "index.d.ts", name);
       if (name === "@pixel-point/aval-compiler") {
         requireEntry(copied, "cli.js", name);
+        requireEntry(copied, COMPILER_WORKER_REGISTRY_ENTRY.output, name);
         await chmod(join(staging, "dist", "cli.js"), 0o755);
       }
       if (name === "@pixel-point/aval-element") {
         requireEntry(copied, "auto.js", name);
-        requireEntry(copied, ELEMENT_RELEASE_WORKER.output, name);
       }
-      if (name === "@pixel-point/aval-player-web") requireEntry(copied, "decoder-worker/entry.js", name);
+      for (const worker of RELEASE_WORKER_ENTRIES) {
+        if (worker.packageName === name) requireEntry(copied, worker.output, name);
+      }
       const first = join(work, "first", short);
       const second = join(work, "second", short);
       await Promise.all([mkdir(first, { recursive: true }), mkdir(second, { recursive: true })]);
@@ -95,7 +97,7 @@ try {
   await immutableOutput.dispose();
 }
 
-async function copyDistribution(source, target, copied, prefix = "") {
+async function copyDistribution(source, target, copied, packageName, prefix = "") {
   for (const entry of await readdir(source, { withFileTypes: true })) {
     const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
     const sourcePath = join(source, entry.name);
@@ -103,12 +105,17 @@ async function copyDistribution(source, target, copied, prefix = "") {
     if (entry.isSymbolicLink()) throw new Error(`distribution symlink is forbidden: ${relative}`);
     if (entry.isDirectory()) {
       await mkdir(targetPath, { recursive: true });
-      await copyDistribution(sourcePath, targetPath, copied, relative);
+      await copyDistribution(sourcePath, targetPath, copied, packageName, relative);
       continue;
     }
     if (!entry.isFile()) throw new Error(`distribution entry is not a regular file: ${relative}`);
     if (/\.map$|\.tsbuildinfo$|(?:^|\/)[^/]+\.(?:test|compile)\.(?:js|d\.ts)$|test-support/iu.test(relative)) continue;
-    if (!/\.(?:js|d\.ts|json)$/u.test(relative)) throw new Error(`unexpected distribution file type: ${relative}`);
+    const isCanonicalCompilerRegistry =
+      packageName === COMPILER_WORKER_REGISTRY_ENTRY.packageName &&
+      relative === COMPILER_WORKER_REGISTRY_ENTRY.output;
+    if (!/\.(?:js|d\.ts)$/u.test(relative) && !isCanonicalCompilerRegistry) {
+      throw new Error(`unexpected distribution file type: ${relative}`);
+    }
     if ((await stat(sourcePath)).size > 8 * 1024 * 1024) throw new Error(`distribution file is unexpectedly large: ${relative}`);
     await copyFile(sourcePath, targetPath);
     copied.push(relative);

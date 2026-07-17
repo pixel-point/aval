@@ -1337,7 +1337,7 @@ export function isVideoCodecString(value: unknown, family: VideoCodec, bitDepth:
 export function isVp9Codec(value: unknown): value is Vp9Codec;
 
 // @public
-export function maximumH264DecodedRgbaBytes(codedWidth: number, codedHeight: number): number;
+export function maximumDecodedRgbaBytes(codec: VideoCodec, codedWidth: number, codedHeight: number): number;
 
 // @public
 export function maximumH264DecoderSurfaceDimension(dimension: number): number;

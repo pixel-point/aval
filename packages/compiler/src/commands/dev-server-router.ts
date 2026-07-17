@@ -6,6 +6,7 @@ import type { DevEventStreamHub } from "./dev-event-stream.js";
 import type { BoundedReadAdmission } from "./dev-file-reader.js";
 import { writeError, writeText } from "./dev-http-response.js";
 import { rewriteDevModuleImports, type PackageModuleStore } from "./dev-package-modules.js";
+import { devWorkerEntry } from "./dev-worker-entries.js";
 import { authorizeBrowserRequest, authorizeHost, rawHeaderValues, type DevBrowserEndpoint, type DevRequestAuthority } from "./dev-request-security.js";
 import {
   MAX_ASSET_BYTES,
@@ -15,7 +16,6 @@ import {
 import { DEV_CLIENT, DEV_CONTENT_SECURITY_POLICY, DEV_CSS, DEV_HTML, DEV_WORKER_CONTENT_SECURITY_POLICY } from "./dev-ui-assets.js";
 
 const MAX_URL_LENGTH = 2_048;
-
 export interface DevServerRouterOptions {
   readonly sessionPath: string;
   readonly bundlePath: string;
@@ -56,8 +56,10 @@ export function createDevServerRequestHandler(options: DevServerRouterOptions): 
       return writeError(response, method, 400, "request-target-invalid");
     }
     if (!url.pathname.startsWith(options.sessionPath)) return writeError(response, method, 404, "not-found");
-    if (url.search !== "") return writeError(response, method, 404, "not-found");
     const relativePath = url.pathname.slice(options.sessionPath.length);
+    if (!acceptedModuleSearch(relativePath, url.search)) {
+      return writeError(response, method, 404, "not-found");
+    }
     const endpoint = endpointClass(relativePath, request);
     const browser = authorizeBrowserRequest(request, authority, endpoint);
     if (!browser.allowed) return writeError(response, method, browser.status, browser.code);
@@ -68,7 +70,7 @@ export function createDevServerRequestHandler(options: DevServerRouterOptions): 
     if (relativePath === "style.css") return writeText(response, method, "text/css; charset=utf-8", DEV_CSS);
     if (relativePath === "client.js") return writeText(response, method, "text/javascript; charset=utf-8", DEV_CLIENT);
     const module = /^modules\/(element|player-web|format|graph)\/(.+)$/u.exec(relativePath);
-    if (module !== null) return serveModule(response, method, module[1] as "element" | "player-web" | "format" | "graph", module[2]!, relativePath === "modules/player-web/decoder-worker/entry.js");
+    if (module !== null) return serveModule(response, method, module[1] as "element" | "player-web" | "format" | "graph", module[2]!, isWorkerEntry(relativePath));
     if (relativePath === "events") return options.eventStreams.connect(request, response, method, options.current());
     const published = options.current();
     if (relativePath === "build.json") {
@@ -134,10 +136,18 @@ export function createDevServerRequestHandler(options: DevServerRouterOptions): 
 function endpointClass(path: string, request: IncomingMessage): DevBrowserEndpoint {
   if (path === "") return "document";
   if (path === "style.css") return "style";
-  if (path === "modules/player-web/decoder-worker/entry.js") return "worker-entry";
+  if (isWorkerEntry(path)) return "worker-entry";
   if (path.startsWith("modules/") && rawHeaderValues(request, "sec-fetch-dest")[0] === "worker") return "worker-module";
   if (path === "client.js" || path.startsWith("modules/")) return "script";
   return "browser-fetch";
+}
+
+function acceptedModuleSearch(path: string, search: string): boolean {
+  return search === "" || devWorkerEntry(path)?.search === search;
+}
+
+function isWorkerEntry(path: string): boolean {
+  return devWorkerEntry(path) !== undefined;
 }
 
 function applyCommonHeaders(response: ServerResponse): void {

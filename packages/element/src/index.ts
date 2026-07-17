@@ -35,3 +35,4 @@ export {
   AvalEnvironmentError,
   AvalNotReadyError
 } from "./errors.js";
+export { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";

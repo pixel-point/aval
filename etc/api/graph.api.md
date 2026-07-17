@@ -390,6 +390,9 @@ export class MotionGraphValidationError extends MotionGraphError {
 // @public
 export function nextBodyFrame(body: GraphBodyDefinition, currentFrame: number): Readonly<BodyFrameStep>;
 
+// @public
+export function sameGraphPresentation(left: Readonly<GraphPresentation> | null, right: Readonly<GraphPresentation> | null): boolean;
+
 // @public (undocumented)
 export interface ValidatedMotionGraph {
     // (undocumented)

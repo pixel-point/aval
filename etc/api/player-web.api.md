@@ -14,7 +14,7 @@ import type { EncodedChunkRecord } from '@pixel-point/aval-format';
 import { FormatHeader } from '@pixel-point/aval-format';
 import { GraphBodyDefinition } from '@pixel-point/aval-graph';
 import { GraphEdgeDefinition } from '@pixel-point/aval-graph';
-import type { GraphPresentation } from '@pixel-point/aval-graph';
+import { GraphPresentation } from '@pixel-point/aval-graph';
 import type { GraphSettlementError } from '@pixel-point/aval-graph';
 import { GraphStartPolicy } from '@pixel-point/aval-graph';
 import type { GraphStateDefinition } from '@pixel-point/aval-graph';

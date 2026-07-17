@@ -1,8 +1,9 @@
-import type {
-  GraphEdgeDefinition,
-  GraphPresentation,
-  MotionGraphResult,
-  MotionGraphSnapshot
+import {
+  sameGraphPresentation,
+  type GraphEdgeDefinition,
+  type GraphPresentation,
+  type MotionGraphResult,
+  type MotionGraphSnapshot
 } from "@pixel-point/aval-graph";
 
 import type {
@@ -12,8 +13,7 @@ import type {
   IntegratedPreparedContentTick
 } from "./integrated-player-contracts.js";
 import {
-  assertIntegratedPresentationIdentity,
-  sameGraphPresentation
+  assertIntegratedPresentationIdentity
 } from "./integrated-player-support.js";
 import type {
   VideoCandidateActivationInput,

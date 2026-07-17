@@ -1,8 +1,8 @@
 import type { Manifest, Unit } from "./asset.js";
 import type { MotionGraphSnapshot } from "@pixel-point/aval-graph";
+import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 
 export const MAX_ROUTE_PREFETCH_INTENTS = 4;
-const CANDIDATE_READY_FRAMES = 6;
 
 export type PrefetchReason =
   | "active-target"
@@ -29,12 +29,8 @@ export interface RoutePrefetchPlan {
 }
 
 export interface PrefetchableRun {
+  readonly unitId: string;
   ready(): Promise<void>;
-  close(): void;
-}
-
-export interface RoutePrefetchClaim<Run> {
-  readonly ready: Promise<Run>;
   cancel(): void;
 }
 
@@ -42,22 +38,20 @@ export interface RoutePrefetchOperations<Run extends PrefetchableRun> {
   readonly signal: AbortSignal;
   readonly preload: (unit: Unit, signal: AbortSignal) => Promise<void>;
   readonly admit: (unit: Unit) => Run;
-  readonly canAdmit?: () => boolean;
+  readonly canAdmit: () => boolean;
   readonly onFailure: (error: unknown) => void;
 }
 
 type EntryState<Run> =
   | Readonly<{ kind: "loading" }>
   | Readonly<{ kind: "loaded" }>
-  | Readonly<{ kind: "admitted"; run: Run }>
-  | Readonly<{ kind: "ready"; run: Run }>;
+  | Readonly<{ kind: "preparing"; run: Run }>
+  | Readonly<{ kind: "ready"; run: Run }>
+  | Readonly<{ kind: "canceled" }>;
 
 interface Entry<Run> {
   intent: Readonly<PrefetchIntent>;
   readonly controller: AbortController;
-  readonly loaded: Promise<void>;
-  admission: Promise<Run> | null;
-  ready: Promise<Run> | null;
   state: EntryState<Run>;
 }
 
@@ -181,7 +175,7 @@ export class RoutePrefetchQueue<Run extends PrefetchableRun> {
     this.#signal = operations.signal;
     this.#preload = operations.preload;
     this.#admit = operations.admit;
-    this.#canAdmit = operations.canAdmit ?? (() => true);
+    this.#canAdmit = operations.canAdmit;
     this.#onFailure = operations.onFailure;
   }
 
@@ -200,7 +194,8 @@ export class RoutePrefetchQueue<Run extends PrefetchableRun> {
     const nextHeadId = desiredIds[0];
     if (
       currentHead !== undefined && currentHead[0] !== nextHeadId &&
-      currentHead[1].ready !== null
+      (currentHead[1].state.kind === "preparing" ||
+        currentHead[1].state.kind === "ready")
     ) {
       this.#entries.delete(currentHead[0]);
       this.#cancel(currentHead[1]);
@@ -226,11 +221,8 @@ export class RoutePrefetchQueue<Run extends PrefetchableRun> {
     this.#admitHead();
   }
 
-  public claim(unitId: string): RoutePrefetchClaim<Run> | undefined {
-    const matching = [...this.#entries.values()].find(
-      (entry) => entry.intent.unit.id === unitId
-    );
-    if (matching === undefined) return undefined;
+  public claim(unitId: string): Run | undefined {
+    if (!this.#entries.has(unitId)) return undefined;
     const head = this.#entries.entries().next().value as
       | [string, Entry<Run>]
       | undefined;
@@ -239,20 +231,9 @@ export class RoutePrefetchQueue<Run extends PrefetchableRun> {
     if (entry.intent.unit.id !== unitId) {
       throw new Error("AVAL prefetch claim invariant failed");
     }
-    if (entry.state.kind !== "ready" || entry.ready === null) return undefined;
+    if (entry.state.kind !== "ready") return undefined;
     this.#entries.delete(id);
-    const ready = entry.ready;
-    this.#operations.delete(entry.loaded);
-    this.#operations.delete(ready);
-    let canceled = false;
-    return Object.freeze({
-      ready,
-      cancel: () => {
-        if (canceled) return;
-        canceled = true;
-        this.#cancel(entry);
-      }
-    });
+    return entry.state.run;
   }
 
   public isReady(unitId: string): boolean {
@@ -261,7 +242,9 @@ export class RoutePrefetchQueue<Run extends PrefetchableRun> {
   }
 
   public async settled(): Promise<void> {
-    await Promise.allSettled([...this.#operations]);
+    while (this.#operations.size > 0) {
+      await Promise.allSettled([...this.#operations]);
+    }
   }
 
   public wake(): void {
@@ -272,28 +255,27 @@ export class RoutePrefetchQueue<Run extends PrefetchableRun> {
     const entries = [...this.#entries.values()];
     this.#entries.clear();
     for (const entry of entries) this.#cancel(entry);
-    return Promise.allSettled([...this.#operations]).then(() => undefined);
+    return this.settled();
   }
 
   #start(intent: Readonly<PrefetchIntent>): Entry<Run> {
     const controller = new AbortController();
     const signal = AbortSignal.any([this.#signal, controller.signal]);
     let entry!: Entry<Run>;
-    const loaded = Promise.resolve()
+    const operation = Promise.resolve()
       .then(() => this.#preload(intent.unit, signal))
       .then(() => {
         signal.throwIfAborted();
-        if (entry.state.kind === "loading") entry.state = { kind: "loaded" };
+        if (entry.state.kind !== "loading") return;
+        entry.state = { kind: "loaded" };
+        this.#admitHead();
       });
     entry = {
       intent,
       controller,
-      loaded,
-      admission: null,
-      ready: null,
       state: { kind: "loading" }
     };
-    this.#track(entry, loaded);
+    this.#track(entry, operation);
     return entry;
   }
 
@@ -303,50 +285,59 @@ export class RoutePrefetchQueue<Run extends PrefetchableRun> {
   }
 
   #scheduleAdmission(entry: Entry<Run>): void {
-    if (entry.ready !== null || !this.#canAdmit()) return;
+    if (entry.state.kind !== "loaded" || !this.#canAdmit()) return;
     const signal = AbortSignal.any([this.#signal, entry.controller.signal]);
-    const admission = entry.loaded.then(() => {
+    let run: Run;
+    try {
       signal.throwIfAborted();
-      const run = this.#admit(entry.intent.unit);
-      entry.state = { kind: "admitted", run };
-      return run;
-    });
-    const ready = admission.then(async (run) => {
+      run = this.#admit(entry.intent.unit);
+      if (run.unitId !== entry.intent.unit.id) {
+        run.cancel();
+        throw new Error("AVAL prefetch candidate identity mismatch");
+      }
+    } catch (error) {
+      entry.state = { kind: "canceled" };
+      this.#report(entry, error);
+      return;
+    }
+    const operation = Promise.resolve().then(async () => {
       try {
         await run.ready();
         signal.throwIfAborted();
+        if (entry.state.kind !== "preparing" || entry.state.run !== run) return;
         entry.state = { kind: "ready", run };
-        return run;
       } catch (error) {
-        run.close();
+        run.cancel();
         throw error;
       }
     });
-    entry.admission = admission;
-    entry.ready = ready;
-    this.#track(entry, ready);
+    entry.state = { kind: "preparing", run };
+    this.#track(entry, operation);
   }
 
   #track(entry: Entry<Run>, operation: Promise<unknown>): void {
     this.#operations.add(operation);
     void operation.finally(() => this.#operations.delete(operation)).catch(() => undefined);
-    void operation.catch((error) => {
-      if (
-        !entry.controller.signal.aborted && !this.#signal.aborted &&
-        !this.#reported.has(entry)
-      ) {
-        this.#reported.add(entry);
-        this.#onFailure(error);
-      }
-    });
+    void operation.catch((error) => this.#report(entry, error));
+  }
+
+  #report(entry: Entry<Run>, error: unknown): void {
+    if (
+      !entry.controller.signal.aborted && !this.#signal.aborted &&
+      !this.#reported.has(entry)
+    ) {
+      this.#reported.add(entry);
+      this.#onFailure(error);
+    }
   }
 
   #cancel(entry: Entry<Run>): void {
     entry.controller.abort(abortError());
-    if (entry.state.kind === "admitted" || entry.state.kind === "ready") {
-      entry.state.run.close();
+    const state = entry.state;
+    entry.state = { kind: "canceled" };
+    if (state.kind === "preparing" || state.kind === "ready") {
+      state.run.cancel();
     }
-    void entry.ready?.then((run) => run.close(), () => undefined);
   }
 }
 
@@ -405,7 +396,8 @@ function loopContinuation(
   const required = !currentPortalReady && (
     lastPortal === undefined ||
     !pendingRouteReady &&
-      lastPortal - presentation.frameIndex <= CANDIDATE_READY_FRAMES
+      lastPortal - presentation.frameIndex <=
+        ELEMENT_DECODER_CAPACITY.candidateReadyFrames
   );
   return Object.freeze({
     intent: Object.freeze({

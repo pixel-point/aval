@@ -19,15 +19,17 @@ import { chromium } from "playwright";
 import { build as viteBuild, preview as vitePreview } from "vite";
 
 import { ELEMENT_RELEASE_WORKER } from "./element-release-contract.mjs";
+import {
+  RELEASE_PACKAGE_SPECS,
+  RELEASE_VERSION,
+  releaseArchiveFilename
+} from "./release-set-model.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const packageDirectory = resolve(root, option("--packages") ?? "artifacts/1.0.0/packages");
-const policy = JSON.parse(await readFile(
-  resolve(root, "config/release/release-policy.json"),
-  "utf8"
-));
-const releaseVersion = policy.releaseVersion;
-const expectedPackages = ["compiler", "element", "format", "graph", "player-web"];
+const packageDirectory = resolve(
+  root,
+  option("--packages") ?? `artifacts/${RELEASE_VERSION}/packages`
+);
 const expectedCodecs = Object.freeze(["av1", "vp9", "h265", "h264"]);
 const expectedCodecPrefixes = Object.freeze({
   av1: "av01.",
@@ -38,11 +40,17 @@ const expectedCodecPrefixes = Object.freeze({
 const STRICT_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; " +
   "connect-src 'self'; worker-src 'self'; img-src 'self'; object-src 'none'; " +
   "base-uri 'none'; frame-ancestors 'none'";
-const archives = (await readdir(packageDirectory))
+const archiveNames = (await readdir(packageDirectory))
   .filter((name) => name.endsWith(".tgz"))
-  .sort()
-  .map((name) => join(packageDirectory, name));
-assert(archives.length === expectedPackages.length, `expected five package archives, found ${archives.length}`);
+  .sort();
+const expectedArchiveNames = RELEASE_PACKAGE_SPECS
+  .map(({ name }) => releaseArchiveFilename(name))
+  .sort();
+assert(
+  JSON.stringify(archiveNames) === JSON.stringify(expectedArchiveNames),
+  `packed archive set was not exact: ${JSON.stringify(archiveNames)}`
+);
+const archives = expectedArchiveNames.map((name) => join(packageDirectory, name));
 
 const temporary = await realpath(await mkdtemp(join(tmpdir(), "aval-packed-dev-")));
 const project = join(temporary, "project");
@@ -72,7 +80,7 @@ try {
     project,
     120_000
   );
-  await verifyInstalledGraph(project, releaseVersion);
+  await verifyInstalledGraph(project, RELEASE_VERSION);
 
   const cli = join(
     project,
@@ -97,12 +105,21 @@ try {
     env: { ...process.env, NO_COLOR: "1" },
     stdio: ["ignore", "pipe", "pipe"]
   });
-  const output = createJsonLineCollector(child.stdout, "packed avl dev stdout");
   let stderr = "";
+  const output = createJsonLineCollector(
+    child.stdout,
+    "packed avl dev stdout",
+    () => stderr
+  );
+  const observeDiagnostic = createJsonErrorMonitor((diagnostic) => {
+    output.fail(devDiagnosticError(diagnostic));
+    child.kill("SIGTERM");
+  });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk) => {
     try {
       stderr = boundedAppend(stderr, chunk, 4 * 1024 * 1024, "packed avl dev stderr");
+      observeDiagnostic(chunk);
     } catch (error) {
       output.fail(error);
       child.kill("SIGTERM");
@@ -117,7 +134,7 @@ try {
   }).then((result) => {
     childExitState = result;
     output.fail(new Error(
-      `packed avl dev exited (${String(result.code ?? result.signal)}):\n${stderr}`
+      `packed avl dev exited (${String(result.code ?? result.signal)})`
     ));
     return result;
   });
@@ -282,7 +299,7 @@ try {
 
   process.stdout.write(`${JSON.stringify({
     status: "passed",
-    packages: expectedPackages.length,
+    packages: RELEASE_PACKAGE_SPECS.length,
     firstGeneration: firstBuild.sequence,
     replacementGeneration: secondBuild.sequence,
     readiness: replacementSnapshot.readiness,
@@ -324,29 +341,29 @@ async function verifyInstalledGraph(projectRoot, version) {
   const scope = join(projectRoot, "node_modules", "@pixel-point");
   const canonicalScope = await realpath(scope);
   const manifests = new Map();
-  for (const name of expectedPackages) {
-    const directory = join(scope, `aval-${name}`);
-    assert(!(await lstat(directory)).isSymbolicLink(), `installed ${name} package is a symlink`);
+  for (const specification of RELEASE_PACKAGE_SPECS) {
+    const directory = join(scope, specification.name.slice("@pixel-point/".length));
+    assert(!(await lstat(directory)).isSymbolicLink(), `installed ${specification.name} package is a symlink`);
     const canonical = await realpath(directory);
     assert(
       canonical.startsWith(`${canonicalScope}${sep}`),
-      `installed ${name} package escaped the clean node_modules scope`
+      `installed ${specification.name} package escaped the clean node_modules scope`
     );
     const manifest = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
-    assert(manifest.version === version, `${name} installed at ${String(manifest.version)}, expected ${version}`);
-    manifests.set(name, manifest);
+    assert(manifest.name === specification.name, `installed package identity drifted for ${specification.name}`);
+    assert(manifest.version === version, `${specification.name} installed at ${String(manifest.version)}, expected ${version}`);
+    manifests.set(specification.name, manifest);
   }
-  const expectedDependencies = {
-    graph: [],
-    format: ["graph"],
-    "player-web": ["graph", "format"],
-    element: ["graph", "format"],
-    compiler: ["graph", "format", "player-web", "element"]
-  };
-  for (const [name, expected] of Object.entries(expectedDependencies)) {
-    const dependencies = manifests.get(name)?.dependencies ?? {};
-    assert(JSON.stringify(Object.keys(dependencies).sort()) === JSON.stringify(expected.map((short) => `@pixel-point/aval-${short}`).sort()), `packed ${name} dependency graph is not exact`);
-    for (const value of Object.values(dependencies)) assert(value === version, `packed ${name} dependency version is not exact`);
+  for (const specification of RELEASE_PACKAGE_SPECS) {
+    const dependencies = manifests.get(specification.name)?.dependencies ?? {};
+    assert(
+      JSON.stringify(Object.keys(dependencies).sort()) ===
+        JSON.stringify([...specification.dependencies].sort()),
+      `packed ${specification.name} dependency graph is not exact`
+    );
+    for (const value of Object.values(dependencies)) {
+      assert(value === version, `packed ${specification.name} dependency version is not exact`);
+    }
   }
 }
 
@@ -360,7 +377,10 @@ async function verifyHttpSurface(url, build, forbiddenPaths) {
   const moduleResponse = await checkedFetch(new URL("modules/element/auto.js", url));
   assert(moduleResponse.status === 200, `packed element module returned ${moduleResponse.status}`);
   const moduleText = await moduleResponse.text();
-  const workerResponse = await checkedFetch(new URL(`modules/element/${ELEMENT_RELEASE_WORKER.output}`, url));
+  const workerResponse = await checkedFetch(new URL(
+    `modules/element/${ELEMENT_RELEASE_WORKER.output}?no-inline`,
+    url
+  ));
   assert(workerResponse.status === 200, `packed element decoder worker returned ${workerResponse.status}`);
   assert(workerResponse.headers.get("content-security-policy")?.includes("default-src 'none'") === true, "packed element decoder worker omitted its closed CSP");
   const workerText = await workerResponse.text();
@@ -681,10 +701,11 @@ function integrityForSha256(value) {
   return `sha256-${Buffer.from(value, "hex").toString("base64")}`;
 }
 
-function createJsonLineCollector(stream, label) {
+function createJsonLineCollector(stream, label, stderr) {
   const records = [];
   const waiters = new Set();
   let buffer = "";
+  let transcript = "";
   let totalBytes = 0;
   let failure;
   stream.setEncoding("utf8");
@@ -694,6 +715,7 @@ function createJsonLineCollector(stream, label) {
       fail(new Error(`${label} exceeded 4 MiB`));
       return;
     }
+    transcript += chunk;
     buffer += chunk;
     for (;;) {
       const newline = buffer.indexOf("\n");
@@ -710,6 +732,10 @@ function createJsonLineCollector(stream, label) {
   });
 
   function emit(value) {
+    if (value?.severity === "error") {
+      fail(devDiagnosticError(value));
+      return;
+    }
     records.push(value);
     if (records.length > 128) records.shift();
     for (const waiter of [...waiters]) {
@@ -722,10 +748,10 @@ function createJsonLineCollector(stream, label) {
 
   function fail(error) {
     if (failure !== undefined) return;
-    failure = error;
+    failure = withCollectedOutput(error, transcript, stderr());
     for (const waiter of waiters) {
       clearTimeout(waiter.timer);
-      waiter.reject(error);
+      waiter.reject(failure);
     }
     waiters.clear();
   }
@@ -743,13 +769,60 @@ function createJsonLineCollector(stream, label) {
           reject: rejectWait,
           timer: setTimeout(() => {
             waiters.delete(waiter);
-            rejectWait(new Error(`${label} did not emit the expected record in ${String(timeoutMs)} ms`));
+            rejectWait(withCollectedOutput(
+              new Error(`${label} did not emit the expected record in ${String(timeoutMs)} ms`),
+              transcript,
+              stderr()
+            ));
           }, timeoutMs)
         };
         waiters.add(waiter);
       });
     }
   });
+}
+
+function createJsonErrorMonitor(onError) {
+  let buffer = "";
+  return (chunk) => {
+    buffer += chunk;
+    for (;;) {
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line === "") continue;
+      try {
+        const value = JSON.parse(line);
+        if (value?.severity === "error") onError(value);
+      } catch {
+        // The child can emit platform diagnostics that are not CLI JSON.
+      }
+    }
+  };
+}
+
+function devDiagnosticError(diagnostic) {
+  return new Error(
+    `packed avl dev reported ${String(diagnostic.code ?? "an error")}: ` +
+    `${String(diagnostic.message ?? "no diagnostic message")}`
+  );
+}
+
+function withCollectedOutput(error, stdout, stderr) {
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `${message}\n\nCollected stdout:\n${diagnosticExcerpt(stdout)}` +
+    `\n\nCollected stderr:\n${diagnosticExcerpt(stderr)}`,
+    { cause: error }
+  );
+}
+
+function diagnosticExcerpt(value) {
+  const maximum = 32 * 1024;
+  if (value.length <= maximum) return value === "" ? "<empty>" : value;
+  return `<truncated ${String(value.length - maximum)} leading characters>\n` +
+    value.slice(-maximum);
 }
 
 async function checkedFetch(url, init = {}) {

@@ -25,16 +25,14 @@ vi.mock("../src/page-resources.js", () => ({
     };
     harness.participants.add(participant);
     return Object.freeze({
-      request: (weight: number) => {
+      request: () => {
         const ticket = createBrokerTicket(
           participant,
-          harness.brokerMode === "immediate",
-          weight
+          harness.brokerMode === "immediate"
         );
         participant.ticket = ticket;
         harness.tickets.push(ticket);
         return Object.freeze({
-          weight,
           take: () => ticket.state === "granted" ? ticket.lease : null,
           wait: () => ticket.promise,
           cancel: () => cancelBrokerTicket(ticket),
@@ -54,7 +52,7 @@ vi.mock("../src/page-resources.js", () => ({
   },
   pageResourcesSnapshot: () => Object.freeze({
     active: harness.tickets.reduce(
-      (sum, { state, weight }) => sum + (state === "granted" ? weight : 0),
+      (sum, { state }) => sum + (state === "granted" ? 2 : 0),
       0
     ),
     queued: harness.tickets.filter(({ state }) => state === "queued").length,
@@ -203,7 +201,7 @@ describe("element lifecycle regressions", () => {
     await element.prepare();
     const stale = harness.tickets[0]!;
     expect(stale.state).toBe("queued");
-    expect(stale.weight).toBe(2);
+    expect(stale).not.toHaveProperty("weight");
 
     source.setAttribute("src", "second.avl");
     FakeMutationObserver.instances[0]!.enqueue(attributeMutation(source));
@@ -240,7 +238,7 @@ describe("element lifecycle regressions", () => {
 });
 
 type BrokerState = "queued" | "granted" | "cancelled" | "released";
-type BrokerLease = Readonly<{ weight: number; release: () => void }>;
+type BrokerLease = Readonly<{ release: () => void }>;
 interface BrokerParticipant {
   visible: boolean;
   disposed: boolean;
@@ -249,7 +247,6 @@ interface BrokerParticipant {
 }
 interface BrokerTicket {
   readonly participant: BrokerParticipant;
-  readonly weight: number;
   state: BrokerState;
   lease: BrokerLease | null;
   readonly promise: Promise<BrokerLease>;
@@ -260,8 +257,7 @@ interface BrokerTicket {
 
 function createBrokerTicket(
   participant: BrokerParticipant,
-  immediate: boolean,
-  weight: number
+  immediate: boolean
 ): BrokerTicket {
   let resolve!: (lease: BrokerLease) => void;
   let reject!: (reason: unknown) => void;
@@ -271,7 +267,6 @@ function createBrokerTicket(
   });
   const ticket: BrokerTicket = {
     participant,
-    weight,
     state: "queued",
     lease: null,
     promise,
@@ -288,7 +283,6 @@ function grantBrokerTicket(ticket: BrokerTicket): void {
   ticket.state = "granted";
   let released = false;
   const lease = Object.freeze({
-    weight: ticket.weight,
     release: () => {
       if (released) return;
       released = true;

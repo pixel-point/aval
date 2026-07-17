@@ -26,23 +26,24 @@ describe("DecoderPool", () => {
     await configure(pool, harness.workers);
 
     const foreground = pool.createForegroundRun(samples(2));
-    const candidate = pool.createCandidateRun(samples(3));
+    const candidate = pool.createCandidate("candidate", samples(3));
+    const candidateRun = candidate.run;
     expect(foreground.generation).toBe(1);
-    expect(candidate.generation).toBe(1);
+    expect(candidateRun.generation).toBe(1);
     expect(pool.identity(foreground)).toEqual({ logicalId: 1, lane: 0 });
-    expect(pool.identity(candidate)).toEqual({ logicalId: 2, lane: 1 });
-    expect(Object.isFrozen(pool.identity(candidate))).toBe(true);
+    expect(pool.identity(candidateRun)).toEqual({ logicalId: 2, lane: 1 });
+    expect(Object.isFrozen(pool.identity(candidateRun))).toBe(true);
 
     start(harness.workers[0]!, foreground.generation);
-    start(harness.workers[1]!, candidate.generation);
+    start(harness.workers[1]!, candidateRun.generation);
     harness.workers[1]!.emit({
       t: "frame",
-      run: candidate.generation,
+      run: candidateRun.generation,
       timestamp: 0,
       frame: decodedFrame()
     });
 
-    await candidate.ready(1);
+    await candidateRun.ready(1);
     expect(harness.workers[0]!.posted).toContainEqual({
       t: "flush",
       run: foreground.generation
@@ -56,28 +57,46 @@ describe("DecoderPool", () => {
     pool.dispose();
   });
 
-  it("swaps lane roles on promotion and rejects stale promotion identities", async () => {
+  it("commits atomically, retires foreground, and makes terminal calls idempotent", async () => {
     const harness = fakeWorker();
     const pool = configuredPool(harness);
     await configure(pool, harness.workers);
     const foreground = pool.createForegroundRun(samples(1));
-    const candidate = pool.createCandidateRun(samples(1));
+    const candidate = pool.createCandidate("candidate", frameSamples(6));
+    expect(candidate.unitId).toBe("candidate");
     expect(pool.candidateAvailable).toBe(false);
 
-    pool.promote(candidate);
-    foreground.close();
+    const readiness = candidate.ready();
+    start(harness.workers[1]!, candidate.run.generation);
+    for (let timestamp = 0; timestamp < 5; timestamp += 1) {
+      harness.workers[1]!.emit({
+        t: "frame",
+        run: candidate.run.generation,
+        timestamp,
+        frame: decodedFrame(timestamp)
+      });
+    }
+    expect(() => candidate.commit()).toThrow("decoder candidate is not ready");
+    expect(foreground.closed).toBe(false);
+    harness.workers[1]!.emit({
+      t: "frame",
+      run: candidate.run.generation,
+      timestamp: 5,
+      frame: decodedFrame(5)
+    });
+    await readiness;
+    candidate.commit();
+    candidate.commit();
+    candidate.cancel();
+    expect(foreground.closed).toBe(true);
     expect(pool.candidateAvailable).toBe(false);
     harness.workers[0]!.emit({ t: "closed", run: foreground.generation });
     expect(pool.candidateAvailable).toBe(true);
-    const nextCandidate = pool.createCandidateRun(samples(1));
+    const nextCandidate = pool.createCandidate("next", samples(1));
 
-    expect(pool.identity(nextCandidate)).toEqual({ logicalId: 3, lane: 0 });
-    expect(() => pool.promote(candidate)).toThrow(
-      "decoder run is not owned by the candidate lane"
-    );
-    expect(() => pool.promote(foreground)).toThrow(
-      "decoder run is not owned by the candidate lane"
-    );
+    expect(pool.identity(nextCandidate.run)).toEqual({ logicalId: 3, lane: 0 });
+    nextCandidate.cancel();
+    nextCandidate.cancel();
 
     pool.dispose();
   });
@@ -87,20 +106,20 @@ describe("DecoderPool", () => {
     const pool = configuredPool(harness);
     await configure(pool, harness.workers);
     const foreground = pool.createForegroundRun(samples(1));
-    const candidate = pool.createCandidateRun(samples(1));
+    const candidate = pool.createCandidate("candidate", samples(1));
 
     expect(() => pool.createForegroundRun(samples(1))).toThrow(
       "decoder foreground lane already owns a run"
     );
-    expect(() => pool.createCandidateRun(samples(1))).toThrow(
+    expect(() => pool.createCandidate("duplicate", samples(1))).toThrow(
       "decoder candidate lane already owns a run"
     );
 
-    candidate.close();
+    candidate.cancel();
     expect(pool.candidateAvailable).toBe(false);
-    harness.workers[1]!.emit({ t: "closed", run: candidate.generation });
+    harness.workers[1]!.emit({ t: "closed", run: candidate.run.generation });
     expect(pool.candidateAvailable).toBe(true);
-    expect(() => pool.createCandidateRun(samples(1))).not.toThrow();
+    expect(() => pool.createCandidate("next", samples(1))).not.toThrow();
     foreground.close();
     harness.workers[0]!.emit({ t: "closed", run: foreground.generation });
     expect(() => pool.createForegroundRun(samples(1))).not.toThrow();
@@ -117,12 +136,12 @@ describe("DecoderPool", () => {
     });
     await configure(pool, harness.workers);
     const foreground = pool.createForegroundRun(samples(2));
-    const candidate = pool.createCandidateRun(samples(3));
+    const candidate = pool.createCandidate("candidate", samples(3));
 
     expect(pool.encodedBytes).toBe(5);
     expect(encodedBytes).toEqual([2, 5]);
     start(harness.workers[0]!, foreground.generation);
-    start(harness.workers[1]!, candidate.generation);
+    start(harness.workers[1]!, candidate.run.generation);
     harness.workers[0]!.emit({
       t: "frame",
       run: foreground.generation,
@@ -131,7 +150,7 @@ describe("DecoderPool", () => {
     });
     harness.workers[1]!.emit({
       t: "frame",
-      run: candidate.generation,
+      run: candidate.run.generation,
       timestamp: 0,
       frame: decodedFrame()
     });
@@ -164,9 +183,9 @@ describe("DecoderPool", () => {
     const pool = configuredPool(harness, { maxDecodedBytes: 1_500 });
     await configure(pool, harness.workers);
     const foreground = pool.createForegroundRun(samples(1));
-    const candidate = pool.createCandidateRun(samples(1));
+    const candidate = pool.createCandidate("candidate", samples(1));
     start(harness.workers[0]!, foreground.generation);
-    start(harness.workers[1]!, candidate.generation);
+    start(harness.workers[1]!, candidate.run.generation);
 
     harness.workers[0]!.emit({
       t: "frame",
@@ -176,12 +195,12 @@ describe("DecoderPool", () => {
     });
     harness.workers[1]!.emit({
       t: "frame",
-      run: candidate.generation,
+      run: candidate.run.generation,
       timestamp: 0,
       frame: decodedFrame()
     });
 
-    await expect(candidate.take(0)).rejects.toThrow(
+    await expect(candidate.run.take(0)).rejects.toThrow(
       "AVAL decoded surfaces exceed their byte ceiling"
     );
     expect(pool.snapshot()).toEqual({
@@ -199,6 +218,7 @@ describe("DecoderPool", () => {
     const pool = configuredPool(harness);
     await configure(pool, harness.workers);
     const run = pool.createForegroundRun(samples(1));
+    const candidate = pool.createCandidate("candidate", samples(1));
     const identity: DecoderPoolRunIdentity = pool.identity(run);
 
     pool.dispose();
@@ -209,7 +229,7 @@ describe("DecoderPool", () => {
     expect(() => pool.createForegroundRun(samples(1))).toThrowError(
       expect.objectContaining({ name: "AbortError" })
     );
-    expect(() => pool.promote(run)).toThrowError(
+    expect(() => candidate.commit()).toThrowError(
       expect.objectContaining({ name: "AbortError" })
     );
   });
@@ -220,6 +240,53 @@ describe("DecoderPool", () => {
     expect(() => configuredPool(harness)).toThrow("worker construction failed");
     expect(harness.workers).toHaveLength(1);
     expect(harness.workers[0]!.terminateCalls).toBe(1);
+  });
+
+  it("surfaces a fatal worker failure from an idle candidate lane", async () => {
+    const harness = fakeWorker();
+    const pool = configuredPool(harness);
+    await configure(pool, harness.workers);
+    const failure = pool.failure();
+
+    harness.workers[1]!.emit({ t: "error" });
+
+    await expect(failure).rejects.toThrow("AVAL decoder failed");
+    expect(pool.candidateAvailable).toBe(false);
+    expect(harness.workers[1]!.terminated).toBe(true);
+    pool.dispose();
+  });
+
+  it("surfaces a fatal worker failure while the promoted lane retires", async () => {
+    const harness = fakeWorker();
+    const pool = configuredPool(harness);
+    await configure(pool, harness.workers);
+    const foreground = pool.createForegroundRun(samples(1));
+    const candidate = pool.createCandidate("candidate", frameSamples(6));
+    const readiness = candidate.ready();
+    start(harness.workers[1]!, candidate.run.generation);
+    for (let timestamp = 0; timestamp < 6; timestamp += 1) {
+      harness.workers[1]!.emit({
+        t: "frame",
+        run: candidate.run.generation,
+        timestamp,
+        frame: decodedFrame(timestamp)
+      });
+    }
+    await readiness;
+    candidate.commit();
+    expect(foreground.closed).toBe(true);
+    expect(harness.workers[0]!.posted).toContainEqual({
+      t: "close",
+      run: foreground.generation
+    });
+    const failure = pool.failure();
+
+    harness.workers[0]!.emit({ t: "error" });
+
+    await expect(failure).rejects.toThrow("AVAL decoder failed");
+    expect(pool.candidateAvailable).toBe(false);
+    expect(harness.workers[0]!.terminated).toBe(true);
+    pool.dispose();
   });
 });
 
@@ -258,8 +325,18 @@ function samples(byteLength: number): readonly DecodeSample[] {
   }];
 }
 
-function decodedFrame(): VideoFrame {
-  return new FakeVideoFrame(16, 16) as unknown as VideoFrame;
+function frameSamples(frameCount: number): readonly DecodeSample[] {
+  return [{
+    data: new Uint8Array(frameCount).buffer,
+    timestamp: 0,
+    duration: 1,
+    key: true,
+    displayedFrames: frameCount
+  }];
+}
+
+function decodedFrame(timestamp = 0): VideoFrame {
+  return new FakeVideoFrame(16, 16, timestamp) as unknown as VideoFrame;
 }
 
 interface FakeWorkerInstance {

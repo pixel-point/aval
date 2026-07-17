@@ -1,3 +1,5 @@
+import { releaseWorkerEntry } from "./worker-entry-contract.mjs";
+
 export const ELEMENT_RELEASE_TYPESCRIPT_ROOTS = Object.freeze([
   "index.ts",
   "auto.ts"
@@ -7,5 +9,5 @@ export const ELEMENT_RELEASE_TYPESCRIPT_ROOTS = Object.freeze([
 // module graph. Keep the worker in the release contract explicitly.
 export const ELEMENT_RELEASE_WORKER = Object.freeze({
   source: "decoder-worker.ts",
-  output: "decoder-worker.js"
+  output: releaseWorkerEntry("@pixel-point/aval-element").output
 });

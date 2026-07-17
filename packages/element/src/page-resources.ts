@@ -1,10 +1,10 @@
+import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
+
 export interface PageDecoderLease {
-  readonly weight: number;
   release(): void;
 }
 
 export interface PageDecoderTicket {
-  readonly weight: number;
   take(): PageDecoderLease | null;
   wait(): Promise<PageDecoderLease>;
   cancel(): void;
@@ -12,7 +12,7 @@ export interface PageDecoderTicket {
 }
 
 export interface PageDecoderParticipant {
-  request(weight: number): PageDecoderTicket;
+  request(): PageDecoderTicket;
   setVisible(visible: boolean): void;
   setPhysicalBytes(bytes: number): void;
   dispose(): void;
@@ -42,7 +42,6 @@ type Participant = {
 };
 type Ticket = {
   readonly participant: Participant;
-  readonly weight: number;
   state: State;
   lease: PageDecoderLease | null;
   promise: Promise<PageDecoderLease> | null;
@@ -56,7 +55,6 @@ type Page = {
   physicalBytes: number;
 };
 
-const MAXIMUM = 2;
 const pages = new WeakMap<object, Page>();
 
 export function createPageDecoderParticipant(
@@ -74,7 +72,7 @@ export function createPageDecoderParticipant(
   };
   page.participants.add(participant);
   return Object.freeze({
-    request: (weight: number): PageDecoderTicket => request(participant, weight),
+    request: (): PageDecoderTicket => request(participant),
     setVisible: (next: boolean): void => visibility(participant, next),
     setPhysicalBytes: (bytes: number): void => setPhysicalBytes(participant, bytes),
     dispose: (): void => disposeParticipant(participant)
@@ -109,15 +107,11 @@ function pageFor(realm: object): Page {
   return page;
 }
 
-function request(participant: Participant, weight: number): PageDecoderTicket {
-  if (!Number.isSafeInteger(weight) || weight < 1 || weight > MAXIMUM) {
-    throw new RangeError("Invalid decoder request weight");
-  }
+function request(participant: Participant): PageDecoderTicket {
   if (participant.disposed) throw abort();
   if (participant.ticket !== null) throw new RangeError("Decoder request already exists");
   const ticket: Ticket = {
     participant,
-    weight,
     state: participant.visible ? "queued" : "parked",
     lease: null,
     promise: null,
@@ -128,7 +122,6 @@ function request(participant: Participant, weight: number): PageDecoderTicket {
   if (ticket.state === "queued") participant.page.queue.push(ticket);
   drain(participant.page);
   return Object.freeze({
-    weight,
     take: (): PageDecoderLease | null =>
       ticket.state === "active" ? ticket.lease : null,
     wait: (): Promise<PageDecoderLease> => wait(ticket),
@@ -194,17 +187,16 @@ function drain(page: Page): void {
       ticket.state = "parked";
       continue;
     }
-    if (ticket.weight > MAXIMUM - page.active) return;
+    if (page.active !== 0) return;
     page.queue.shift();
     ticket.state = "active";
-    page.active += ticket.weight;
+    page.active = ELEMENT_DECODER_CAPACITY.workerCount;
     let released = false;
     const lease = Object.freeze({
-      weight: ticket.weight,
       release: (): void => {
         if (released) return;
         released = true;
-        page.active -= ticket.weight;
+        page.active = 0;
         ticket.state = "done";
         ticket.lease = null;
         ticket.promise = null;

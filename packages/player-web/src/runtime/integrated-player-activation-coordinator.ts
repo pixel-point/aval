@@ -1,6 +1,7 @@
-import type {
-  MotionGraphEngine,
-  MotionGraphResult
+import {
+  sameGraphPresentation,
+  type MotionGraphEngine,
+  type MotionGraphResult
 } from "@pixel-point/aval-graph";
 
 import type { EffectHost } from "./effect-host.js";
@@ -15,7 +16,6 @@ import type { IntegratedOperationGate } from "./integrated-operation-gate.js";
 import type { IntegratedPlayerMotion } from "./integrated-player-motion.js";
 import {
   assertIntegratedStaticPresentation,
-  sameGraphPresentation,
   throwIfIntegratedAborted,
   validateIntegratedPlaybackTraceState
 } from "./integrated-player-support.js";

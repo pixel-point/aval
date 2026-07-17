@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ELEMENT_DECODER_CAPACITY } from "../src/decoder-capacity.js";
 import {
   contextRecoveryCount,
   outstandingDecoder,
@@ -229,10 +230,19 @@ describe("diagnostics", () => {
   });
 
   it("reports queued/granted decoder ownership without fabricating presentation state", () => {
-    expect(outstandingDecoder(0, "parked")).toBe(2);
-    expect(outstandingDecoder(0, "queued")).toBe(2);
-    expect(outstandingDecoder(1, "granted")).toBe(2);
-    expect(outstandingDecoder(2, "granted")).toBe(2);
+    expect(outstandingDecoder(0, "parked")).toBe(
+      ELEMENT_DECODER_CAPACITY.workerCount
+    );
+    expect(outstandingDecoder(0, "queued")).toBe(
+      ELEMENT_DECODER_CAPACITY.workerCount
+    );
+    expect(outstandingDecoder(1, "granted")).toBe(
+      ELEMENT_DECODER_CAPACITY.workerCount
+    );
+    expect(outstandingDecoder(
+      ELEMENT_DECODER_CAPACITY.workerCount,
+      "granted"
+    )).toBe(ELEMENT_DECODER_CAPACITY.workerCount);
     expect(outstandingDecoder(0, null)).toBe(0);
     expect(resolutionScale(0, 0)).toBe(0);
     expect(resolutionScale(100, 50)).toBe(1);

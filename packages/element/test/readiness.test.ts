@@ -4,6 +4,7 @@ import type {
   Blob,
   Manifest
 } from "../src/asset.js";
+import { ELEMENT_DECODER_CAPACITY } from "../src/decoder-capacity.js";
 import { createReadinessPlan } from "../src/readiness.js";
 
 describe("all-routes readiness plan", () => {
@@ -40,14 +41,19 @@ describe("all-routes readiness plan", () => {
       { edge: "b.c", kind: "cut", transitionUnit: null,
         targetFrames: [0, 1, 2, 3, 4, 0] },
       { edge: "c.a", kind: "stream", transitionUnit: "bridge",
-        targetFrames: [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3] }
+        targetFrames: Array.from(
+          { length: ELEMENT_DECODER_CAPACITY.ringSize },
+          (_, index) => index % 4
+        ) }
     ]);
     expect(plan.decodedFrameBytes).toBe(8 * 8 * 4);
     expect(plan.encodedBytes).toBe(150);
     expect(plan.semanticPersistentBytes).toBe(21 * 8 * 8 * 4);
     expect(plan.uniquePersistentBytes).toBe(14 * 8 * 8 * 4);
     expect(plan.declaredWorkingSetBytes).toBe(
-      21 * 8 * 8 * 4 + 2 * 12 * 48 * 48 * 4 + 150 + 8 * 8 * 4
+      21 * 8 * 8 * 4 +
+      ELEMENT_DECODER_CAPACITY.totalDecodedSurfaces * 48 * 48 * 4 +
+      150 + 8 * 8 * 4
     );
   });
 
@@ -130,7 +136,9 @@ function fixture(): Manifest {
       maxRuntimeBytes: Number.MAX_SAFE_INTEGER,
       decodedPixelBytes: frameBytes,
       persistentCacheBytes: persistent,
-      runtimeWorkingSetBytes: persistent + 2 * 12 * 48 * 48 * 4 + 150 + frameBytes
+      runtimeWorkingSetBytes: persistent +
+        ELEMENT_DECODER_CAPACITY.totalDecodedSurfaces * 48 * 48 * 4 +
+        150 + frameBytes
     }
   };
 }

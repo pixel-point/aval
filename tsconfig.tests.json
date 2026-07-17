@@ -8,7 +8,7 @@
     ]
   },
   "include": [
-    "playwright.config.ts",
+    "playwright*.config.ts",
     "tests/**/*.ts"
   ]
 }

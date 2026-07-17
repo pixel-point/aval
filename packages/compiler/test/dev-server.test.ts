@@ -198,6 +198,22 @@ describe("loopback dev server", () => {
       expect(workerCsp).toContain("script-src 'self'");
       expect(workerCsp).toContain("worker-src 'self'");
       expect(workerCsp).not.toMatch(/blob:|data:|unsafe-inline|unsafe-eval/u);
+      const elementWorker = await fetch(new URL(
+        "modules/element/decoder-worker.js?no-inline",
+        server.url
+      ));
+      expect(elementWorker.status).toBe(200);
+      expect(elementWorker.headers.get("content-security-policy")).toBe(
+        workerEntry.headers.get("content-security-policy")
+      );
+      expect((await fetch(new URL(
+        "modules/element/decoder-worker.js?no-inline=1",
+        server.url
+      ))).status).toBe(404);
+      expect((await fetch(new URL(
+        "modules/player-web/decoder-worker/entry.js?no-inline",
+        server.url
+      ))).status).toBe(404);
       const publicOrigin = new URL(server.url).origin;
       expect((await fetch(`${publicOrigin}/modules/element/index.js`)).status).toBe(404);
       expect((await fetch(new URL("modules/element/%2e%2e/index.js", server.url))).status).toBe(404);
@@ -246,6 +262,14 @@ describe("loopback dev server", () => {
       expect(await rawHttpStatus(Number(url.port), browserHeaders(url, `${url.pathname}events`, "same-origin", "cors", "empty"))).toBe(200);
       expect(await rawHttpStatus(Number(url.port), [
         `GET ${url.pathname}modules/player-web/decoder-worker/entry.js HTTP/1.1`,
+        `Host: ${url.host}`,
+        "Sec-Fetch-Site: same-origin",
+        "Sec-Fetch-Mode: same-origin",
+        "Sec-Fetch-Dest: worker",
+        "Connection: close"
+      ])).toBe(200);
+      expect(await rawHttpStatus(Number(url.port), [
+        `GET ${url.pathname}modules/element/decoder-worker.js?no-inline HTTP/1.1`,
         `Host: ${url.host}`,
         "Sec-Fetch-Site: same-origin",
         "Sec-Fetch-Mode: same-origin",

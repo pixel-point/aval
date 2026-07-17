@@ -58,6 +58,7 @@ import type {
   Vp9Codec,
   Vp9PacketInspection
 } from "@pixel-point/aval-format";
+import { maximumDecodedRgbaBytes } from "@pixel-point/aval-format";
 
 // Never emitted: this tuple makes every canonical wire/video type cross the
 // package export boundary during test TypeScript compilation.
@@ -137,3 +138,4 @@ geometry.decodedStorageRect[0] = 1;
 
 const pngDeflateCode: FormatErrorCode = "PNG_DEFLATE_INVALID";
 void pngDeflateCode;
+void maximumDecodedRgbaBytes("h264", 16, 16);

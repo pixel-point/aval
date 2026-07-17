@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { RELEASE_PACKAGE_NAMES, releasePackageDirectory } from "./release-set-model.mjs";
 import { ensureCompilerCliExecutable } from "./compiler-cli-mode.mjs";
 import { ELEMENT_RELEASE_TYPESCRIPT_ROOTS, ELEMENT_RELEASE_WORKER } from "./element-release-contract.mjs";
+import { COMPILER_WORKER_REGISTRY_ENTRY } from "./worker-entry-contract.mjs";
 
 const BUILD_INFO = Object.freeze({
   "@pixel-point/aval-graph": new Set(["graph.tsbuildinfo"]),
@@ -162,7 +163,12 @@ function privateBuildConfig(root, name, distribution, staged) {
   }
   return {
     ...config,
-    include: [slash(join(source, "**/*.ts"))],
+    include: [
+      slash(join(source, "**/*.ts")),
+      ...(name === COMPILER_WORKER_REGISTRY_ENTRY.packageName
+        ? [slash(join(source, COMPILER_WORKER_REGISTRY_ENTRY.output))]
+        : [])
+    ],
     exclude: [slash(join(source, "**/*.test.ts")), slash(join(source, "**/*.compile.ts")), slash(join(source, "**/*test-support.ts"))]
   };
 }
@@ -195,7 +201,7 @@ function listProgramSourceFiles({ repository, config, source, packageName }) {
   if (sourceFiles.length === 0) throw new Error(`${packageName} compiler program has no package source files`);
   if (new Set(sourceFiles).size !== sourceFiles.length) throw new Error(`${packageName} compiler program contains duplicate package source files`);
   for (const path of sourceFiles) {
-    if (!isReleaseSource(path)) throw new Error(`${packageName} compiler program contains non-release source: ${path}`);
+    if (!isReleaseSource(path, packageName)) throw new Error(`${packageName} compiler program contains non-release source: ${path}`);
   }
   return Object.freeze(sourceFiles);
 }
@@ -217,15 +223,19 @@ function slash(path) { return path.split(sep).join("/"); }
 
 export async function assertDistributionDerived({ source, sourceFiles, distribution, packageName }) {
   if (!Array.isArray(sourceFiles) || sourceFiles.length === 0) throw new Error(`${packageName} has no compiler-derived release source files`);
-  const availableSources = new Set((await collectFiles(resolve(source))).filter((path) => isReleaseSource(path)));
+  const availableSources = new Set((await collectFiles(resolve(source))).filter((path) => isReleaseSource(path, packageName)));
   const reviewedSources = [...sourceFiles].sort(compareText);
   if (new Set(reviewedSources).size !== reviewedSources.length) throw new Error(`${packageName} release source closure contains duplicates`);
   for (const path of reviewedSources) {
-    if (!isReleaseSource(path) || !availableSources.has(path)) throw new Error(`${packageName} release source closure contains an invalid source: ${path}`);
+    if (!isReleaseSource(path, packageName) || !availableSources.has(path)) throw new Error(`${packageName} release source closure contains an invalid source: ${path}`);
   }
   if (!BUILD_INFO[packageName]) throw new Error(`${packageName} has no reviewed release emission contract`);
   const expected = new Set();
   for (const path of reviewedSources) {
+    if (path.endsWith(".json")) {
+      expected.add(path);
+      continue;
+    }
     if (path.endsWith(".d.ts")) continue;
     const stem = path.slice(0, -3);
     expected.add(`${stem}.js`);
@@ -258,6 +268,11 @@ async function collectFiles(root, directory = root, output = []) {
   return output;
 }
 
-function isReleaseSource(path) { return path.endsWith(".ts") && !/\.(?:test|compile)\.ts$/u.test(path) && !/test-support\.ts$/u.test(path); }
+function isReleaseSource(path, packageName) {
+  return packageName === COMPILER_WORKER_REGISTRY_ENTRY.packageName &&
+      path === COMPILER_WORKER_REGISTRY_ENTRY.output ||
+    path.endsWith(".ts") && !/\.(?:test|compile)\.ts$/u.test(path) &&
+      !/test-support\.ts$/u.test(path);
+}
 function packageDirectory(root, name, child) { return resolve(root, "packages", releasePackageDirectory(name), child); }
 function compareText(left, right) { return left < right ? -1 : left > right ? 1 : 0; }

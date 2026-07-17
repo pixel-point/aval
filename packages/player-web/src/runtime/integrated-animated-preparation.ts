@@ -1,5 +1,6 @@
 import {
   MotionGraphEngine,
+  sameGraphPresentation,
   type GraphPresentation,
   type MotionGraphSnapshot
 } from "@pixel-point/aval-graph";
@@ -32,7 +33,6 @@ import {
   isIntegratedAbortError,
   normalizeIntegratedCandidateFailure,
   raceIntegratedAbort,
-  sameGraphPresentation,
   throwIfIntegratedAborted,
   validateIntegratedCandidateAttempt,
   validateIntegratedPreparedActivation,

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   AVAL_ELEMENT_API_MAJOR,
-  AVAL_TAG_NAME
+  AVAL_TAG_NAME,
+  ELEMENT_DECODER_CAPACITY
 } from "../src/index.js";
 import { createAvalElementClass } from "../src/aval-element.js";
 
@@ -10,6 +11,13 @@ describe("public element API", () => {
   it("freezes the prototype tag and API major", () => {
     expect(AVAL_TAG_NAME).toBe("aval-player");
     expect(AVAL_ELEMENT_API_MAJOR).toBe(1);
+    expect(ELEMENT_DECODER_CAPACITY).toEqual({
+      workerCount: 2,
+      ringSize: 12,
+      candidateReadyFrames: 6,
+      totalDecodedSurfaces: 24
+    });
+    expect(Object.isFrozen(ELEMENT_DECODER_CAPACITY)).toBe(true);
   });
 
   it("keeps source identity exclusively in direct source children", () => {

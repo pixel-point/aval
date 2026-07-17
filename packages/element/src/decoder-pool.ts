@@ -5,10 +5,11 @@ import {
   type DecodeRun,
   type DecodeSample
 } from "./decoder.js";
+import { ELEMENT_DECODER_LANE_IDS } from "./decoder-capacity.js";
 
 const MAX_BYTES = Number.MAX_SAFE_INTEGER;
 
-export type DecoderPoolLaneId = 0 | 1;
+export type DecoderPoolLaneId = (typeof ELEMENT_DECODER_LANE_IDS)[number];
 
 interface DecoderPoolLane {
   readonly id: DecoderPoolLaneId;
@@ -17,7 +18,6 @@ interface DecoderPoolLane {
 
 interface RunOwnership {
   readonly identity: DecoderPoolRunIdentity;
-  readonly candidateEpoch: number | null;
 }
 
 export interface DecoderPoolRunIdentity {
@@ -31,6 +31,18 @@ export interface DecoderPoolSnapshot {
   readonly openFrameBytes: number;
 }
 
+/**
+ * Owns one discardable run until it is either installed as foreground or
+ * retired. Both terminal operations are idempotent.
+ */
+export interface DecoderPoolCandidate {
+  readonly unitId: string;
+  readonly run: DecodeRun;
+  ready(): Promise<void>;
+  commit(): void;
+  cancel(): void;
+}
+
 /** Owns the two isolated serial decoders used for foreground/candidate playback. */
 export class DecoderPool {
   readonly #lanes: readonly [DecoderPoolLane, DecoderPoolLane];
@@ -40,12 +52,12 @@ export class DecoderPool {
   readonly #maxDecodedBytes: number;
   readonly #onDecodedBytes: ((bytes: number) => void) | undefined;
   readonly #onEncodedBytes: ((bytes: number) => void) | undefined;
+  readonly #failure: Promise<never>;
   #foreground: DecoderPoolLane;
   #candidate: DecoderPoolLane;
   #foregroundRun: DecodeRun | null = null;
   #candidateRun: DecodeRun | null = null;
   #sequence = 0;
-  #candidateEpoch = 1;
   #disposed = false;
 
   public constructor(
@@ -66,25 +78,42 @@ export class DecoderPool {
     this.#onDecodedBytes = limits.onDecodedBytes;
     this.#onEncodedBytes = limits.onEncodedBytes;
 
-    let first: Decoder | undefined;
+    const lanes: DecoderPoolLane[] = [];
     try {
-      first = this.#createDecoder(0, config, expectation, limits);
-      const second = this.#createDecoder(1, config, expectation, limits);
-      this.#lanes = Object.freeze([
-        Object.freeze({ id: 0, decoder: first }),
-        Object.freeze({ id: 1, decoder: second })
-      ]);
+      for (const id of ELEMENT_DECODER_LANE_IDS) {
+        lanes.push(Object.freeze({
+          id,
+          decoder: this.#createDecoder(id, config, expectation, limits)
+        }));
+      }
     } catch (error) {
-      first?.dispose();
+      for (const lane of lanes) lane.decoder.dispose();
       throw error;
     }
-    this.#foreground = this.#lanes[0];
-    this.#candidate = this.#lanes[1];
+    const [foreground, candidate] = lanes;
+    if (
+      lanes.length !== 2 || foreground === undefined || candidate === undefined
+    ) {
+      for (const lane of lanes) lane.decoder.dispose();
+      throw new Error("decoder capacity does not define two lanes");
+    }
+    this.#lanes = Object.freeze([foreground, candidate]);
+    this.#foreground = foreground;
+    this.#candidate = candidate;
+    this.#failure = Promise.race(
+      this.#lanes.map(({ decoder }) => decoder.failure())
+    );
+    void this.#failure.catch(() => undefined);
   }
 
   public async supported(): Promise<boolean> {
     const support = await Promise.all(this.#lanes.map((lane) => lane.decoder.supported()));
     return support.every(Boolean);
+  }
+
+  /** Rejects when either required physical decoder lane becomes unusable. */
+  public failure(): Promise<never> {
+    return this.#failure;
   }
 
   public createForegroundRun(samples: readonly Readonly<DecodeSample>[]): DecodeRun {
@@ -95,45 +124,71 @@ export class DecoderPool {
     ) {
       throw new Error("decoder foreground lane already owns a run");
     }
-    const run = this.#createRun(this.#foreground, samples, null);
+    const run = this.#createRun(this.#foreground, samples);
     this.#foregroundRun = run;
     return run;
   }
 
-  public createCandidateRun(samples: readonly Readonly<DecodeSample>[]): DecodeRun {
+  public createCandidate(
+    unitId: string,
+    samples: readonly Readonly<DecodeSample>[]
+  ): DecoderPoolCandidate {
     this.#assertLive();
+    if (typeof unitId !== "string" || unitId.length === 0) {
+      throw new TypeError("decoder candidate unit is invalid");
+    }
     if (
       (this.#candidateRun !== null && !this.#candidateRun.closed) ||
       !this.#candidate.decoder.available
     ) {
       throw new Error("decoder candidate lane already owns a run");
     }
-    const run = this.#createRun(this.#candidate, samples, this.#candidateEpoch);
+    const run = this.#createRun(this.#candidate, samples);
     this.#candidateRun = run;
-    return run;
-  }
-
-  /** Makes the candidate's physical lane foreground without moving its run. */
-  public promote(candidateRun: DecodeRun): void {
-    this.#assertLive();
-    const ownership = this.#ownership.get(candidateRun);
-    if (
-      ownership === undefined ||
-      this.#candidateRun !== candidateRun ||
-      ownership.identity.lane !== this.#candidate.id ||
-      ownership.candidateEpoch !== this.#candidateEpoch ||
-      candidateRun.closed
-    ) {
-      throw new Error("decoder run is not owned by the candidate lane");
-    }
-    if (this.#candidateEpoch === MAX_BYTES) {
-      throw new RangeError("decoder candidate epoch is exhausted");
-    }
-    const previousForeground = this.#foregroundRun;
-    [this.#foreground, this.#candidate] = [this.#candidate, this.#foreground];
-    this.#foregroundRun = candidateRun;
-    this.#candidateRun = previousForeground;
-    this.#candidateEpoch += 1;
+    let state: "preparing" | "ready" | "committed" | "canceled" =
+      "preparing";
+    let readiness: Promise<void> | null = null;
+    return Object.freeze({
+      unitId,
+      run,
+      ready: () => {
+        if (state === "ready" || state === "committed") {
+          return Promise.resolve();
+        }
+        if (state === "canceled") return Promise.reject(abortError());
+        readiness ??= run.ready().then(() => {
+          if (state === "preparing") state = "ready";
+        });
+        return readiness;
+      },
+      commit: () => {
+        if (state === "committed" || state === "canceled") return;
+        this.#assertLive();
+        if (state !== "ready") {
+          throw new Error("decoder candidate is not ready");
+        }
+        const ownership = this.#ownership.get(run);
+        if (
+          ownership === undefined ||
+          this.#candidateRun !== run ||
+          ownership.identity.lane !== this.#candidate.id ||
+          run.closed
+        ) {
+          throw new Error("decoder candidate is no longer current");
+        }
+        const previousForeground = this.#foregroundRun;
+        [this.#foreground, this.#candidate] = [this.#candidate, this.#foreground];
+        this.#foregroundRun = run;
+        this.#candidateRun = previousForeground;
+        state = "committed";
+        previousForeground?.close();
+      },
+      cancel: () => {
+        if (state === "committed" || state === "canceled") return;
+        state = "canceled";
+        run.close();
+      }
+    });
   }
 
   public identity(run: DecodeRun): DecoderPoolRunIdentity {
@@ -203,8 +258,7 @@ export class DecoderPool {
 
   #createRun(
     lane: DecoderPoolLane,
-    samples: readonly Readonly<DecodeSample>[],
-    candidateEpoch: number | null
+    samples: readonly Readonly<DecodeSample>[]
   ): DecodeRun {
     if (this.#sequence === MAX_BYTES) {
       throw new RangeError("decoder logical run identity is exhausted");
@@ -214,7 +268,7 @@ export class DecoderPool {
       logicalId: ++this.#sequence,
       lane: lane.id
     });
-    this.#ownership.set(run, Object.freeze({ identity, candidateEpoch }));
+    this.#ownership.set(run, Object.freeze({ identity }));
     return run;
   }
 
@@ -263,4 +317,8 @@ function byteCeilingError(kind: "decoded" | "encoded"): RangeError {
   return new RangeError(kind === "decoded"
     ? "AVAL decoded surfaces exceed their byte ceiling"
     : "decoder encoded copies exceed their byte ceiling");
+}
+
+function abortError(): DOMException {
+  return new DOMException("AVAL decoder candidate was aborted", "AbortError");
 }

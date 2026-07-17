@@ -565,6 +565,14 @@ export interface Binding {
 // @public (undocumented)
 export function defineAvalElement(): AvalElementConstructor;
 
+// @public
+export const ELEMENT_DECODER_CAPACITY: Readonly<{
+    workerCount: 2;
+    ringSize: 12;
+    candidateReadyFrames: 6;
+    totalDecodedSurfaces: number;
+}>;
+
 // @public (undocumented)
 export type RuntimeReadiness = "unready" | "metadataReady" | "visualReady" | "interactiveReady" | "staticReady" | "disposed" | "error";
 

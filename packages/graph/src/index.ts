@@ -5,6 +5,7 @@ export {
 } from "./errors.js";
 export { GRAPH_IDENTIFIER_PATTERN, GRAPH_LIMITS } from "./limits.js";
 export { MotionGraphEngine } from "./engine.js";
+export { sameGraphPresentation } from "./presentation.js";
 export {
   findFinishBoundary,
   findNextPortalBoundary,

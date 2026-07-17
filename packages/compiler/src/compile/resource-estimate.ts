@@ -5,14 +5,12 @@ import type {
 } from "@pixel-point/aval-format";
 import {
   FORMAT_DEFAULT_BUDGETS,
-  maximumH264DecodedRgbaBytes
+  maximumDecodedRgbaBytes
 } from "@pixel-point/aval-format";
+import { ELEMENT_DECODER_CAPACITY } from "@pixel-point/aval-element";
 
 import { CompilerError } from "../diagnostics.js";
 import type { NormalizedSourceProject, VideoCodec } from "../model.js";
-
-const DECODED_SURFACES_PER_RING = 12;
-const CONCURRENT_DECODER_RING_COUNT = 2;
 
 /** Compute diagnostic runtime terms without inventing a hard host policy. */
 export function estimateRuntimeLimits(
@@ -31,9 +29,7 @@ export function estimateRuntimeLimits(
     ...geometries.map(({ codedRgbaBytes }) => codedRgbaBytes)
   );
   const decoderSurfaceBytes = Math.max(...geometries.map((geometry) =>
-    codec === "h264"
-      ? maximumH264DecodedRgbaBytes(geometry.codedWidth, geometry.codedHeight)
-      : geometry.codedRgbaBytes
+    maximumDecodedRgbaBytes(codec, geometry.codedWidth, geometry.codedHeight)
   ));
   const reversibleFrames = project.units.reduce((total, unit) =>
     checkedSum(
@@ -85,8 +81,7 @@ export function estimateRuntimeLimits(
   );
   const decoderWorkingSetBytes = checkedProduct(
     [
-      CONCURRENT_DECODER_RING_COUNT,
-      DECODED_SURFACES_PER_RING,
+      ELEMENT_DECODER_CAPACITY.totalDecodedSurfaces,
       decoderSurfaceBytes
     ],
     "decoder working-set bytes"

@@ -5,11 +5,12 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "resolveJsonModule": true,
     "outDir": "dist",
     "rootDir": "src",
     "tsBuildInfoFile": "dist/compiler.tsbuildinfo",
     "lib": ["ES2023"],
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.json"]
 }

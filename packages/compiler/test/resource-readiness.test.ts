@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ELEMENT_DECODER_CAPACITY } from "@pixel-point/aval-element";
 import { deriveReadiness } from "../src/compile/readiness-plan.js";
 import { estimateRuntimeLimits } from "../src/compile/resource-estimate.js";
 import { deriveVideoRenditionGeometry } from "@pixel-point/aval-format";
@@ -59,7 +60,9 @@ describe("compiled resource and readiness derivation", () => {
       maxRuntimeBytes: Number.MAX_SAFE_INTEGER,
       decodedPixelBytes: 2_048,
       persistentCacheBytes: 26 * 2_048,
-      runtimeWorkingSetBytes: 26 * 2_048 + 2 * 12 * 64 * 48 * 4 + 40 + 2_048
+      runtimeWorkingSetBytes: 26 * 2_048 +
+        ELEMENT_DECODER_CAPACITY.totalDecodedSurfaces * 64 * 48 * 4 +
+        40 + 2_048
     });
   });
 

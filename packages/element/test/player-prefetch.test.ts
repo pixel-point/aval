@@ -12,7 +12,11 @@ const media = vi.hoisted(() => ({
   blocked: new Set<number>(),
   releaseBlocked: [] as Array<{ runId: number; release: () => void }>,
   operations: [] as string[],
-  decoderCount: 0
+  decoderCount: 0,
+  decoderFailures: [] as Array<{
+    promise: Promise<never>;
+    reject: (reason: unknown) => void;
+  }>
 }));
 
 vi.mock("../src/asset.js", () => {
@@ -190,8 +194,21 @@ vi.mock("../src/decoder.js", () => ({
   Decoder: class {
     public encodedBytes = 0;
     public readonly lane = media.decoderCount++;
+    readonly #failure: Promise<never>;
+    public constructor() {
+      let rejectFailure!: (reason: unknown) => void;
+      this.#failure = new Promise<never>((_resolve, reject) => {
+        rejectFailure = reject;
+      });
+      media.decoderFailures[this.lane] = {
+        promise: this.#failure,
+        reject: rejectFailure
+      };
+      void this.#failure.catch(() => undefined);
+    }
     public get available(): boolean { return true; }
     public async supported(): Promise<boolean> { return true; }
+    public failure(): Promise<never> { return this.#failure; }
     public createRun(samples: readonly { timestamp: number; displayedFrames: number }[]) {
       const label = samples[0]!.timestamp;
       const tracked = {
@@ -296,6 +313,7 @@ afterEach(() => {
   media.releaseBlocked.length = 0;
   media.operations.length = 0;
   media.decoderCount = 0;
+  media.decoderFailures.length = 0;
   vi.unstubAllGlobals();
 });
 
@@ -339,7 +357,7 @@ describe("player multi-route prefetch", () => {
     await player.dispose();
   });
 
-  it("holds intro exhaustion until its body candidate is ready", async () => {
+  it("holds intro exhaustion for readiness and recovers a retired-lane failure", async () => {
     vi.stubGlobal("Worker", class {});
     vi.stubGlobal("VideoDecoder", class {});
     const frames: FrameRequestCallback[] = [];
@@ -368,7 +386,7 @@ describe("player multi-route prefetch", () => {
       onResourceBytes: () => undefined,
       onMetadata: () => undefined,
       onReadiness: () => undefined,
-      onAnimationResourcesRetired: () => undefined,
+      onAnimationResourcesRetired: () => events.push("retired"),
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: (type) => events.push(type),
@@ -393,7 +411,7 @@ describe("player multi-route prefetch", () => {
     expect(intro.closed).toBe(false);
 
     releaseRun(body);
-    await driveFrames(frames, () => false, 1);
+    await driveFrames(frames, () => media.operations.includes(bodyDraw), 2);
 
     expect(media.operations, JSON.stringify(media.operations)).toContain(bodyDraw);
     expect(intro.closed).toBe(true);
@@ -405,6 +423,14 @@ describe("player multi-route prefetch", () => {
       media.operations.indexOf(`close:${String(intro.id)}`)
     );
     expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
+
+    media.decoderFailures[intro.lane]!.reject(new Error("AVAL decoder failed"));
+    await eventually(() => events.includes("failure:worker-decode-failure"));
+    expect(events).toContain("retired");
+    expect(player.snapshot(false)).toMatchObject({
+      selectedRendition: null,
+      workerCount: 0
+    });
 
     await player.dispose();
   });

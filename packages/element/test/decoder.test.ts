@@ -16,6 +16,35 @@ afterEach(() => {
 });
 
 describe("Decoder output certification", () => {
+  it("admits runs only after configuration and acknowledged lane retirement", async () => {
+    const Worker = fakeWorker();
+    const VideoFrame = fakeVideoFrame();
+    vi.stubGlobal("Worker", Worker);
+    vi.stubGlobal("VideoFrame", VideoFrame);
+
+    const decoder = configuredDecoder();
+    const worker = Worker.latest();
+    expect(decoder.available).toBe(false);
+    expect(() => oneFrameRun(decoder)).toThrow("decoder lane is unavailable");
+
+    worker.emit({ t: "configured", supported: true });
+    await decoder.supported();
+    expect(decoder.available).toBe(true);
+
+    const first = oneFrameRun(decoder);
+    expect(decoder.available).toBe(false);
+    expect(() => oneFrameRun(decoder)).toThrow("decoder lane is unavailable");
+    first.close();
+    expect(decoder.available).toBe(false);
+    worker.emit({ t: "closed", run: first.generation });
+    expect(decoder.available).toBe(true);
+
+    const second = oneFrameRun(decoder);
+    expect(worker.posted).toContainEqual({ t: "start", run: second.generation });
+    second.close();
+    decoder.dispose();
+  });
+
   it("accepts the browser sRGB transfer normalization of limited BT.709", async () => {
     const Worker = fakeWorker();
     const VideoFrame = fakeVideoFrame({
@@ -343,9 +372,8 @@ describe("Decoder output certification", () => {
       worker.emit({ t: "configured", supported: true });
       await decoder.supported();
       const first = oneFrameRun(decoder);
-      const second = oneFrameRun(decoder);
       expect(worker.posted).toContainEqual({ t: "start", run: first.generation });
-      expect(worker.posted).not.toContainEqual({ t: "start", run: second.generation });
+      expect(() => oneFrameRun(decoder)).toThrow("decoder lane is unavailable");
 
       worker.emit({ t: "started", run: first.generation });
       worker.emit({ t: "accepted", run: first.generation });
@@ -354,6 +382,7 @@ describe("Decoder output certification", () => {
       expect(worker.posted).toContainEqual({ t: "close", run: first.generation });
 
       worker.emit({ t: terminal, run: first.generation });
+      const second = oneFrameRun(decoder);
       expect(worker.posted).toContainEqual({ t: "start", run: second.generation });
 
       // Duplicate terminal messages from the retired generation are stale and
@@ -372,7 +401,7 @@ describe("Decoder output certification", () => {
     }
   );
 
-  it("treats a worker error as globally fatal after a local close", async () => {
+  it("retains a flushed run as the lane's sole owner until it closes", async () => {
     const Worker = fakeWorker();
     const VideoFrame = fakeVideoFrame();
     vi.stubGlobal("Worker", Worker);
@@ -383,15 +412,45 @@ describe("Decoder output certification", () => {
     worker.emit({ t: "configured", supported: true });
     await decoder.supported();
     const first = oneFrameRun(decoder);
-    const second = oneFrameRun(decoder);
+    worker.emit({ t: "started", run: first.generation });
+    worker.emit({ t: "accepted", run: first.generation });
+    worker.emit({
+      t: "frame",
+      run: first.generation,
+      timestamp: 0,
+      frame: new VideoFrame(32, 34)
+    });
+    worker.emit({ t: "flushed", run: first.generation });
+    await first.complete();
+
+    expect(decoder.available).toBe(false);
+    expect(() => oneFrameRun(decoder)).toThrow("decoder lane is unavailable");
+    first.close();
+    expect(decoder.available).toBe(true);
+    expect(() => oneFrameRun(decoder)).not.toThrow();
+    decoder.dispose();
+  });
+
+  it("treats a worker error as globally fatal after a local close", async () => {
+    const Worker = fakeWorker();
+    const VideoFrame = fakeVideoFrame();
+    vi.stubGlobal("Worker", Worker);
+    vi.stubGlobal("VideoFrame", VideoFrame);
+
+    const decoder = configuredDecoder();
+    const failure = decoder.failure();
+    const worker = Worker.latest();
+    worker.emit({ t: "configured", supported: true });
+    await decoder.supported();
+    const first = oneFrameRun(decoder);
     worker.emit({ t: "started", run: first.generation });
     worker.emit({ t: "accepted", run: first.generation });
     first.close();
 
     worker.emit({ t: "error" });
 
+    await expect(failure).rejects.toThrow("AVAL decoder failed");
     expect(worker.terminated).toBe(true);
-    expect(worker.posted).not.toContainEqual({ t: "start", run: second.generation });
     expect(decoder.snapshot()).toEqual({
       workerCount: 0,
       openFrames: 0,
@@ -411,7 +470,6 @@ describe("Decoder output certification", () => {
     worker.emit({ t: "configured", supported: true });
     await decoder.supported();
     const first = oneFrameRun(decoder);
-    const second = oneFrameRun(decoder);
     worker.emit({ t: "started", run: first.generation });
     first.close();
 
@@ -427,6 +485,7 @@ describe("Decoder output certification", () => {
     expect((frame as unknown as { closed: boolean }).closed).toBe(true);
     expect(worker.terminated).toBe(false);
     worker.emit({ t: "closed", run: first.generation });
+    const second = oneFrameRun(decoder);
     expect(worker.posted).toContainEqual({ t: "start", run: second.generation });
     second.close();
     decoder.dispose();
@@ -445,9 +504,9 @@ describe("Decoder output certification", () => {
       worker.emit({ t: "configured", supported: true });
       await decoder.supported();
       const first = oneFrameRun(decoder);
-      const second = oneFrameRun(decoder);
       first.close();
       worker.emit({ t: "closed", run: first.generation });
+      const second = oneFrameRun(decoder);
       expect(worker.posted).toContainEqual({ t: "start", run: second.generation });
 
       worker.emit({ t: kind, run: first.generation });
@@ -469,9 +528,9 @@ describe("Decoder output certification", () => {
     worker.emit({ t: "configured", supported: true });
     await decoder.supported();
     const first = oneFrameRun(decoder);
-    oneFrameRun(decoder);
     first.close();
     worker.emit({ t: "closed", run: first.generation });
+    oneFrameRun(decoder);
     const frame = new VideoFrame(32, 34);
 
     worker.emit({

@@ -21,7 +21,7 @@ const REQUIRED_RUNTIME_EXPORTS = Object.freeze([
   "deriveVideoRenditionGeometry",
   "h264CodecForLevel",
   "inspectH264AnnexBRendition",
-  "maximumH264DecodedRgbaBytes",
+  "maximumDecodedRgbaBytes",
   "prepareH264EncoderRendition",
   "parseVideoCodecString",
   "isVideoCodecString",

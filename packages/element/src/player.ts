@@ -6,19 +6,24 @@ import {
   type Source,
   type Unit
 } from "./asset.js";
-import type {
-  GraphPresentation,
-  MotionGraphEffect,
-  MotionGraphEngine,
-  MotionGraphResult,
-  MotionGraphSnapshot
+import {
+  sameGraphPresentation,
+  type GraphPresentation,
+  type MotionGraphEffect,
+  type MotionGraphEngine,
+  type MotionGraphResult,
+  type MotionGraphSnapshot
 } from "@pixel-point/aval-graph";
-import { maximumH264DecodedRgbaBytes } from "@pixel-point/aval-format";
+import { maximumDecodedRgbaBytes } from "@pixel-point/aval-format";
 import {
   type DecodeRun,
   type DecodeSample
 } from "./decoder.js";
-import { DecoderPool } from "./decoder-pool.js";
+import {
+  DecoderPool,
+  type DecoderPoolCandidate
+} from "./decoder-pool.js";
+import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 import {
   createCodecValidator,
   type CodecValidator
@@ -51,22 +56,31 @@ import type {
 
 type State = Manifest["states"][number];
 
-interface ActiveMedia {
+interface ActiveMediaBase {
   readonly unit: Unit;
-  run: DecodeRun | null;
-  readonly starting: DecodeRunStart | null;
-  promoted: boolean;
-  readonly resident: string | null;
   lastIndex: number;
+}
+
+interface ResidentMedia extends ActiveMediaBase {
+  readonly kind: "resident";
+}
+
+interface StreamMedia extends ActiveMediaBase {
+  readonly kind: "stream";
+  readonly run: DecodeRun;
   drainedIndex: number;
   drain: Promise<void>;
 }
 
-interface DecodeRunStart {
-  readonly ready: Promise<DecodeRun>;
-  readonly candidate: boolean;
-  cancel(): void;
-}
+type ActiveMedia = ResidentMedia | StreamMedia;
+
+type StreamReservation =
+  | Readonly<{ kind: "foreground"; media: StreamMedia }>
+  | Readonly<{
+      kind: "candidate";
+      media: StreamMedia;
+      candidate: DecoderPoolCandidate;
+    }>;
 
 type PrepareResult = RuntimeReadinessResult;
 type CandidateReport = RuntimeReadinessResult["report"]["candidates"][number];
@@ -77,8 +91,6 @@ interface StateRequest {
 }
 
 const PREPARE_MS = 5_000;
-const RING = 12;
-
 type AdvanceOutcome = "progressed" | "waiting-route";
 
 const COLOR = Object.freeze({
@@ -343,7 +355,7 @@ class PlayerImpl implements Player {
   readonly #resident = new Map<string, Promise<void>>();
   readonly #residentReady = new Set<string>();
   readonly #residentFrames = new Map<string, Set<number>>();
-  readonly #routePrefetch: RoutePrefetchQueue<DecodeRun>;
+  readonly #routePrefetch: RoutePrefetchQueue<DecoderPoolCandidate>;
   readonly #validated = new Set<string>();
   readonly #trace: Readonly<AvalRuntimeTraceRecord>[] = [];
   readonly #requests = new Map<number, StateRequest>();
@@ -353,7 +365,6 @@ class PlayerImpl implements Player {
   #plan: Readonly<ReadinessPlan> | null = null;
   #initialMedia: Readonly<{ unit: Unit; run: DecodeRun }> | null = null;
   #active: ActiveMedia | null = null;
-  #provisional: ActiveMedia | null = null;
   #advanceWork: Promise<AdvanceOutcome> | null = null;
   #preparationMediaWork: Promise<Readonly<{
     unit: Unit;
@@ -463,6 +474,9 @@ class PlayerImpl implements Player {
     });
     input.onMetadata(this.metadata);
     input.onReadiness("metadataReady");
+    if (decoders !== null) {
+      void decoders.failure().catch((error) => this.#fail(error));
+    }
   }
 
   public activate(): void {
@@ -747,7 +761,15 @@ class PlayerImpl implements Player {
     }
     this.#preparationDeadline.signal.throwIfAborted();
     const animated = graph.beginAnimated();
-    await this.#applyWithDraw(animated, true, this.#input.platform.now(), null);
+    const required = this.#requiredCandidate(animated.presentation);
+    const replacement = required === null ? null : this.#reserveStream(required);
+    await this.#applyWithDraw(
+      animated,
+      true,
+      this.#input.platform.now(),
+      null,
+      replacement
+    );
     this.#prepareRoutes(graph.snapshot());
     this.#input.onReadiness("visualReady");
     this.#input.onReadiness("interactiveReady");
@@ -878,7 +900,10 @@ class PlayerImpl implements Player {
       encodedBytes,
       Math.max(
         decoders?.openFrameBytes ?? 0,
-        checkedTotal(Array.from({ length: RING * 2 }, () => surfaceBytes))
+        checkedTotal(Array.from(
+          { length: ELEMENT_DECODER_CAPACITY.totalDecodedSurfaces },
+          () => surfaceBytes
+        ))
       ),
       renderer.runtimeBytes
     ]);
@@ -891,12 +916,9 @@ class PlayerImpl implements Player {
     this.#cancelFrame();
     this.#preparationDeadline.cancel(abortError());
     const active = this.#active;
-    const provisional = this.#provisional;
-    this.#provisional = null;
     const initialMedia = this.#initialMedia;
     this.#initialMedia = null;
     initialMedia?.run.close();
-    this.#closeActive(provisional);
     this.#closeActive(active);
     if (this.#active === active) this.#active = null;
     const prefetched = this.#routePrefetch.retire();
@@ -904,12 +926,7 @@ class PlayerImpl implements Player {
     await Promise.allSettled([
       ...(this.#advanceWork === null ? [] : [this.#advanceWork]),
       ...(this.#preparationMediaWork === null ? [] : [this.#preparationMediaWork]),
-      ...(active?.starting === null || active?.starting === undefined
-        ? [] : [active.starting.ready]),
-      ...(active === null ? [] : [active.drain]),
-      ...(provisional?.starting === null || provisional?.starting === undefined
-        ? [] : [provisional.starting.ready]),
-      ...(provisional === null ? [] : [provisional.drain]),
+      ...(active?.kind === "stream" ? [active.drain] : []),
       prefetched,
       ...this.#resident.values(),
       ...(renderer === null ? [] : [renderer.settled()])
@@ -1039,7 +1056,7 @@ class PlayerImpl implements Player {
     const replacement = required === null ? null : this.#reserveStream(required);
     try {
       const result = graph.tick(tick);
-      if (!samePresentation(preview.presentation, result.presentation)) {
+      if (!sameGraphPresentation(preview.presentation, result.presentation)) {
         throw new Error("AVAL graph preview diverged from its committed tick");
       }
       this.#ordinal += 1n;
@@ -1053,7 +1070,7 @@ class PlayerImpl implements Player {
       this.#prepareRoutes(graph.snapshot());
       return "progressed";
     } catch (error) {
-      this.#cancelProvisional(replacement);
+      this.#cancelReservation(replacement);
       throw error;
     }
   }
@@ -1150,7 +1167,7 @@ class PlayerImpl implements Player {
     routeReady: boolean,
     callbackStart: number,
     rationalDeadlineUs: number | null,
-    preparedReplacement: ActiveMedia | null | undefined = undefined
+    replacement: StreamReservation | null
   ): Promise<void> {
     const generation = this.#animationGeneration;
     const renderer = this.#renderer;
@@ -1160,12 +1177,6 @@ class PlayerImpl implements Player {
     }
     const presentation = result.presentation;
     if (presentation === null) throw new Error("Invalid AVAL graph presentation");
-    const required = preparedReplacement === undefined
-      ? this.#requiredCandidate(presentation)
-      : null;
-    const replacement: ActiveMedia | null = preparedReplacement === undefined
-      ? required === null ? null : this.#reserveStream(required)
-      : preparedReplacement;
     try {
       const post: Readonly<MotionGraphEffect>[] = [];
       for (const effect of result.effects) {
@@ -1188,7 +1199,7 @@ class PlayerImpl implements Player {
         rationalDeadlineUs
       );
     } catch (error) {
-      this.#cancelProvisional(replacement);
+      this.#cancelReservation(replacement);
       throw error;
     }
   }
@@ -1252,60 +1263,49 @@ class PlayerImpl implements Player {
     generation: number,
     renderer: Renderer,
     decoders: DecoderPool,
-    preparedReplacement: ActiveMedia | null
+    replacement: StreamReservation | null
   ): Promise<void> {
     if (presentation.kind === "static") {
-      if (preparedReplacement !== null) {
-        throw new Error("Invalid AVAL prepared replacement");
-      }
+      if (replacement !== null) throw new Error("Invalid AVAL stream replacement");
       return;
     }
     this.#assertAnimation(generation, renderer, decoders);
     const key = `${presentation.kind}\0${presentation.unitId}\0${String(presentation.frameIndex)}`;
     if (key === this.#lastDraw) {
-      if (preparedReplacement !== null) {
-        throw new Error("Invalid AVAL prepared replacement");
-      }
+      if (replacement !== null) throw new Error("Invalid AVAL stream replacement");
       return;
     }
     const unit = this.#unit(presentation.unitId);
     if (presentation.kind === "reversible") {
-      if (preparedReplacement !== null) {
-        throw new Error("Invalid AVAL prepared replacement");
-      }
+      if (replacement !== null) throw new Error("Invalid AVAL stream replacement");
       await this.#ensureResident(unit);
       this.#assertAnimation(generation, renderer, decoders);
       const previous = this.#active;
-      const replacement = previous?.resident === unit.id
+      const resident = previous?.kind === "resident" && previous.unit.id === unit.id
         ? previous
         : {
+          kind: "resident" as const,
           unit,
-          run: null,
-          starting: null,
-          promoted: false,
-          resident: unit.id,
-          lastIndex: -1,
-          drainedIndex: -1,
-          drain: Promise.resolve()
+          lastIndex: -1
         };
       await renderer.drawStored(unit.id, presentation.frameIndex);
       this.#assertAnimation(generation, renderer, decoders);
-      if (replacement !== previous) {
-        this.#active = replacement;
+      resident.lastIndex = presentation.frameIndex;
+      if (resident !== previous) {
+        this.#active = resident;
         this.#closeActive(previous);
       }
     } else {
       const previous = this.#active;
-      const replacing = previous === null || previous.resident !== null ||
+      const replacing = previous === null || previous.kind === "resident" ||
         previous.unit.id !== unit.id || presentation.frameIndex <= previous.lastIndex;
-      if (replacing !== (preparedReplacement !== null)) {
-        throw new Error("Invalid AVAL prepared replacement");
+      if (replacing !== (replacement !== null)) {
+        throw new Error("Invalid AVAL stream replacement");
       }
-      const active = preparedReplacement ?? previous;
-      if (active === null || active.unit.id !== unit.id) {
-        throw new Error("Invalid AVAL prepared replacement");
+      const active = replacement?.media ?? previous;
+      if (active === null || active.kind !== "stream" || active.unit.id !== unit.id) {
+        throw new Error("Invalid AVAL stream replacement");
       }
-      if (replacing) await this.#activeRun(active, true);
       if (this.#hasResident(unit.id, presentation.frameIndex)) {
         await renderer.drawStored(unit.id, presentation.frameIndex);
         this.#assertAnimation(generation, renderer, decoders);
@@ -1315,8 +1315,7 @@ class PlayerImpl implements Player {
         }
         await active.drain;
         this.#assertAnimation(generation, renderer, decoders);
-        const run = await this.#activeRun(active);
-        this.#assertAnimation(generation, renderer, decoders);
+        const run = active.run;
         const frame = await run.take(presentation.frameIndex);
         try {
           this.#assertAnimation(generation, renderer, decoders);
@@ -1329,10 +1328,10 @@ class PlayerImpl implements Player {
       this.#assertAnimation(generation, renderer, decoders);
       active.lastIndex = presentation.frameIndex;
       if (replacing) {
-        this.#promote(active);
+        if (replacement === null) throw new Error("Invalid AVAL stream replacement");
+        if (replacement.kind === "candidate") replacement.candidate.commit();
         this.#active = active;
-        if (this.#provisional === active) this.#provisional = null;
-        this.#closeActive(previous);
+        if (replacement.kind === "foreground") this.#closeActive(previous);
       }
       if (this.#hasResident(unit.id, presentation.frameIndex)) {
         this.#drainThrough(active, presentation.frameIndex);
@@ -1357,64 +1356,50 @@ class PlayerImpl implements Player {
       this.#decoders !== decoders) throw abortError();
   }
 
-  #beginStream(unit: Unit): ActiveMedia {
-    const starting = this.#takeRun(unit);
+  #reserveStream(unit: Unit): StreamReservation {
+    const initial = this.#initialMedia;
+    if (initial?.unit.id === unit.id) {
+      this.#initialMedia = null;
+      return Object.freeze({
+        kind: "foreground" as const,
+        media: this.#streamMedia(unit, initial.run)
+      });
+    }
+    const candidate = this.#routePrefetch.claim(unit.id);
+    if (candidate === undefined) {
+      throw new Error("AVAL candidate route is unavailable");
+    }
+    if (candidate.unitId !== unit.id) {
+      candidate.cancel();
+      throw new Error("AVAL candidate route identity diverged");
+    }
+    return Object.freeze({
+      kind: "candidate" as const,
+      media: this.#streamMedia(this.#unit(candidate.unitId), candidate.run),
+      candidate
+    });
+  }
+
+  #streamMedia(unit: Unit, run: DecodeRun): StreamMedia {
     return {
+      kind: "stream",
       unit,
-      run: null,
-      starting,
-      promoted: !starting.candidate,
-      resident: null,
+      run,
       lastIndex: -1,
       drainedIndex: -1,
       drain: Promise.resolve()
     };
   }
 
-  #reserveStream(unit: Unit): ActiveMedia {
-    if (this.#provisional !== null) {
-      throw new Error("AVAL replacement transaction is already active");
-    }
-    const active = this.#beginStream(unit);
-    this.#provisional = active;
-    return active;
+  #cancelReservation(reservation: StreamReservation | null): void {
+    if (reservation === null) return;
+    if (reservation.kind === "candidate") reservation.candidate.cancel();
+    else reservation.media.run.close();
   }
 
-  #cancelProvisional(active: ActiveMedia | null): void {
-    if (active === null || this.#provisional !== active) return;
-    this.#provisional = null;
-    this.#closeActive(active);
-  }
-
-  async #activeRun(active: ActiveMedia, detached = false): Promise<DecodeRun> {
-    if (active.run !== null) return active.run;
-    if (active.starting === null) throw new Error("Invalid AVAL media state");
-    const run = await active.starting.ready;
-    if (
-      (!detached && this.#active !== active) ||
-      this.#staticReason !== null || this.#disposed
-    ) {
-      run.close();
-      throw abortError();
-    }
-    active.run = run;
-    return run;
-  }
-
-  #promote(active: ActiveMedia): void {
-    if (active.promoted) return;
-    const decoders = this.#decoders;
-    const run = active.run;
-    if (decoders === null || run === null || active.starting?.candidate !== true) {
-      throw new Error("Invalid AVAL candidate promotion");
-    }
-    decoders.promote(run);
-    active.promoted = true;
-  }
-
-  #drainThrough(active: ActiveMedia, index: number): void {
+  #drainThrough(active: StreamMedia, index: number): void {
     active.drain = active.drain.then(async () => {
-      const run = await this.#activeRun(active);
+      const run = active.run;
       for (let cursor = active.drainedIndex + 1; cursor <= index; cursor += 1) {
         const frame = await run.take(cursor);
         this.#release(run, frame);
@@ -1427,30 +1412,7 @@ class PlayerImpl implements Player {
   }
 
   #closeActive(active: ActiveMedia | null): void {
-    if (active === null) return;
-    active.starting?.cancel();
-    active.run?.close();
-  }
-
-  #takeRun(unit: Unit): DecodeRunStart {
-    const initial = this.#initialMedia;
-    if (initial?.unit.id === unit.id) {
-      this.#initialMedia = null;
-      return this.#resolvedRunStart(initial.run);
-    }
-    const prepared = this.#routePrefetch.claim(unit.id);
-    if (prepared === undefined) {
-      throw new Error("AVAL candidate route is unavailable");
-    }
-    return Object.freeze({ ...prepared, candidate: true });
-  }
-
-  #resolvedRunStart(run: DecodeRun): DecodeRunStart {
-    return Object.freeze({
-      ready: Promise.resolve(run),
-      candidate: false,
-      cancel: () => run.close()
-    });
+    if (active?.kind === "stream") active.run.close();
   }
 
   #prepareRoutes(
@@ -1467,9 +1429,9 @@ class PlayerImpl implements Player {
         ? null
         : {
             unitId: active.unit.id,
-            mode: active.resident === null ? "stream" : "resident"
+            mode: active.kind
           },
-      RING,
+      ELEMENT_DECODER_CAPACITY.ringSize,
       pending !== null && this.#departureReady(pending)
     );
     for (const unit of plan.resident) void this.#ensureResident(unit);
@@ -1497,7 +1459,7 @@ class PlayerImpl implements Player {
     if (key === this.#lastDraw) return null;
     const unit = this.#unit(presentation.unitId);
     const active = this.#active;
-    return active === null || active.resident !== null || active.unit.id !== unit.id ||
+    return active === null || active.kind === "resident" || active.unit.id !== unit.id ||
       presentation.frameIndex <= active.lastIndex ? unit : null;
   }
 
@@ -1553,10 +1515,12 @@ class PlayerImpl implements Player {
     this.#reportResourceBytes();
   }
 
+  #createLoadedRun(unit: Unit, role: "foreground"): DecodeRun;
+  #createLoadedRun(unit: Unit, role: "candidate"): DecoderPoolCandidate;
   #createLoadedRun(
     unit: Unit,
     role: "foreground" | "candidate"
-  ): DecodeRun {
+  ): DecodeRun | DecoderPoolCandidate {
     const decoders = this.#decoders;
     if (decoders === null) throw new Error("AVAL decoder is unavailable");
     const span = this.#unitSpan(unit);
@@ -1592,15 +1556,22 @@ class PlayerImpl implements Player {
       this.#validated.add(unit.id);
       if (this.#validated.size === this.#units.size) this.#validator.complete();
     }
-    const run = role === "foreground"
-      ? decoders.createForegroundRun(samples)
-      : decoders.createCandidateRun(samples);
+    if (role === "foreground") {
+      const run = decoders.createForegroundRun(samples);
+      this.#reportResourceBytes();
+      if (run.frameCount !== unit.frameCount) {
+        run.close();
+        throw new Error("Invalid AVAL asset");
+      }
+      return run;
+    }
+    const candidate = decoders.createCandidate(unit.id, samples);
     this.#reportResourceBytes();
-    if (run.frameCount !== unit.frameCount) {
-      run.close();
+    if (candidate.run.frameCount !== unit.frameCount) {
+      candidate.cancel();
       throw new Error("Invalid AVAL asset");
     }
-    return run;
+    return candidate;
   }
 
   #unitSpan(unit: Unit): Unit["chunks"][number] {
@@ -1662,7 +1633,7 @@ class PlayerImpl implements Player {
       ? null : Object.freeze({ ...result.presentation });
     const active = this.#active;
     if (active === null) throw new Error("Invalid AVAL media state");
-    const runId = active.run === null || this.#decoders === null
+    const runId = active.kind === "resident" || this.#decoders === null
       ? null : this.#decoders.identity(active.run).logicalId;
     const graphPresentation = result.presentation;
     const edgeId = graphPresentation !== null &&
@@ -1709,7 +1680,7 @@ class PlayerImpl implements Player {
           localFrame: frame
         }),
         ringSize: this.#decoders?.snapshot().openFrames ?? 0,
-        ringCapacity: RING * 2,
+        ringCapacity: ELEMENT_DECODER_CAPACITY.totalDecodedSurfaces,
         smoothSession: this.#incidents === 0
       }),
       submitted: Object.freeze([]),
@@ -1890,9 +1861,11 @@ function decodedSurfaceBytes(
   manifest: Readonly<Manifest>,
   rendition: Readonly<Rendition>
 ): number {
-  return manifest.codec === "h264"
-    ? maximumH264DecodedRgbaBytes(rendition.codedWidth, rendition.codedHeight)
-    : checkedProduct([rendition.codedWidth, rendition.codedHeight, 4]);
+  return maximumDecodedRgbaBytes(
+    manifest.codec,
+    rendition.codedWidth,
+    rendition.codedHeight
+  );
 }
 
 export function routeWaitBlocksPresentation(
@@ -1906,27 +1879,6 @@ export function routeWaitBlocksPresentation(
     departure.start.type !== "cut" &&
     unit?.kind === "body" && unit.playback === "finite" &&
     presentation.frameIndex === unit.frameCount - 1;
-}
-
-function samePresentation(
-  left: Readonly<GraphPresentation> | null,
-  right: Readonly<GraphPresentation> | null
-): boolean {
-  if (left === null || right === null) return left === right;
-  if (left.kind === "static") {
-    return right.kind === "static" && left.state === right.state;
-  }
-  if (left.kind === "intro" || left.kind === "body") {
-    return right.kind === left.kind && left.state === right.state &&
-      left.unitId === right.unitId && left.frameIndex === right.frameIndex;
-  }
-  if (left.kind === "locked") {
-    return right.kind === "locked" && left.edgeId === right.edgeId &&
-      left.unitId === right.unitId && left.frameIndex === right.frameIndex;
-  }
-  return right.kind === "reversible" && left.edgeId === right.edgeId &&
-    left.unitId === right.unitId && left.frameIndex === right.frameIndex &&
-    left.direction === right.direction;
 }
 
 /** Exact encoded-copy ceiling implied by four queued wants plus active and retiring runs. */
@@ -1976,7 +1928,10 @@ function assertCandidateBudget(
     assetSnapshot.metadataBytes,
     residentBlobBytes,
     encodedCopyCeiling(asset, rendition),
-    checkedProduct([RING * 2, decodedSurfaceBytes(asset.manifest, rendition)]),
+    checkedProduct([
+      ELEMENT_DECODER_CAPACITY.totalDecodedSurfaces,
+      decodedSurfaceBytes(asset.manifest, rendition)
+    ]),
     rendererAdmission.runtimeBytes
   ]);
   if (aggregate > asset.manifest.limits.maxRuntimeBytes) {

@@ -1,5 +1,10 @@
 # Kinetic Orb Rapid-Hover Stability Design
 
+**Status:** Superseded by
+[`2026-07-17-concurrent-route-decoding-design.md`](./2026-07-17-concurrent-route-decoding-design.md).
+The reproduction and requirements remain historical evidence; its serial
+decoder and prepared-run architecture is no longer current.
+
 ## Purpose
 
 Make rapid pointer enter/leave churn safe for every AVAL interactive asset. The

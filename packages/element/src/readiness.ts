@@ -4,7 +4,8 @@ import type {
   Manifest,
   Unit
 } from "./asset.js";
-import { maximumH264DecodedRgbaBytes } from "@pixel-point/aval-format";
+import { maximumDecodedRgbaBytes } from "@pixel-point/aval-format";
+import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 
 type Body = Extract<Unit, { readonly kind: "body" }>;
 
@@ -41,9 +42,6 @@ export interface ReadinessPlan {
   readonly uniquePersistentBytes: number;
   readonly declaredWorkingSetBytes: number;
 }
-
-const DECODED_SURFACES_PER_RING = 12;
-const CONCURRENT_DECODER_RING_COUNT = 2;
 
 /** Expand the complete format-1.0 all-routes set for one selected rendition. */
 export function createReadinessPlan(
@@ -108,7 +106,7 @@ export function createReadinessPlan(
       count = endpointFrames(edge, endpoints);
     } else {
       kind = "stream";
-      count = DECODED_SURFACES_PER_RING;
+      count = ELEMENT_DECODER_CAPACITY.ringSize;
     }
     const targetFrames = runway(body, port.entryFrame, count);
     if (edge.start.type === "cut") {
@@ -129,9 +127,11 @@ export function createReadinessPlan(
   const maximumDecodedFrameBytes = Math.max(...manifest.renditions.map(({ codedWidth, codedHeight }) =>
     product(codedWidth, codedHeight, 4)));
   const maximumDecoderSurfaceBytes = Math.max(...manifest.renditions.map((candidate) =>
-    manifest.codec === "h264"
-      ? maximumH264DecodedRgbaBytes(candidate.codedWidth, candidate.codedHeight)
-      : product(candidate.codedWidth, candidate.codedHeight, 4)));
+    maximumDecodedRgbaBytes(
+      manifest.codec,
+      candidate.codedWidth,
+      candidate.codedHeight
+    )));
   const encodedByRendition = new Map<string, number>();
   for (const blob of blobs) encodedByRendition.set(
     blob.rendition,
@@ -149,8 +149,7 @@ export function createReadinessPlan(
   const declaredWorkingSetBytes = [
     semanticPersistentBytes,
     product(
-      CONCURRENT_DECODER_RING_COUNT,
-      DECODED_SURFACES_PER_RING,
+      ELEMENT_DECODER_CAPACITY.totalDecodedSurfaces,
       maximumDecoderSurfaceBytes
     ),
     Math.max(0, ...encodedByRendition.values()),

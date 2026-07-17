@@ -5,6 +5,7 @@ import { ElementEventMutationGate } from "./element-event-mutation-gate.js";
 import { ElementEngagementBinding } from "./element-engagement-binding.js";
 import { ElementPublicEvents } from "./element-public-events.js";
 import { ElementTrace } from "./element-trace.js";
+import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 import type {
   Metadata,
   Player,
@@ -43,7 +44,6 @@ import type {
 
 let runtimeModule: Promise<typeof import("./player.js")> | null = null;
 const PREPARATION_MS = 5_000;
-const PLAYER_DECODER_WEIGHT = 2;
 type IntersectionGate = {
   readonly promise: Promise<void>;
   readonly resolve: () => void;
@@ -1652,7 +1652,7 @@ export function createAvalElementClass(
       if (this.#decoderLease !== null) return true;
       if (this.#decoderTicket !== null) return false;
       const epoch = this.#sourceRequestEpoch;
-      const ticket = this.#ensurePageParticipant().request(PLAYER_DECODER_WEIGHT);
+      const ticket = this.#ensurePageParticipant().request();
       const lease = ticket.take();
       if (lease !== null) {
         this.#decoderLease = lease;
@@ -2092,7 +2092,7 @@ export function outstandingDecoder(
 ): number {
   return Math.max(
     workerCount,
-    ticketState === null ? 0 : PLAYER_DECODER_WEIGHT
+    ticketState === null ? 0 : ELEMENT_DECODER_CAPACITY.workerCount
   );
 }
 

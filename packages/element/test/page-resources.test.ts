@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ELEMENT_DECODER_CAPACITY } from "../src/decoder-capacity.js";
 import {
   pageResourcesSnapshot,
   createPageDecoderParticipant,
@@ -10,7 +11,6 @@ import {
 
 interface Slot {
   participant: PageDecoderParticipant;
-  weight: number;
   visible: boolean;
   ticket: PageDecoderTicket | null;
   lease: PageDecoderLease | null;
@@ -24,7 +24,7 @@ interface ByteSlot {
 }
 
 describe("page decoder resources", () => {
-  it("grants one weighted pair and preserves visible FIFO around parked tickets", () => {
+  it("grants one atomic player permit and preserves visible FIFO around parked tickets", () => {
     const first = slot(true);
     const second = slot(true);
     const parked = slot(false);
@@ -36,12 +36,11 @@ describe("page decoder resources", () => {
 
     refresh([first, second, parked, fourth]);
     expect(first.lease).not.toBeNull();
-    expect(first.lease?.weight).toBe(2);
     expect(second.lease).toBeNull();
     expect(parked.lease).toBeNull();
     expect(fourth.lease).toBeNull();
     expect(pageResourcesSnapshot()).toEqual({
-      active: 2,
+      active: ELEMENT_DECODER_CAPACITY.workerCount,
       queued: 2,
       parked: 1,
       participants: 4,
@@ -64,7 +63,7 @@ describe("page decoder resources", () => {
     refresh([parked]);
     expect(parked.lease).not.toBeNull();
     expect(pageResourcesSnapshot()).toEqual({
-      active: 2,
+      active: ELEMENT_DECODER_CAPACITY.workerCount,
       queued: 0,
       parked: 0,
       participants: 4,
@@ -81,31 +80,40 @@ describe("page decoder resources", () => {
     });
   });
 
-  it("never partially grants a pair or bypasses its FIFO position", () => {
-    const single = slot(true, 1);
-    const pair = slot(true, 2);
-    const follower = slot(true, 1);
-    request(single);
-    request(pair);
+  it("never grants more than one player permit or bypasses FIFO position", () => {
+    const first = slot(true);
+    const second = slot(true);
+    const follower = slot(true);
+    request(first);
+    request(second);
     request(follower);
-    refresh([single, pair, follower]);
+    refresh([first, second, follower]);
 
-    expect(single.lease?.weight).toBe(1);
-    expect(pair.lease).toBeNull();
+    expect(first.lease).not.toBeNull();
+    expect(second.lease).toBeNull();
     expect(follower.lease).toBeNull();
-    expect(pageResourcesSnapshot()).toMatchObject({ active: 1, queued: 2 });
+    expect(pageResourcesSnapshot()).toMatchObject({
+      active: ELEMENT_DECODER_CAPACITY.workerCount,
+      queued: 2
+    });
 
-    release(single);
-    refresh([pair, follower]);
-    expect(pair.lease?.weight).toBe(2);
+    release(first);
+    refresh([second, follower]);
+    expect(second.lease).not.toBeNull();
     expect(follower.lease).toBeNull();
-    expect(pageResourcesSnapshot()).toMatchObject({ active: 2, queued: 1 });
+    expect(pageResourcesSnapshot()).toMatchObject({
+      active: ELEMENT_DECODER_CAPACITY.workerCount,
+      queued: 1
+    });
 
-    release(pair);
+    release(second);
     refresh([follower]);
-    expect(follower.lease?.weight).toBe(1);
-    expect(pageResourcesSnapshot()).toMatchObject({ active: 1, queued: 0 });
-    disposeAll([single, pair, follower]);
+    expect(follower.lease).not.toBeNull();
+    expect(pageResourcesSnapshot()).toMatchObject({
+      active: ELEMENT_DECODER_CAPACITY.workerCount,
+      queued: 0
+    });
+    disposeAll([first, second, follower]);
   });
 
   it("is race-safe when a grant, cancellation, and disposal share a microtask turn", async () => {
@@ -142,11 +150,9 @@ describe("page decoder resources", () => {
 
   it("never returns a stale lease after a granted ticket is released", async () => {
     const participant = createPageDecoderParticipant(true);
-    const ticket = participant.request(2);
+    const ticket = participant.request();
     const lease = ticket.take();
     expect(lease).not.toBeNull();
-    expect(ticket.weight).toBe(2);
-    expect(lease?.weight).toBe(2);
     lease!.release();
     expect(ticket.state()).toBe("released");
     expect(ticket.take()).toBeNull();
@@ -154,30 +160,23 @@ describe("page decoder resources", () => {
     participant.dispose();
   });
 
-  it("rejects invalid weights without creating a ticket", () => {
+  it("rejects duplicate requests without creating a second ticket", () => {
     const participant = createPageDecoderParticipant();
-    for (const weight of [
-      0,
-      -1,
-      0.5,
-      Number.NaN,
-      Number.POSITIVE_INFINITY,
-      3
-    ]) {
-      expect(() => participant.request(weight)).toThrowError(RangeError);
-    }
+    const ticket = participant.request();
+    expect(() => participant.request()).toThrowError(RangeError);
     expect(pageResourcesSnapshot()).toMatchObject({
-      active: 0,
+      active: ELEMENT_DECODER_CAPACITY.workerCount,
       queued: 0,
       parked: 0,
       participants: 1
     });
+    ticket.take()!.release();
     participant.dispose();
   });
 
   it("promotes a parked BFCache participant before the successor selects a decoder", () => {
     const participant = createPageDecoderParticipant(false);
-    const ticket = participant.request(2);
+    const ticket = participant.request();
     expect(ticket.state()).toBe("parked");
     participant.setVisible(true);
     expect(ticket.state()).toBe("granted");
@@ -196,7 +195,7 @@ describe("page decoder resources", () => {
     const random = randomFor(0xc0de_51a7);
     const slots: Slot[] = Array.from(
       { length: 12 },
-      () => slot((random() & 1) === 0, random() % 2 + 1)
+      () => slot((random() & 1) === 0)
     );
 
     for (let step = 0; step < 20_000; step += 1) {
@@ -218,7 +217,7 @@ describe("page decoder resources", () => {
       } else if (operation === 4 && !current.disposed) {
         dispose(current);
       } else if (operation === 5 && current.disposed) {
-        current = slot((random() & 1) === 0, random() % 2 + 1);
+        current = slot((random() & 1) === 0);
         slots[index] = current;
       } else if (
         operation === 6 && !current.disposed &&
@@ -231,7 +230,8 @@ describe("page decoder resources", () => {
       refresh(slots);
       const live = slots.filter(({ disposed }) => !disposed);
       const active = live.reduce(
-        (sum, { lease }) => sum + (lease?.weight ?? 0),
+        (sum, { lease }) => sum +
+          (lease === null ? 0 : ELEMENT_DECODER_CAPACITY.workerCount),
         0
       );
       const queued = live.filter(({ ticket, lease, visible }) =>
@@ -247,7 +247,7 @@ describe("page decoder resources", () => {
         participants: live.length,
         physicalBytes: 0
       });
-      expect(active).toBeLessThanOrEqual(2);
+      expect(active).toBeLessThanOrEqual(ELEMENT_DECODER_CAPACITY.workerCount);
     }
 
     disposeAll(slots);
@@ -261,10 +261,10 @@ describe("page decoder resources", () => {
   });
 
   it("reports exact ticket states and aggregate physical bytes", () => {
-    const first = slot(true, 1);
-    const second = slot(false, 2);
-    const third = slot(true, 1);
-    const fourth = slot(true, 2);
+    const first = slot(true);
+    const second = slot(false);
+    const third = slot(true);
+    const fourth = slot(true);
     request(first);
     request(second);
     request(third);
@@ -272,11 +272,11 @@ describe("page decoder resources", () => {
 
     expect(first.ticket!.state()).toBe("granted");
     expect(second.ticket!.state()).toBe("parked");
-    expect(third.ticket!.state()).toBe("granted");
+    expect(third.ticket!.state()).toBe("queued");
     expect(fourth.ticket!.state()).toBe("queued");
     expect(pageResourcesSnapshot()).toMatchObject({
-      active: 2,
-      queued: 1,
+      active: ELEMENT_DECODER_CAPACITY.workerCount,
+      queued: 2,
       parked: 1
     });
     first.participant.setPhysicalBytes(1_024);
@@ -290,7 +290,8 @@ describe("page decoder resources", () => {
     const firstTicket = first.ticket!;
     release(first);
     expect(firstTicket.state()).toBe("released");
-    refresh([fourth]);
+    refresh([third, fourth]);
+    expect(third.ticket!.state()).toBe("granted");
     expect(fourth.ticket!.state()).toBe("queued");
     release(third);
     refresh([fourth]);
@@ -354,11 +355,11 @@ describe("page decoder resources", () => {
     first.setPhysicalBytes(11);
     second.setPhysicalBytes(13);
     successor.setPhysicalBytes(17);
-    const firstTicket = first.request(1);
-    const secondTicket = second.request(1);
-    const successorTicket = successor.request(2);
+    const firstTicket = first.request();
+    const secondTicket = second.request();
+    const successorTicket = successor.request();
     const firstLease = firstTicket.take()!;
-    const secondLease = secondTicket.take()!;
+    const secondGrant = secondTicket.wait();
     const successorGrant = successorTicket.wait();
     expect(successorTicket.state()).toBe("queued");
 
@@ -366,7 +367,7 @@ describe("page decoder resources", () => {
     expect(firstTicket.state()).toBe("released");
     expect(successorTicket.state()).toBe("queued");
     expect(pageResourcesSnapshot()).toEqual({
-      active: 1,
+      active: ELEMENT_DECODER_CAPACITY.workerCount,
       queued: 1,
       parked: 0,
       participants: 2,
@@ -375,15 +376,17 @@ describe("page decoder resources", () => {
 
     firstLease.release();
     first.dispose();
-    expect(pageResourcesSnapshot().active).toBe(1);
+    expect(pageResourcesSnapshot().active).toBe(
+      ELEMENT_DECODER_CAPACITY.workerCount
+    );
     expect(pageResourcesSnapshot().physicalBytes).toBe(30);
+    const secondLease = await secondGrant;
     secondLease.release();
     const successorLease = await successorGrant;
     expect(successorTicket.state()).toBe("granted");
-    expect(successorLease.weight).toBe(2);
     second.dispose();
     expect(pageResourcesSnapshot()).toEqual({
-      active: 2,
+      active: ELEMENT_DECODER_CAPACITY.workerCount,
       queued: 0,
       parked: 0,
       participants: 1,
@@ -456,10 +459,9 @@ describe("page decoder resources", () => {
   });
 });
 
-function slot(visible: boolean, weight = 2): Slot {
+function slot(visible: boolean): Slot {
   return {
     participant: createPageDecoderParticipant(visible),
-    weight,
     visible,
     ticket: null,
     lease: null,
@@ -476,7 +478,7 @@ function byteSlot(): ByteSlot {
 }
 
 function request(value: Slot): void {
-  value.ticket = value.participant.request(value.weight);
+  value.ticket = value.participant.request();
   value.lease = value.ticket.take();
 }
 
