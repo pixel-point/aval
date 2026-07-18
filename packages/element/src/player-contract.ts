@@ -4,6 +4,7 @@ import type {
   RuntimeFailureCode,
   RuntimeReadinessResult
 } from "./public-types.js";
+import type { AvalPlaybackError } from "./errors.js";
 
 export interface Source {
   readonly src: string;
@@ -43,6 +44,7 @@ export interface PlayerSnapshot {
   readonly openFrames: number;
   readonly contextLossCount: number;
   readonly contextRecoveryCount: number;
+  readonly cleanupFailureCount?: number;
   readonly presentation: Readonly<{
     cssWidth: number;
     cssHeight: number;
@@ -129,4 +131,9 @@ export interface PlayerInput {
     operation: string,
     fatal: boolean
   ) => void;
+  /** Returns the generation's canonical public error for a terminal playback failure. */
+  readonly onPlaybackFailure: (
+    code: RuntimeFailureCode,
+    operation: string
+  ) => AvalPlaybackError;
 }

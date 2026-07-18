@@ -7,6 +7,9 @@ export class AvalPlaybackError extends Error {
   public readonly generation: number;
 
   public constructor(failure: Readonly<AvalPublicFailure>, generation: number) {
+    if (!Number.isSafeInteger(generation) || generation < 1) {
+      throw new RangeError("playback generation must be a positive integer");
+    }
     super(PLAYBACK_ERROR_MESSAGE);
     this.name = "AvalPlaybackError";
     this.failure = Object.isFrozen(failure)

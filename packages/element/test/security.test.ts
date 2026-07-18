@@ -37,11 +37,10 @@ describe("element trust boundary", () => {
     expect(Object.isFrozen(read.failures)).toBe(true);
   });
 
-  it("maps internal failures only onto documented public codes", () => {
+  it("publishes only documented public failure codes", () => {
     expect(publicFailureCode("load-failure")).toBe("load-failure");
-    expect(publicFailureCode("resource-budget")).toBe("resource-rejection");
-    expect(publicFailureCode("animation-failure")).toBe("worker-decode-failure");
-    expect(publicFailureCode("fallback-failure")).toBe("renderer-failure");
+    expect(publicFailureCode("worker-decode-failure")).toBe("worker-decode-failure");
+    expect(publicFailureCode("renderer-failure")).toBe("renderer-failure");
   });
 
   it("does not use generated markup, dynamic code, video seeking, or console hooks", async () => {

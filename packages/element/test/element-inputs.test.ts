@@ -529,20 +529,12 @@ describe("element inputs", () => {
       "invalid-configuration", "unsupported-browser",
       "interaction-target-unavailable", "element-cleanup-incomplete"
     ]);
-    const inputs = [
-      ...documented,
-      "resource-budget",
-      "animation-failure",
-      "fallback-failure"
-    ] as const;
+    const inputs = [...documented] as const;
     for (const input of inputs) {
       expect(documented.has(publicFailureCode(
         input as Parameters<typeof publicFailureCode>[0]
       ))).toBe(true);
     }
-    expect(publicFailureCode("resource-budget")).toBe("resource-rejection");
-    expect(publicFailureCode("animation-failure")).toBe("worker-decode-failure");
-    expect(publicFailureCode("fallback-failure")).toBe("renderer-failure");
   });
 });
 

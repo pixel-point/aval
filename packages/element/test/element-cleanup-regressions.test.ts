@@ -216,14 +216,14 @@ describe("element cleanup regressions", () => {
     const attempts = await Promise.allSettled([preparation, terminal]);
 
     expect.soft(attempts).toHaveLength(2);
-    for (const attempt of attempts) {
-      expect.soft(attempt.status).toBe("rejected");
-      if (attempt.status === "rejected") {
-        expect.soft(attempt.reason).toMatchObject({
-          message: "synthetic retirement failure"
-        });
-      }
-    }
+    expect.soft(attempts[0]).toMatchObject({
+      status: "rejected",
+      reason: { name: "AbortError" }
+    });
+    expect.soft(attempts[1]).toMatchObject({
+      status: "rejected",
+      reason: { message: "synthetic retirement failure" }
+    });
     expect.soft(runtime.disposeAttempts).toBe(2);
     expect(element.getDiagnostics()).toMatchObject({
       finalDisposed: false,

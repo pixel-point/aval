@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AvalPlaybackError } from "../src/errors.js";
 
 const media = vi.hoisted(() => ({
   runs: [] as Array<{
@@ -13,6 +14,9 @@ const media = vi.hoisted(() => ({
   releaseBlocked: [] as Array<{ runId: number; release: () => void }>,
   operations: [] as string[],
   decoderCount: 0,
+  assetDisposeFailures: 0,
+  assetDisposeHold: null as Promise<void> | null,
+  assetDisposeReached: null as (() => void) | null,
   decoderFailures: [] as Array<{
     promise: Promise<never>;
     reject: (reason: unknown) => void;
@@ -147,7 +151,14 @@ vi.mock("../src/asset.js", () => {
       const index = units.findIndex(({ id }) => id === unit);
       return new Uint8Array([index]).buffer;
     }
-    public async dispose(): Promise<void> {}
+    public async dispose(): Promise<void> {
+      media.assetDisposeReached?.();
+      if (media.assetDisposeHold !== null) await media.assetDisposeHold;
+      if (media.assetDisposeFailures > 0) {
+        media.assetDisposeFailures -= 1;
+        throw new Error("synthetic asset cleanup failure");
+      }
+    }
     public snapshot() {
       return {
         mode: "range",
@@ -313,6 +324,9 @@ afterEach(() => {
   media.releaseBlocked.length = 0;
   media.operations.length = 0;
   media.decoderCount = 0;
+  media.assetDisposeFailures = 0;
+  media.assetDisposeHold = null;
+  media.assetDisposeReached = null;
   media.decoderFailures.length = 0;
   vi.unstubAllGlobals();
 });
@@ -345,7 +359,8 @@ describe("player multi-route prefetch", () => {
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: () => undefined,
-      onFailure: () => undefined
+      onFailure: () => undefined,
+      onPlaybackFailure: defaultPlaybackFailure
     });
     player.activate();
     await player.prepare();
@@ -357,7 +372,7 @@ describe("player multi-route prefetch", () => {
     await player.dispose();
   });
 
-  it("holds intro exhaustion for readiness and recovers a retired-lane failure", async () => {
+  it("holds intro exhaustion for readiness and terminates on a decoder-lane failure", async () => {
     vi.stubGlobal("Worker", class {});
     vi.stubGlobal("VideoDecoder", class {});
     const frames: FrameRequestCallback[] = [];
@@ -368,6 +383,16 @@ describe("player multi-route prefetch", () => {
     vi.stubGlobal("cancelAnimationFrame", () => undefined);
     media.blocked.add(0);
     const events: string[] = [];
+    const readiness: string[] = [];
+    const terminal = new AvalPlaybackError(Object.freeze({
+      code: "worker-decode-failure",
+      message: "Playback could not continue.",
+      operation: "playback"
+    }), 1);
+    const playbackFailures: Array<Readonly<{
+      code: string;
+      operation: string;
+    }>> = [];
     const player = await createPlayer({
       canvas: new EventTarget() as HTMLCanvasElement,
       platform: testPlatform(),
@@ -385,12 +410,17 @@ describe("player multi-route prefetch", () => {
       decoderReady: () => true,
       onResourceBytes: () => undefined,
       onMetadata: () => undefined,
-      onReadiness: () => undefined,
+      onReadiness: (value) => readiness.push(value),
       onAnimationResourcesRetired: () => events.push("retired"),
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: (type) => events.push(type),
-      onFailure: (code) => events.push(`failure:${code}`)
+      onFailure: (code) => events.push(`failure:${code}`),
+      onPlaybackFailure: (code, operation) => {
+        expect(events).toContain("retired");
+        playbackFailures.push({ code, operation });
+        return terminal;
+      }
     });
     player.activate();
     await player.prepare();
@@ -424,14 +454,161 @@ describe("player multi-route prefetch", () => {
     );
     expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
 
+    media.assetDisposeFailures = 1;
     media.decoderFailures[intro.lane]!.reject(new Error("AVAL decoder failed"));
-    await eventually(() => events.includes("failure:worker-decode-failure"));
+    await eventually(() => events.includes("retired"));
+    await expect(player.prepare()).rejects.toBe(terminal);
+    expect(playbackFailures).toEqual([{
+      code: "worker-decode-failure",
+      operation: "playback"
+    }]);
+    expect(readiness).not.toContain("staticReady");
+    expect(events.some((event) => event.startsWith("failure:"))).toBe(false);
     expect(events).toContain("retired");
     expect(player.snapshot(false)).toMatchObject({
-      selectedRendition: null,
-      workerCount: 0
+      selectedRendition: "main",
+      workerCount: 0,
+      cleanupFailureCount: 1
     });
 
+    await player.dispose();
+  });
+
+  it("rejects pending state work with the canonical error when a candidate decoder fails", async () => {
+    vi.stubGlobal("Worker", class {});
+    vi.stubGlobal("VideoDecoder", class {});
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    media.blocked.add(300);
+    const terminal = new AvalPlaybackError(Object.freeze({
+      code: "worker-decode-failure",
+      message: "Playback could not continue.",
+      operation: "playback"
+    }), 2);
+    const playbackFailures: string[] = [];
+    let retired = false;
+    const player = await createPlayer({
+      canvas: new EventTarget() as HTMLCanvasElement,
+      platform: testPlatform(),
+      initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
+      baseUrl: "https://example.test/",
+      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      credentials: "same-origin",
+      signal: new AbortController().signal,
+      preparationTimeoutMs: 5_000,
+      motion: "full",
+      reduced: false,
+      initialState: null,
+      initialBody: false,
+      visible: true,
+      decoderReady: () => true,
+      onResourceBytes: () => undefined,
+      onMetadata: () => undefined,
+      onReadiness: () => undefined,
+      onAnimationResourcesRetired: () => { retired = true; },
+      onDraw: () => undefined,
+      onRestart: () => undefined,
+      onEvent: () => undefined,
+      onFailure: () => undefined,
+      onPlaybackFailure: (code, operation) => {
+        expect(retired).toBe(true);
+        playbackFailures.push(`${code}:${operation}`);
+        return terminal;
+      }
+    });
+    player.activate();
+    await player.prepare();
+    await eventually(() => lastRun(0) !== undefined);
+    const originalBody = lastRun(0)!;
+    await driveFrames(
+      frames,
+      () => media.operations.includes(`draw:${String(originalBody.id)}:0`)
+    );
+
+    const request = player.setState("hover");
+    void request.catch(() => undefined);
+    await eventually(() => lastRun(300) !== undefined);
+    const candidate = lastRun(300)!;
+    media.decoderFailures[candidate.lane]!.reject(new Error("candidate decode failed"));
+    await eventually(() => playbackFailures.length === 1);
+    (player as unknown as { contextChanged(state: "error"): void }).contextChanged("error");
+
+    await expect(request).rejects.toBe(terminal);
+    expect(retired).toBe(true);
+    expect(playbackFailures).toEqual(["worker-decode-failure:playback"]);
+    await expect(player.prepare()).rejects.toBe(terminal);
+    expect(player.snapshot(false)).toMatchObject({ workerCount: 0, openFrames: 0 });
+    await player.dispose();
+  });
+
+  it("lets source supersession win while terminal cleanup is pending", async () => {
+    vi.stubGlobal("Worker", class {});
+    vi.stubGlobal("VideoDecoder", class {});
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const controller = new AbortController();
+    const playbackFailures: string[] = [];
+    const terminal = new AvalPlaybackError(Object.freeze({
+      code: "renderer-failure",
+      message: "Playback could not continue.",
+      operation: "render"
+    }), 3);
+    const player = await createPlayer({
+      canvas: new EventTarget() as HTMLCanvasElement,
+      platform: testPlatform(),
+      initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
+      baseUrl: "https://example.test/",
+      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      credentials: "same-origin",
+      signal: controller.signal,
+      preparationTimeoutMs: 5_000,
+      motion: "full",
+      reduced: false,
+      initialState: null,
+      initialBody: false,
+      visible: true,
+      decoderReady: () => true,
+      onResourceBytes: () => undefined,
+      onMetadata: () => undefined,
+      onReadiness: () => undefined,
+      onAnimationResourcesRetired: () => undefined,
+      onDraw: () => undefined,
+      onRestart: () => undefined,
+      onEvent: () => undefined,
+      onFailure: () => undefined,
+      onPlaybackFailure: (code, operation) => {
+        playbackFailures.push(`${code}:${operation}`);
+        return terminal;
+      }
+    });
+    player.activate();
+    await player.prepare();
+    await player.settled();
+
+    let releaseCleanup!: () => void;
+    let markCleanupReached!: () => void;
+    const cleanupReached = new Promise<void>((resolve) => {
+      markCleanupReached = resolve;
+    });
+    media.assetDisposeReached = markCleanupReached;
+    media.assetDisposeHold = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    (player as unknown as {
+      contextChanged(state: "error"): void;
+    }).contextChanged("error");
+    await cleanupReached;
+    const pending = player.prepare();
+    controller.abort(new DOMException("source replaced", "AbortError"));
+    releaseCleanup();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(playbackFailures).toHaveLength(0);
+    media.assetDisposeHold = null;
     await player.dispose();
   });
 
@@ -467,7 +644,8 @@ describe("player multi-route prefetch", () => {
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: (type) => events.push(type),
-      onFailure: (code) => events.push(`failure:${code}`)
+      onFailure: (code) => events.push(`failure:${code}`),
+      onPlaybackFailure: defaultPlaybackFailure
     });
     player.activate();
     await player.prepare();
@@ -565,7 +743,8 @@ describe("player multi-route prefetch", () => {
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: (type) => events.push(type),
-      onFailure: (code) => events.push(`failure:${code}`)
+      onFailure: (code) => events.push(`failure:${code}`),
+      onPlaybackFailure: defaultPlaybackFailure
     });
     player.activate();
     await player.prepare();
@@ -645,7 +824,8 @@ describe("player multi-route prefetch", () => {
         events.push(type);
         if (type === "transitionstart") transitionStarted = true;
       },
-      onFailure: (code) => events.push(`failure:${code}`)
+      onFailure: (code) => events.push(`failure:${code}`),
+      onPlaybackFailure: defaultPlaybackFailure
     });
     player.activate();
     await player.prepare();
@@ -747,7 +927,8 @@ describe("player multi-route prefetch", () => {
           transitions.push(String((detail as { edge: string }).edge));
         }
       },
-      onFailure: (code) => events.push(`failure:${code}`)
+      onFailure: (code) => events.push(`failure:${code}`),
+      onPlaybackFailure: defaultPlaybackFailure
     });
     player.activate();
     await player.prepare();
@@ -850,7 +1031,8 @@ describe("player multi-route prefetch", () => {
       onDraw: () => observed.push("draw"),
       onRestart: () => observed.push("restart"),
       onEvent: (type, detail) => observed.push(`${type}:${String(detail.to ?? "")}`),
-      onFailure: () => observed.push("failure")
+      onFailure: () => observed.push("failure"),
+      onPlaybackFailure: defaultPlaybackFailure
     });
 
     expect(observed).toEqual([]);
@@ -916,4 +1098,15 @@ function testPlatform() {
     clearTimeout: (handle: number) => globalThis.clearTimeout(handle),
     crypto: globalThis.crypto
   };
+}
+
+function defaultPlaybackFailure(
+  code: ConstructorParameters<typeof AvalPlaybackError>[0]["code"],
+  operation: string
+): AvalPlaybackError {
+  return new AvalPlaybackError(Object.freeze({
+    code,
+    message: "Playback could not continue.",
+    operation
+  }), 1);
 }

@@ -35,15 +35,6 @@ export type RuntimeReadiness =
 
 export type StaticReason =
   | "reduced-motion"
-  | "no-video-rendition"
-  | "worker-unavailable"
-  | "renderer-unavailable"
-  | "codec-unsupported"
-  | "resource-budget"
-  | "readiness-failed"
-  | "preparation-timeout"
-  | "animation-failure"
-  | "fallback-failure"
   | "visibility-suspended"
   | "decoder-queued";
 
@@ -376,6 +367,7 @@ export interface AvalDiagnostics {
     reclamationCount: number;
     contextLossCount: number;
     contextRecoveryCount: number;
+    cleanupFailureCount: number;
   }>;
   readonly motion: Readonly<{
     configured: AvalMotion;

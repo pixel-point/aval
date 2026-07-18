@@ -46,4 +46,12 @@ describe("AvalPlaybackError", () => {
       operation: "resume"
     });
   });
+
+  it("rejects an invalid source generation", () => {
+    expect(() => new AvalPlaybackError(Object.freeze({
+      code: "readiness-failure",
+      message: "Playback could not continue.",
+      operation: "prepare"
+    }), 0)).toThrow(RangeError);
+  });
 });

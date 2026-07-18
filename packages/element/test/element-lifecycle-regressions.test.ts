@@ -6,11 +6,18 @@ import type {
   PlayerSnapshot
 } from "../src/player-contract.js";
 import type { AvalElement } from "../src/public-types.js";
+import { AvalPlaybackError } from "../src/errors.js";
 
 const harness = vi.hoisted(() => ({
   brokerMode: "immediate" as "immediate" | "queued",
   inputs: [] as unknown[],
   players: [] as unknown[],
+  failNextPrepare: false,
+  failNextPrepareGeneric: false,
+  deferNextPrepareFailure: false,
+  deferNextDispose: false,
+  deferredFailures: [] as DeferredFailure[],
+  deferredDisposals: [] as Array<() => void>,
   participants: new Set<BrokerParticipant>(),
   tickets: [] as BrokerTicket[]
 }));
@@ -65,8 +72,16 @@ vi.mock("../src/page-resources.js", () => ({
 vi.mock("../src/player.js", () => ({
   createPlayer: async (input: PlayerInput): Promise<Player> => {
     const granted = input.decoderReady();
+    const failPrepare = harness.failNextPrepare;
+    harness.failNextPrepare = false;
+    const failPrepareGeneric = harness.failNextPrepareGeneric;
+    harness.failNextPrepareGeneric = false;
+    const deferPrepareFailure = harness.deferNextPrepareFailure;
+    harness.deferNextPrepareFailure = false;
     let state = input.initialState ?? "idle";
     let disposed = false;
+    let animationRetired = false;
+    let disposal: Promise<void> | null = null;
     const metadata = Object.freeze({
       initialState: "idle",
       stateNames: Object.freeze(["idle", "hover"]),
@@ -87,8 +102,8 @@ vi.mock("../src/player.js", () => ({
       selectedCodec: granted ? "avc1.64001E" : null,
       selectedBitDepth: granted ? 8 : null,
       transportMode: granted ? "range" : null,
-      declaredFileBytes: disposed ? 0 : 1_024,
-      metadataBytes: disposed ? 0 : 128,
+      declaredFileBytes: disposed || animationRetired ? 0 : 1_024,
+      metadataBytes: disposed || animationRetired ? 0 : 128,
       verifiedBytes: 0,
       residentBlobBytes: 0,
       activeTransportBodies: 0,
@@ -99,12 +114,12 @@ vi.mock("../src/player.js", () => ({
       contextLossCount: 0,
       contextRecoveryCount: 0,
       presentation: Object.freeze({
-        cssWidth: disposed ? 0 : 16,
-        cssHeight: disposed ? 0 : 16,
-        backingWidth: disposed ? 0 : 16,
-        backingHeight: disposed ? 0 : 16,
-        effectiveDprX: disposed ? 0 : 1,
-        effectiveDprY: disposed ? 0 : 1,
+        cssWidth: disposed || animationRetired ? 0 : 16,
+        cssHeight: disposed || animationRetired ? 0 : 16,
+        backingWidth: disposed || animationRetired ? 0 : 16,
+        backingHeight: disposed || animationRetired ? 0 : 16,
+        effectiveDprX: disposed || animationRetired ? 0 : 1,
+        effectiveDprY: disposed || animationRetired ? 0 : 1,
         stagingBytes: 0,
         residentBytes: 0,
         textureBytes: 0,
@@ -116,7 +131,7 @@ vi.mock("../src/player.js", () => ({
       }),
       trace: Object.freeze([])
     });
-    const player: Player = {
+    const player: TestPlayer = {
       metadata,
       activate: () => {
         input.onMetadata(metadata);
@@ -132,6 +147,7 @@ vi.mock("../src/player.js", () => ({
           to: state,
           isTransitioning: false
         }));
+        if (failPrepare) return;
         if (granted) {
           input.onReadiness("visualReady");
           input.onReadiness("interactiveReady");
@@ -141,7 +157,34 @@ vi.mock("../src/player.js", () => ({
           input.onAnimationResourcesRetired();
         }
       },
-      prepare: async () => granted ? animatedResult() : queuedResult(),
+      prepare: () => {
+        if (deferPrepareFailure) {
+          return new Promise((_, reject) => {
+            harness.deferredFailures.push({
+              fail: () => {
+                animationRetired = true;
+                input.onAnimationResourcesRetired();
+                reject(input.onPlaybackFailure(
+                  "worker-decode-failure",
+                  "prepare"
+                ));
+              }
+            });
+          });
+        }
+        if (failPrepare) {
+          animationRetired = true;
+          input.onAnimationResourcesRetired();
+          return Promise.reject(input.onPlaybackFailure(
+            "worker-decode-failure",
+            "prepare"
+          ));
+        }
+        if (failPrepareGeneric) {
+          return Promise.reject(new Error("synthetic preparation failure"));
+        }
+        return Promise.resolve(granted ? animatedResult() : queuedResult());
+      },
       setState: async (next) => {
         const previous = state;
         state = next;
@@ -168,7 +211,26 @@ vi.mock("../src/player.js", () => ({
       resize: () => undefined,
       snapshot,
       settled: async () => undefined,
-      dispose: async () => { disposed = true; }
+      dispose: () => {
+        if (!harness.deferNextDispose) {
+          disposed = true;
+          return Promise.resolve();
+        }
+        disposal ??= new Promise<void>((resolve) => {
+          harness.deferredDisposals.push(() => {
+            disposed = true;
+            harness.deferNextDispose = false;
+            resolve();
+          });
+        });
+        return disposal;
+      },
+      failActive: () => {
+        animationRetired = true;
+        input.onAnimationResourcesRetired();
+        return input.onPlaybackFailure("worker-decode-failure", "playback");
+      },
+      disposed: () => disposed
     };
     harness.inputs.push(input);
     harness.players.push(player);
@@ -189,12 +251,168 @@ afterEach(async () => {
   }
   harness.inputs.length = 0;
   harness.players.length = 0;
+  harness.failNextPrepare = false;
+  harness.failNextPrepareGeneric = false;
+  harness.deferNextPrepareFailure = false;
+  harness.deferNextDispose = false;
+  harness.deferredFailures.length = 0;
+  harness.deferredDisposals.length = 0;
   harness.tickets.length = 0;
   FakeMutationObserver.instances.length = 0;
   await settleMicrotasks();
 });
 
 describe("element lifecycle regressions", () => {
+  it("retains one canonical playback error until a newer source generation", async () => {
+    harness.brokerMode = "immediate";
+    harness.failNextPrepare = true;
+    const { element, source } = createConnectedElement("broken.avl");
+    const errors: Array<CustomEvent<Readonly<{
+      generation: number;
+      failure: Readonly<{ code: string; message: string; operation: string | null }>;
+      fatal: boolean;
+    }>>> = [];
+    element.addEventListener("error", ((event: CustomEvent) => {
+      errors.push(event as typeof errors[number]);
+    }) as EventListener);
+
+    let first!: AvalPlaybackError;
+    try {
+      await element.prepare();
+    } catch (error) {
+      expect(error).toBeInstanceOf(AvalPlaybackError);
+      first = error as AvalPlaybackError;
+    }
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.detail.fatal).toBe(true);
+    expect(errors[0]!.detail.failure).toBe(first.failure);
+    expect(element.readiness).toBe("error");
+    expect(element.getDiagnostics().lastFailure).toBe(first.failure);
+    const playerCount = harness.players.length;
+
+    await expect(element.prepare()).rejects.toBe(first);
+    expect(errors).toHaveLength(1);
+    expect(harness.players).toHaveLength(playerCount);
+
+    source.setAttribute("src", "healthy.avl");
+    FakeMutationObserver.instances[0]!.enqueue(attributeMutation(source));
+    await expect(element.prepare()).resolves.toMatchObject({ mode: "animated" });
+    expect(harness.players).toHaveLength(playerCount + 1);
+    expect(element.getDiagnostics().lastFailure).toBeNull();
+  });
+
+  it("retires an active failed generation before publishing one retained error", async () => {
+    harness.brokerMode = "immediate";
+    const { element, source } = createConnectedElement("motion.avl");
+    await element.prepare();
+    const player = playerAt(0);
+    const events: CustomEvent[] = [];
+    let diagnosticsAtEvent: ReturnType<AvalElement["getDiagnostics"]> | null = null;
+    element.addEventListener("error", ((event: CustomEvent) => {
+      events.push(event);
+      diagnosticsAtEvent = element.getDiagnostics();
+    }) as EventListener);
+
+    const error = player.failActive();
+
+    expect(events).toHaveLength(1);
+    expect(events[0]!.detail).toMatchObject({ fatal: true, generation: 1 });
+    expect(events[0]!.detail.failure).toBe(error.failure);
+    expect(diagnosticsAtEvent).toMatchObject({
+      readiness: "error",
+      mode: null,
+      lastFailure: error.failure,
+      outstanding: { decoder: 0, bytes: 0 },
+      runtime: {
+        declaredFileBytes: 0,
+        activeLeaseCount: 0,
+        pageParticipantCount: 0,
+        pagePhysicalBytes: 0
+      }
+    });
+    await expect(element.prepare()).rejects.toBe(error);
+    expect(events).toHaveLength(1);
+
+    await eventually(() => player.disposed());
+    expect(element.getDiagnostics().outstanding.player).toBe(0);
+
+    source.setAttribute("src", "replacement.avl");
+    FakeMutationObserver.instances[0]!.enqueue(attributeMutation(source));
+    await expect(element.prepare()).resolves.toMatchObject({ mode: "animated" });
+    expect(element.getDiagnostics().lastFailure).toBeNull();
+  });
+
+  it("does not let deferred terminal retirement cancel an error-listener replacement", async () => {
+    harness.brokerMode = "immediate";
+    const { element, source } = createConnectedElement("motion.avl");
+    await element.prepare();
+    let replacement: Promise<unknown> | null = null;
+    element.addEventListener("error", () => {
+      source.setAttribute("src", "replacement.avl");
+      FakeMutationObserver.instances[0]!.enqueue(attributeMutation(source));
+      replacement = element.prepare();
+    }, { once: true });
+
+    playerAt(0).failActive();
+
+    await eventually(() => replacement !== null);
+    await expect(replacement).resolves.toMatchObject({ mode: "animated" });
+    expect(harness.players).toHaveLength(2);
+    expect(element.getDiagnostics()).toMatchObject({
+      sourceGeneration: 2,
+      readiness: "interactiveReady",
+      lastFailure: null
+    });
+  });
+
+  it("does not publish an old failure when cleanup is superseded", async () => {
+    harness.brokerMode = "immediate";
+    harness.failNextPrepareGeneric = true;
+    harness.deferNextDispose = true;
+    const { element, source } = createConnectedElement("old.avl");
+    const errors: CustomEvent[] = [];
+    element.addEventListener("error", ((event: CustomEvent) => {
+      errors.push(event);
+    }) as EventListener);
+    const stale = element.prepare();
+    void stale.catch(() => undefined);
+    await eventually(() => harness.deferredDisposals.length === 1);
+
+    source.setAttribute("src", "new.avl");
+    FakeMutationObserver.instances[0]!.enqueue(attributeMutation(source));
+    const replacement = element.prepare();
+    harness.deferredDisposals[0]!();
+
+    await expect(stale).rejects.toMatchObject({ name: "AbortError" });
+    await expect(replacement).resolves.toMatchObject({ mode: "animated" });
+    expect(errors).toHaveLength(0);
+    expect(element.getDiagnostics().lastFailure).toBeNull();
+  });
+
+  it("turns a superseded deferred terminal failure into AbortError", async () => {
+    harness.brokerMode = "immediate";
+    harness.deferNextPrepareFailure = true;
+    const { element, source } = createConnectedElement("old.avl");
+    const events: CustomEvent[] = [];
+    element.addEventListener("error", ((event: CustomEvent) => {
+      events.push(event);
+    }) as EventListener);
+    const stale = element.prepare();
+    void stale.catch(() => undefined);
+    await eventually(() => harness.deferredFailures.length === 1);
+
+    source.setAttribute("src", "new.avl");
+    FakeMutationObserver.instances[0]!.enqueue(attributeMutation(source));
+    const replacement = element.prepare();
+    harness.deferredFailures[0]!.fail();
+
+    await expect(stale).rejects.toMatchObject({ name: "AbortError" });
+    await expect(replacement).resolves.toMatchObject({ mode: "animated" });
+    expect(events).toHaveLength(0);
+    expect(element.getDiagnostics().lastFailure).toBeNull();
+  });
+
   it("releases a stale queued decoder grant without restarting the replaced source", async () => {
     harness.brokerMode = "queued";
     const { element, source } = createConnectedElement("first.avl");
@@ -255,6 +473,15 @@ interface BrokerTicket {
   releases: number;
 }
 
+interface DeferredFailure {
+  fail(): void;
+}
+
+interface TestPlayer extends Player {
+  failActive(): AvalPlaybackError;
+  disposed(): boolean;
+}
+
 function createBrokerTicket(
   participant: BrokerParticipant,
   immediate: boolean
@@ -313,6 +540,10 @@ function cancelBrokerTicket(ticket: BrokerTicket): void {
 
 function inputAt(index: number): Readonly<PlayerInput> {
   return harness.inputs[index] as Readonly<PlayerInput>;
+}
+
+function playerAt(index: number): TestPlayer {
+  return harness.players[index] as TestPlayer;
 }
 
 function animatedResult() {
@@ -524,4 +755,12 @@ function attributeMutation(target: FakeElement): MutationRecord {
 
 async function settleMicrotasks(): Promise<void> {
   for (let index = 0; index < 8; index += 1) await Promise.resolve();
+}
+
+async function eventually(predicate: () => boolean): Promise<void> {
+  for (let index = 0; index < 32; index += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  throw new Error("condition did not settle");
 }

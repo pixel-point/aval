@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AvalPlaybackError } from "../src/errors.js";
 
 const selection = vi.hoisted(() => ({
   opens: 0,
@@ -200,7 +201,8 @@ describe("player rendition selection", () => {
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: () => undefined,
-      onFailure: () => undefined
+      onFailure: () => undefined,
+      onPlaybackFailure: defaultPlaybackFailure
     });
     player.activate();
 
@@ -235,7 +237,8 @@ describe("player rendition selection", () => {
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: () => undefined,
-      onFailure: () => undefined
+      onFailure: () => undefined,
+      onPlaybackFailure: defaultPlaybackFailure
     });
     player.activate();
 
@@ -249,6 +252,7 @@ describe("player rendition selection", () => {
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const observed: string[] = [];
+    let playbackFailures = 0;
     let readiness = "metadataReady";
     let mode = "pending";
     const player = await createPlayer({
@@ -279,7 +283,11 @@ describe("player rendition selection", () => {
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: () => undefined,
-      onFailure: () => undefined
+      onFailure: () => undefined,
+      onPlaybackFailure: (code, operation) => {
+        playbackFailures += 1;
+        return defaultPlaybackFailure(code, operation);
+      }
     });
     player.activate();
     observed.length = 0;
@@ -292,6 +300,7 @@ describe("player rendition selection", () => {
       "readiness:staticReady:static",
       "retired:staticReady:static"
     ]);
+    expect(playbackFailures).toBe(0);
     expect(Worker.instances()).toHaveLength(2);
     await player.dispose();
   });
@@ -327,7 +336,8 @@ describe("player rendition selection", () => {
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: () => undefined,
-      onFailure: () => undefined
+      onFailure: () => undefined,
+      onPlaybackFailure: defaultPlaybackFailure
     });
     player.activate();
 
@@ -342,7 +352,7 @@ describe("player rendition selection", () => {
     await player.dispose();
   });
 
-  it("reports every authored rendition rejection in ladder order", async () => {
+  it("raises one canonical unsupported-profile error after every rendition rejects", async () => {
     const Worker = fakeWorker([
       [false, false],
       [false, false]
@@ -350,7 +360,9 @@ describe("player rendition selection", () => {
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const controller = new AbortController();
-    const player = await createPlayer({
+    const terminal = playbackError("unsupported-profile", "prepare", 3);
+    const failures: string[] = [];
+    const creation = createPlayer({
       canvas: new EventTarget() as HTMLCanvasElement,
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
@@ -372,23 +384,17 @@ describe("player rendition selection", () => {
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: () => undefined,
-      onFailure: () => undefined
-    });
-    player.activate();
-
-    const result = await player.prepare();
-    expect(result).toMatchObject({
-      mode: "static",
-      report: {
-        candidates: [
-          { rendition: "high", rank: 0, outcome: "rejected" },
-          { rendition: "low", rank: 1, outcome: "rejected" }
-        ]
+      onFailure: () => undefined,
+      onPlaybackFailure: (code, operation) => {
+        failures.push(`${code}:${operation}`);
+        return terminal;
       }
     });
+
+    await expect(creation).rejects.toBe(terminal);
+    expect(failures).toEqual(["unsupported-profile:prepare"]);
     expect(selection.opens).toBe(1);
     expect(Worker.instances()).toHaveLength(4);
-    await player.dispose();
   });
 
   it("treats a decoder support-probe exception as terminal for source selection", async () => {
@@ -396,6 +402,8 @@ describe("player rendition selection", () => {
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const controller = new AbortController();
+    const terminal = playbackError("worker-decode-failure", "prepare", 4);
+    const failures: string[] = [];
     const creation = createPlayer({
       canvas: new EventTarget() as HTMLCanvasElement,
       platform: testPlatform(),
@@ -421,10 +429,15 @@ describe("player rendition selection", () => {
       onDraw: () => undefined,
       onRestart: () => undefined,
       onEvent: () => undefined,
-      onFailure: () => undefined
+      onFailure: () => undefined,
+      onPlaybackFailure: (code, operation) => {
+        failures.push(`${code}:${operation}`);
+        return terminal;
+      }
     });
 
-    await expect(creation).rejects.toThrow("AVAL decoder failed");
+    await expect(creation).rejects.toBe(terminal);
+    expect(failures).toEqual(["worker-decode-failure:prepare"]);
     expect(selection.opens).toBe(1);
     expect(Worker.instances()).toHaveLength(2);
   });
@@ -434,10 +447,11 @@ describe("player rendition selection", () => {
     const Worker = fakeWorker([[true, true]]);
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
-    await expect(createPlayer(selectionInput([
+    const terminal = playbackError("resource-rejection", "prepare", 5);
+    await expect(createPlayer({ ...selectionInput([
       { src: "first.avl", codec: "avc1.640028", integrity: "" },
       { src: "second.avl", codec: "avc1.640028", integrity: "" }
-    ]))).rejects.toThrow(/resource declarations/u);
+    ]), onPlaybackFailure: () => terminal })).rejects.toBe(terminal);
     expect(selection.opens).toBe(1);
     expect(Worker.instances()).toHaveLength(0);
   });
@@ -447,10 +461,11 @@ describe("player rendition selection", () => {
     const Worker = fakeWorker([[true, true]]);
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
-    await expect(createPlayer(selectionInput([
+    const terminal = playbackError("renderer-failure", "prepare", 6);
+    await expect(createPlayer({ ...selectionInput([
       { src: "first.avl", codec: "avc1.640028", integrity: "" },
       { src: "second.avl", codec: "avc1.640028", integrity: "" }
-    ]))).rejects.toThrow("WebGL construction failed");
+    ]), onPlaybackFailure: () => terminal })).rejects.toBe(terminal);
     expect(selection.opens).toBe(1);
     expect(Worker.instances()).toHaveLength(2);
   });
@@ -516,8 +531,28 @@ function selectionInput(sources: readonly { src: string; codec: string; integrit
     onDraw: () => undefined,
     onRestart: () => undefined,
     onEvent: () => undefined,
-    onFailure: () => undefined
+    onFailure: () => undefined,
+    onPlaybackFailure: defaultPlaybackFailure
   };
+}
+
+function defaultPlaybackFailure(
+  code: ConstructorParameters<typeof AvalPlaybackError>[0]["code"],
+  operation: string
+): AvalPlaybackError {
+  return playbackError(code, operation, 1);
+}
+
+function playbackError(
+  code: ConstructorParameters<typeof AvalPlaybackError>[0]["code"],
+  operation: string,
+  generation: number
+): AvalPlaybackError {
+  return new AvalPlaybackError(Object.freeze({
+    code,
+    message: "Playback could not continue.",
+    operation
+  }), generation);
 }
 
 type WorkerSupport = boolean | "error";

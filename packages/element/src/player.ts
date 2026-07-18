@@ -48,6 +48,7 @@ import {
   Renderer,
   type RenderLayout
 } from "./renderer.js";
+import type { AvalPlaybackError } from "./errors.js";
 import type {
   AvalRuntimeTraceRecord,
   RuntimeReadinessResult,
@@ -112,9 +113,13 @@ export async function createPlayer(
   try {
     return await selectPlayer(publications.input, deadline, publications);
   } catch (error) {
+    const timedOut = deadline.timedOut && !input.signal.aborted;
     deadline.dispose();
-    if (deadline.timedOut && !input.signal.aborted) throw preparationTimeout();
-    throw error;
+    if (input.signal.aborted || isAbort(error) && !timedOut) throw error;
+    throw input.onPlaybackFailure(
+      timedOut ? "watchdog-timeout" : selectionFailureCode(error),
+      "prepare"
+    );
   }
 }
 
@@ -125,7 +130,7 @@ async function selectPlayer(
 ): Promise<Player> {
   if (input.sources.length === 0) throw new TypeError("AVAL requires a source");
   let retained: Asset | null = null;
-  let unavailable: StaticReason = "codec-unsupported";
+  let unavailable: CandidateRejectionReason = "codec-unsupported";
   const reports: Readonly<CandidateReport>[] = [];
   for (const source of input.sources) {
     deadline.signal.throwIfAborted();
@@ -152,10 +157,9 @@ async function selectPlayer(
     const first = asset.manifest.renditions[0]!;
     const firstRank = reports.length;
     if (deadline.timedOut) {
-      return new PlayerImpl(
-        input, asset, first, null, null, deadline, publications, "preparation-timeout",
-        reports, firstRank
-      );
+      await asset.dispose();
+      reportResourceBytes(input, null);
+      throw preparationTimeout();
     }
     if (!input.visible) {
       return new PlayerImpl(
@@ -169,8 +173,9 @@ async function selectPlayer(
     }
     if (input.platform.Worker === null || input.platform.VideoDecoder === null ||
       input.platform.VideoFrame === null) {
-      return new PlayerImpl(input, asset, first, null, null, deadline, publications,
-        "worker-unavailable", reports, firstRank);
+      await asset.dispose();
+      reportResourceBytes(input, null);
+      throw unsupportedProfileError();
     }
     if (!input.decoderReady()) {
       return new PlayerImpl(input, asset, first, null, null, deadline, publications,
@@ -257,10 +262,9 @@ async function selectPlayer(
       catch (error) {
         decoders.dispose();
         if (deadline.timedOut) {
-          return new PlayerImpl(
-            input, asset, rendition, null, null, deadline, publications, "preparation-timeout",
-            reports, rank
-          );
+          await asset.dispose();
+          reportResourceBytes(input, null);
+          throw preparationTimeout();
         }
         await asset.dispose();
         reportResourceBytes(input, null);
@@ -327,9 +331,11 @@ async function selectPlayer(
   }
   if (retained === null) throw new Error("No AVAL source is available");
   const rendition = retained.manifest.renditions[0];
+  await retained.dispose();
+  reportResourceBytes(input, null);
   if (rendition === undefined) throw new Error("Invalid AVAL asset");
-  return new PlayerImpl(input, retained, rendition, null, null, deadline, publications,
-    unavailable, reports, 0, false);
+  if (unavailable === "resource-budget") throw resourceBudgetError();
+  throw unsupportedProfileError();
 }
 
 class PlayerImpl implements Player {
@@ -359,8 +365,11 @@ class PlayerImpl implements Player {
   readonly #validated = new Set<string>();
   readonly #trace: Readonly<AvalRuntimeTraceRecord>[] = [];
   readonly #requests = new Map<number, StateRequest>();
+  readonly #terminalSignal: Promise<never>;
+  readonly #rejectTerminalSignal: (reason: unknown) => void;
   #preparation: Promise<PrepareResult> | null = null;
   #recovery: Promise<PrepareResult> | null = null;
+  #terminalWork: Promise<AvalPlaybackError> | null = null;
   #graph: MotionGraphEngine | null = null;
   #plan: Readonly<ReadinessPlan> | null = null;
   #initialMedia: Readonly<{ unit: Unit; run: DecodeRun }> | null = null;
@@ -395,6 +404,8 @@ class PlayerImpl implements Player {
   #restartRequested = false;
   #contextLosses = 0;
   #contextRecoveries = 0;
+  #cleanupFailureCount = 0;
+  #animationResourcesRetired = false;
   readonly #contextRestored: () => void;
 
   public constructor(
@@ -412,6 +423,12 @@ class PlayerImpl implements Player {
     ),
     reportCurrent = true
   ) {
+    let rejectTerminalSignal!: (reason: unknown) => void;
+    this.#terminalSignal = new Promise<never>((_resolve, reject) => {
+      rejectTerminalSignal = reject;
+    });
+    this.#rejectTerminalSignal = rejectTerminalSignal;
+    void this.#terminalSignal.catch(() => undefined);
     this.#input = input;
     this.#asset = asset;
     this.#preparationDeadline = deadline;
@@ -493,7 +510,10 @@ class PlayerImpl implements Player {
     if (this.#preparation === null) {
       this.#preparation = this.#prepareBounded();
     }
-    return limit(this.#preparation, options.signal, options.timeoutMs, this.#input.platform);
+    const operation = this.#terminalWork === null
+      ? Promise.race([this.#preparation, this.#terminalSignal])
+      : this.#terminalWork.then((error) => Promise.reject(error));
+    return limit(operation, options.signal, options.timeoutMs, this.#input.platform);
   }
 
   public async setState(state: string): Promise<void> {
@@ -509,7 +529,9 @@ class PlayerImpl implements Player {
 
   public send(event: string): boolean {
     const graph = this.#graph;
-    if (!this.#activated || this.#disposed || graph === null) return false;
+    if (!this.#activated || this.#disposed || this.#failed || graph === null) {
+      return false;
+    }
     const result = graph.send(event);
     this.#applyWithoutDraw(result);
     if (this.#prepared) this.#prepareRoutes(graph.snapshot());
@@ -518,11 +540,13 @@ class PlayerImpl implements Player {
   }
 
   public canSend(event: string): boolean {
-    return this.#activated && !this.#disposed && (this.#graph?.canSend(event) ?? false);
+    return this.#activated && !this.#disposed && !this.#failed &&
+      (this.#graph?.canSend(event) ?? false);
   }
 
   public readyFor(state: string): boolean {
-    if (this.#disposed || !this.#prepared || this.#staticReason !== null ||
+    if (this.#disposed || this.#failed || !this.#prepared ||
+      this.#staticReason !== null ||
       !this.#states.has(state)) return false;
     const graph = this.#graph;
     if (graph === null) return false;
@@ -554,6 +578,7 @@ class PlayerImpl implements Player {
     policy: "auto" | "reduce" | "full",
     reducedMotion: boolean
   ): Promise<void> {
+    if (this.#terminalWork !== null) throw await this.#terminalWork;
     if (reduced(policy, reducedMotion)) {
       if (this.#staticReason === "reduced-motion") return;
       this.#installGraph();
@@ -577,6 +602,7 @@ class PlayerImpl implements Player {
   public async suspend(
     reason: "visibility-suspended"
   ): Promise<RuntimeReadinessResult> {
+    if (this.#terminalWork !== null) throw await this.#terminalWork;
     if (this.#disposed) throw abortError();
     this.#installGraph();
     this.#staticReason = reason;
@@ -596,17 +622,18 @@ class PlayerImpl implements Player {
   }
 
   public contextChanged(state: "lost" | "restored" | "error"): void {
-    if (this.#disposed || this.#staticReason !== null) return;
+    if (this.#disposed || this.#failed || this.#staticReason !== null) return;
     if (state === "restored") {
       this.#contextRestored();
       return;
     }
-    if (state === "lost") this.#awaitingContextRestore = true;
-    if (state === "lost") this.#contextLosses += 1;
-    void this.#recoverStatic("animation-failure").then(() => {
-      this.#input.onFailure("context-loss", "render", false);
-      if (state === "error") this.#contextRestored();
-    });
+    if (state === "lost") {
+      this.#awaitingContextRestore = true;
+      this.#contextLosses += 1;
+      this.#cancelFrame();
+      return;
+    }
+    void this.#terminate("context-loss", "render");
   }
 
   public resize(width: number, height: number, dpr: number, fit: string): void {
@@ -616,11 +643,10 @@ class PlayerImpl implements Player {
       renderer.resize(width, height, dpr, fit);
       this.#reportResourceBytes();
     } catch (error) {
-      if (admissionFailure(error)) {
-        void this.#recoverStatic("resource-budget").then(() => {
-          this.#input.onFailure("resource-rejection", "resize", false);
-        });
-      } else this.#fail(error);
+      void this.#terminate(
+        admissionFailure(error) ? "resource-rejection" : playbackFailureCode(error),
+        "resize"
+      );
     }
   }
 
@@ -668,6 +694,7 @@ class PlayerImpl implements Player {
         this.#contextRecoveries,
         presentation.contextRecoveryCount
       ),
+      cleanupFailureCount: this.#cleanupFailureCount,
       presentation,
       trace: trace ? Object.freeze([...this.#trace]) : Object.freeze([])
     });
@@ -676,27 +703,33 @@ class PlayerImpl implements Player {
   public async settled(): Promise<void> {
     await Promise.allSettled([
       ...this.#resident.values(),
-      this.#routePrefetch.settled()
+      this.#routePrefetch.settled(),
+      ...(this.#terminalWork === null ? [] : [this.#terminalWork])
     ]);
     await (this.#renderer ?? this.#retiredRenderer)?.settled();
   }
 
   public async dispose(): Promise<void> {
-    if (this.#disposed) return;
-    this.#disposed = true;
-    this.#animationGeneration += 1;
-    this.#input.canvas.removeEventListener("webglcontextrestored", this.#contextRestored);
-    this.#preparationDeadline.dispose();
-    this.#cancelFrame();
-    const graph = this.#graph;
-    if (graph !== null && graph.snapshot().readiness !== "disposed") {
-      this.#applyWithoutDraw(graph.dispose({
-        ...(graph.snapshot().visualState === null
-          ? {}
-          : { retainedVisualState: graph.snapshot().visualState! })
-      }));
+    if (!this.#disposed) {
+      this.#disposed = true;
+      this.#animationGeneration += 1;
+      this.#input.canvas.removeEventListener(
+        "webglcontextrestored",
+        this.#contextRestored
+      );
+      this.#preparationDeadline.dispose();
+      this.#cancelFrame();
+      const graph = this.#graph;
+      if (graph !== null && graph.snapshot().readiness !== "disposed") {
+        this.#applyWithoutDraw(graph.dispose({
+          ...(graph.snapshot().visualState === null
+            ? {}
+            : { retainedVisualState: graph.snapshot().visualState! })
+        }));
+      }
+      this.#rejectRequests("AbortError");
     }
-    this.#rejectRequests("AbortError");
+    if (this.#animationResourcesRetired) return;
     await this.#retireAnimationResources();
   }
 
@@ -707,18 +740,17 @@ class PlayerImpl implements Player {
       this.#preparationDeadline.complete();
       return result;
     } catch (error) {
-      if (this.#disposed || this.#input.signal.aborted) throw error;
-      if (this.#staticReason !== null) return this.#recoverStatic(this.#staticReason);
-      const reason = this.#preparationDeadline.timedOut
-        ? "preparation-timeout" : admissionFailure(error)
-          ? "resource-budget" : "readiness-failed";
-      const result = await this.#recoverStatic(reason);
-      this.#input.onFailure(
-        reason === "preparation-timeout" ? "watchdog-timeout" : "readiness-failure",
-        "prepare",
-        false
-      );
-      return result;
+      if (this.#disposed || this.#input.signal.aborted) {
+        throw playerAbortReason(this.#input.signal);
+      }
+      if (this.#terminalWork !== null) throw await this.#terminalWork;
+      if (policyReason(this.#staticReason)) {
+        return this.#recoverStatic(this.#staticReason);
+      }
+      const code = this.#preparationDeadline.timedOut
+        ? "watchdog-timeout" : admissionFailure(error)
+          ? "resource-rejection" : preparationFailureCode(error);
+      throw await this.#terminate(code, "prepare");
     }
   }
 
@@ -738,7 +770,7 @@ class PlayerImpl implements Player {
 
   async #start(): Promise<PrepareResult> {
     const graph = this.#installGraph();
-    if (this.#preparationDeadline.timedOut) this.#staticReason = "preparation-timeout";
+    if (this.#preparationDeadline.timedOut) throw preparationTimeout();
     if (this.#staticReason !== null) {
       this.#applyWithoutDraw(graph.beginStatic(this.#staticReason));
       await this.#retireAnimationResources();
@@ -779,6 +811,9 @@ class PlayerImpl implements Player {
   }
 
   #recoverStatic(reason: StaticReason): Promise<PrepareResult> {
+    if (!policyReason(reason)) {
+      return Promise.reject(new Error("AVAL static recovery is limited to policy suspension"));
+    }
     if (this.#recovery !== null) return this.#recovery;
     this.#animationGeneration += 1;
     const operation = Promise.resolve().then(() => this.#performRecovery(reason));
@@ -913,6 +948,7 @@ class PlayerImpl implements Player {
   }
 
   async #retireAnimationResources(): Promise<void> {
+    if (this.#animationResourcesRetired) return;
     this.#cancelFrame();
     this.#preparationDeadline.cancel(abortError());
     const active = this.#active;
@@ -942,6 +978,7 @@ class PlayerImpl implements Player {
     await this.#asset.dispose();
     reportResourceBytes(this.#input, null);
     this.#input.onAnimationResourcesRetired();
+    this.#animationResourcesRetired = true;
   }
 
   #reportResourceBytes(): void {
@@ -1347,7 +1384,7 @@ class PlayerImpl implements Player {
     renderer: Renderer,
     decoders: DecoderPool
   ): void {
-    if (this.#disposed || this.#staticReason !== null ||
+    if (this.#disposed || this.#failed || this.#staticReason !== null ||
       this.#animationGeneration !== generation || this.#renderer !== renderer ||
       this.#decoders !== decoders) throw abortError();
   }
@@ -1734,28 +1771,75 @@ class PlayerImpl implements Player {
     return graph;
   }
 
-  #rejectRequests(name: string): void {
-    const error = requestError(name);
+  #rejectRequests(reason: string | Error): void {
+    const error = typeof reason === "string" ? requestError(reason) : reason;
     for (const capability of this.#requests.values()) capability.reject(error);
     this.#requests.clear();
   }
 
   #fail(reason: unknown): void {
     if (this.#disposed || this.#failed || this.#staticReason !== null) return;
-    this.#failed = true;
-    void this.#recoverStatic("animation-failure").then(() => {
-      this.#input.onFailure(playbackFailureCode(reason), "playback", false);
-    }).catch(() => {
-      const graph = this.#graph;
-      if (graph !== null && graph.snapshot().readiness !== "disposed" &&
-        graph.snapshot().readiness !== "error") {
-        try { this.#applyWithoutDraw(graph.failStatic("static fallback failed")); }
-        catch { /* reject every remaining capability below */ }
-      }
-      this.#rejectRequests("PlaybackFallbackError");
-      void this.#retireAnimationResources();
-      this.#input.onFailure("renderer-failure", "playback", true);
+    void this.#terminate(playbackFailureCode(reason), "playback");
+  }
+
+  #terminate(
+    code: Parameters<PlayerInput["onPlaybackFailure"]>[0],
+    operation: string
+  ): Promise<AvalPlaybackError> {
+    if (this.#terminalWork !== null) return this.#terminalWork;
+    let resolveTerminal!: (error: AvalPlaybackError) => void;
+    let rejectTerminal!: (reason: unknown) => void;
+    const work = new Promise<AvalPlaybackError>((resolve, reject) => {
+      resolveTerminal = resolve;
+      rejectTerminal = reject;
     });
+    this.#terminalWork = work;
+    void work.catch(() => undefined);
+    this.#failed = true;
+    this.#animationGeneration += 1;
+    void this.#finishTerminal(code, operation).then(
+      resolveTerminal,
+      rejectTerminal
+    );
+    return work;
+  }
+
+  async #finishTerminal(
+    code: Parameters<PlayerInput["onPlaybackFailure"]>[0],
+    operation: string
+  ): Promise<AvalPlaybackError> {
+    this.#cancelFrame();
+    this.#awaitingContextRestore = false;
+    this.#input.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.#contextRestored
+    );
+    const graph = this.#graph;
+    if (graph !== null && graph.snapshot().readiness !== "disposed") {
+      try { graph.dispose(); }
+      catch { /* cleanup cannot replace the canonical playback error */ }
+    }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.#retireAnimationResources();
+        break;
+      } catch {
+        this.#cleanupFailureCount = Math.min(
+          Number.MAX_SAFE_INTEGER,
+          this.#cleanupFailureCount + 1
+        );
+      }
+    }
+    if (this.#disposed || this.#input.signal.aborted) {
+      const error = playerAbortReason(this.#input.signal);
+      this.#rejectRequests(error);
+      this.#rejectTerminalSignal(error);
+      throw error;
+    }
+    const error = this.#input.onPlaybackFailure(code, operation);
+    this.#rejectRequests(error);
+    this.#rejectTerminalSignal(error);
+    return error;
   }
 }
 
@@ -1937,7 +2021,7 @@ function assertCandidateBudget(
 function candidateReport(
   rendition: string,
   rank: number,
-  reason: StaticReason | null
+  reason: StaticReason | CandidateRejectionReason | null
 ) {
   if (reason === null) {
     return Object.freeze({ rendition, rank, outcome: "selected" as const, failure: null });
@@ -1946,12 +2030,9 @@ function candidateReport(
     reason === "decoder-queued") {
     return Object.freeze({ rendition, rank, outcome: "eligible" as const, failure: null });
   }
-  const code = reason === "codec-unsupported" || reason === "no-video-rendition" ||
-    reason === "worker-unavailable" ? "unsupported-profile" as const
-    : reason === "renderer-unavailable" ? "renderer-failure" as const
-      : reason === "resource-budget" ? "resource-rejection" as const
-        : reason === "preparation-timeout" ? "watchdog-timeout" as const
-          : "readiness-failure" as const;
+  const code = reason === "resource-budget"
+    ? "resource-rejection" as const
+    : "unsupported-profile" as const;
   return Object.freeze({
     rendition,
     rank,
@@ -1964,8 +2045,19 @@ function candidateReport(
   });
 }
 
+type CandidateRejectionReason =
+  | "codec-unsupported"
+  | "no-video-rendition"
+  | "resource-budget";
+
 function abortError(): Error {
   return new DOMException("AVAL operation was superseded", "AbortError");
+}
+
+function playerAbortReason(signal: AbortSignal): Error {
+  return signal.aborted && signal.reason instanceof Error
+    ? signal.reason
+    : abortError();
 }
 
 function limit<T>(
@@ -2065,6 +2157,12 @@ function resourceBudgetError(): Error {
   return error;
 }
 
+function unsupportedProfileError(): Error {
+  const error = new Error("AVAL has no supported animated rendition");
+  error.name = "NotSupportedError";
+  return error;
+}
+
 function admissionFailure(error: unknown): boolean {
   return errorString(error, "name") === "ResourceBudgetError" ||
     /resource declarations|resource budget|byte cap|byte ceiling/i.test(
@@ -2077,6 +2175,45 @@ function playbackFailureCode(reason: unknown): "renderer-failure" | "worker-deco
   return /canvas|context|draw|renderer|texture|viewport|webgl/i.test(message)
     ? "renderer-failure"
     : "worker-decode-failure";
+}
+
+function preparationFailureCode(reason: unknown):
+  "readiness-failure" | "renderer-failure" | "worker-decode-failure" {
+  const message = errorString(reason, "message") ?? "";
+  if (/canvas|context|draw|renderer|texture|viewport|webgl/i.test(message)) {
+    return "renderer-failure";
+  }
+  if (/codec|decode|decoder|frame|video/i.test(message)) {
+    return "worker-decode-failure";
+  }
+  return "readiness-failure";
+}
+
+function selectionFailureCode(reason: unknown):
+  | "invalid-asset"
+  | "resource-rejection"
+  | "renderer-failure"
+  | "worker-decode-failure"
+  | "readiness-failure"
+  | "unsupported-profile" {
+  const name = errorString(reason, "name") ?? "";
+  const message = errorString(reason, "message") ?? "";
+  if (name === "NotSupportedError") return "unsupported-profile";
+  if (admissionFailure(reason)) return "resource-rejection";
+  if (/canvas|context|draw|renderer|texture|viewport|webgl/i.test(message)) {
+    return "renderer-failure";
+  }
+  if (/codec|decode|decoder|frame|video|worker/i.test(message)) {
+    return "worker-decode-failure";
+  }
+  if (/invalid aval|manifest|asset/i.test(message)) return "invalid-asset";
+  return "readiness-failure";
+}
+
+function policyReason(reason: StaticReason | null): reason is
+  "reduced-motion" | "visibility-suspended" | "decoder-queued" {
+  return reason === "reduced-motion" || reason === "visibility-suspended" ||
+    reason === "decoder-queued";
 }
 
 function checkedTotal(values: readonly number[]): number {
@@ -2131,7 +2268,11 @@ class PublicationGate {
         operation: string,
         fatal: boolean
       ) =>
-        publish(() => target.onFailure(code, operation, fatal))
+        publish(() => target.onFailure(code, operation, fatal)),
+      onPlaybackFailure: (
+        code: Parameters<PlayerInput["onPlaybackFailure"]>[0],
+        operation: string
+      ) => target.onPlaybackFailure(code, operation)
     });
   }
 

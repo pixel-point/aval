@@ -22,7 +22,11 @@ import {
   type PageResourcesSnapshot
 } from "./page-resources.js";
 import { LifecycleLane } from "./lifecycle-lane.js";
-import { AvalNotReadyError, ElementCleanupIncompleteError } from "./errors.js";
+import {
+  AvalNotReadyError,
+  AvalPlaybackError,
+  ElementCleanupIncompleteError
+} from "./errors.js";
 import { ShadowLayerOwner } from "./shadow-layers.js";
 import type {
   AvalAutoplay,
@@ -49,8 +53,7 @@ type IntersectionGate = {
   readonly resolve: () => void;
   readonly reject: (reason: unknown) => void;
 };
-type FailureInput = AvalPublicFailure["code"] |
-  "resource-budget" | "animation-failure" | "fallback-failure";
+type FailureInput = AvalPublicFailure["code"];
 type ElementTiming = Readonly<{
   setTimeout: (callback: () => void, delay: number) => number;
   clearTimeout: (handle: number) => void;
@@ -157,6 +160,8 @@ export function createAvalElementClass(
     #visualState: string | null = null;
     #transitioning = false;
     #lastFailure: Readonly<AvalPublicFailure> | null = null;
+    #terminalError: AvalPlaybackError | null = null;
+    #cleanupFailureCount = 0;
     #cleanup: Readonly<Record<string, unknown>> | null = null;
     #terminalCleanup: Readonly<Record<string, unknown>> | null = null;
     #intersecting = false;
@@ -681,8 +686,11 @@ export function createAvalElementClass(
 
     #trackLoad(operation: Promise<RuntimeReadinessResult>): void {
       this.#load = operation;
-      void operation.catch(() => {
-        if (this.#load === operation && !this.#finalDisposed) this.#load = null;
+      void operation.catch((error: unknown) => {
+        if (
+          this.#load === operation && !this.#finalDisposed &&
+          error !== this.#terminalError
+        ) this.#load = null;
       });
     }
 
@@ -723,6 +731,8 @@ export function createAvalElementClass(
       this.#visualState = null;
       this.#transitioning = false;
       this.#lastFailure = null;
+      this.#terminalError = null;
+      this.#cleanupFailureCount = 0;
       this.#mode = null;
       this.#staticReason = null;
       this.#layers.resetSource(generation);
@@ -741,8 +751,11 @@ export function createAvalElementClass(
       if (sources.length === 0) return this.#configurationFailure(generation);
       const view = document.defaultView;
       if (!runtimeHostSupported(this.#layers.stylesSupported, view)) {
-        this.#publishFailure("unsupported-browser", "configure", false, generation);
-        throw new AvalNotReadyError("AVAL runtime presentation is unsupported");
+        throw this.#publishTerminalFailure(
+          "unsupported-browser",
+          "configure",
+          generation
+        );
       }
       const clock = view.performance;
       const timing = createElementTiming(view);
@@ -837,6 +850,32 @@ export function createAvalElementClass(
           onFailure: (code, operation, fatal) => {
             if (!this.#publicationCurrent(generation, token)) return;
             this.#publishFailure(code, operation, fatal, generation);
+          },
+          onPlaybackFailure: (code, operation) => {
+            if (!this.#publicationCurrent(generation, token)) {
+              return this.#createPlaybackError(code, operation, generation);
+            }
+            const activePlayer = this.#player;
+            const preparing = activePlayer !== null &&
+              this.#preparingPlayer === activePlayer;
+            this.#releasePageResources(true);
+            const error = this.#publishTerminalFailure(
+              code,
+              operation,
+              generation
+            );
+            if (activePlayer !== null && !preparing) {
+              queueMicrotask(() => {
+                if (
+                  this.#terminalError !== error ||
+                  this.#player !== activePlayer ||
+                  !this.#generationCurrent(generation, token) ||
+                  this.#finalDisposed
+                ) return;
+                void this.#queueRetirement(false).catch(() => undefined);
+              });
+            }
+            return error;
           }
         });
         if (!this.#current(generation, token)) {
@@ -889,14 +928,11 @@ export function createAvalElementClass(
         }
         return result;
       } catch (error) {
-        if (!this.#current(generation, token) || isAbort(error)) throw error;
-        if (isPreparationTimeout(error)) {
-          this.#releasePageResources();
-          this.#mode = "static";
-          this.#staticReason = "preparation-timeout";
-          this.#setReadiness("staticReady", "preparation-timeout");
-          return staticResult("preparation-timeout");
-        }
+        if (!this.#current(generation, token)) throw abortError();
+        if (isAbort(error)) throw error;
+        const playbackError = error instanceof AvalPlaybackError
+          ? error : null;
+        const timedOut = isPreparationTimeout(error);
         try {
           await failedGenerationCleanup(
             this.#player !== null,
@@ -904,22 +940,44 @@ export function createAvalElementClass(
             () => this.#releasePageResources(true)
           );
         } catch (cleanupError) {
-          this.#publishFailure(
+          if (!this.#generationCurrent(generation, token)) throw abortError();
+          if (playbackError !== null) throw playbackError;
+          if (timedOut) {
+            throw this.#publishTerminalFailure(
+              "watchdog-timeout",
+              "prepare",
+              generation
+            );
+          }
+          throw this.#publishTerminalFailure(
             "element-cleanup-incomplete",
             "prepare-cleanup",
-            true,
             generation
           );
-          throw cleanupError;
         }
-        this.#publishFailure("readiness-failure", "prepare", true, generation);
-        throw error;
+        if (!this.#generationCurrent(generation, token)) throw abortError();
+        if (playbackError !== null) throw playbackError;
+        if (timedOut) {
+          throw this.#publishTerminalFailure(
+            "watchdog-timeout",
+            "prepare",
+            generation
+          );
+        }
+        throw this.#publishTerminalFailure(
+          "readiness-failure",
+          "prepare",
+          generation
+        );
       }
     }
 
     #configurationFailure(generation: number): Promise<RuntimeReadinessResult> {
-      this.#publishFailure("invalid-configuration", "configure", true, generation);
-      return Promise.reject(new TypeError("Invalid aval-player configuration"));
+      return Promise.reject(this.#publishTerminalFailure(
+        "invalid-configuration",
+        "configure",
+        generation
+      ));
     }
 
     async #retireGeneration(terminal: boolean): Promise<void> {
@@ -945,6 +1003,7 @@ export function createAvalElementClass(
         this.#retiringDeclaredFileBytes = 0;
         try {
           const retired = player.snapshot(false);
+          this.#captureCleanupFailures(retired);
           this.#retiringDeclaredFileBytes = retired.declaredFileBytes;
           this.#counters.contextRecovery += retired.contextRecoveryCount;
         } catch {
@@ -978,6 +1037,7 @@ export function createAvalElementClass(
           failure = error;
         }
       }
+      this.#captureCleanupFailures(snapshot);
       if (disposed && !failed && playerSnapshotDisposed(snapshot)) {
         try {
           this.#setResourceBytes(0);
@@ -1049,6 +1109,11 @@ export function createAvalElementClass(
       fatal: boolean,
       generation: number
     ): void {
+      if (fatal) {
+        this.#publishTerminalFailure(code, operation, generation);
+        return;
+      }
+      if (this.#terminalError?.generation === generation) return;
       const publicCode = publicFailureCode(code);
       const failure = Object.freeze({
         code: publicCode,
@@ -1057,10 +1122,40 @@ export function createAvalElementClass(
       }) as Readonly<AvalPublicFailure>;
       this.#lastFailure = failure;
       this.#dispatch("error", { failure, fatal }, generation);
-      if (fatal) {
-        this.#mode = null;
-        this.#setReadiness("error");
+    }
+
+    #publishTerminalFailure(
+      code: FailureInput,
+      operation: string,
+      generation: number
+    ): AvalPlaybackError {
+      if (this.#terminalError?.generation === generation) {
+        return this.#terminalError;
       }
+      const error = this.#createPlaybackError(code, operation, generation);
+      this.#terminalError = error;
+      const retainedLoad = Promise.reject(error);
+      void retainedLoad.catch(() => undefined);
+      this.#load = retainedLoad;
+      this.#lastFailure = error.failure;
+      this.#mode = null;
+      this.#staticReason = null;
+      this.#setReadiness("error");
+      this.#dispatch("error", { failure: error.failure, fatal: true }, generation);
+      return error;
+    }
+
+    #createPlaybackError(
+      code: FailureInput,
+      operation: string,
+      generation: number
+    ): AvalPlaybackError {
+      const publicCode = publicFailureCode(code);
+      return new AvalPlaybackError(Object.freeze({
+        code: publicCode,
+        message: `AVAL operation failed (${publicCode})`,
+        operation
+      }), generation);
     }
 
     #setReadiness(value: RuntimeReadiness, reason?: StaticReason): void {
@@ -1590,10 +1685,14 @@ export function createAvalElementClass(
     }
 
     #current(generation: number, token: number): boolean {
+      return this.#generationCurrent(generation, token) &&
+        this.#controller?.signal.aborted === false;
+    }
+
+    #generationCurrent(generation: number, token: number): boolean {
       return !this.#finalDisposed &&
         this.#lifecycle.current(token) &&
-        generation === this.#sourceGeneration &&
-        this.#controller?.signal.aborted === false;
+        generation === this.#sourceGeneration;
     }
 
     #publicationCurrent(generation: number, token: number): boolean {
@@ -1690,6 +1789,13 @@ export function createAvalElementClass(
       this.#pageParticipant = null;
       this.#resourceBytes = 0;
       if (forgetRealm) this.#pageRealm = null;
+    }
+
+    #captureCleanupFailures(snapshot: Readonly<PlayerSnapshot> | null): void {
+      this.#cleanupFailureCount = Math.max(
+        this.#cleanupFailureCount,
+        snapshot?.cleanupFailureCount ?? 0
+      );
     }
 
     #pageSnapshot(): Readonly<PageResourcesSnapshot> {
@@ -1806,7 +1912,11 @@ export function createAvalElementClass(
           pageParticipantCount: page.participants,
           reclamationCount: 0,
           contextLossCount: runtime.contextLossCount,
-          contextRecoveryCount: runtime.contextRecoveryCount
+          contextRecoveryCount: runtime.contextRecoveryCount,
+          cleanupFailureCount: Math.max(
+            this.#cleanupFailureCount,
+            runtime.cleanupFailureCount ?? 0
+          )
         }),
         motion: Object.freeze({
           configured: this.motion,
@@ -2058,12 +2168,7 @@ export function interactionTarget(
 export function publicFailureCode(
   code: FailureInput
 ): AvalPublicFailure["code"] {
-  switch (code) {
-    case "resource-budget": return "resource-rejection";
-    case "animation-failure": return "worker-decode-failure";
-    case "fallback-failure": return "renderer-failure";
-    default: return code;
-  }
+  return code;
 }
 
 export function outstandingDecoder(
@@ -2399,6 +2504,7 @@ function emptyRuntime(): PlayerSnapshot {
     openFrames: 0,
     contextLossCount: 0,
     contextRecoveryCount: 0,
+    cleanupFailureCount: 0,
     presentation: Object.freeze({
       cssWidth: 0,
       cssHeight: 0,
@@ -2408,18 +2514,6 @@ function emptyRuntime(): PlayerSnapshot {
       effectiveDprY: 0
     }),
     trace: Object.freeze([])
-  });
-}
-
-function staticResult(reason: StaticReason): RuntimeReadinessResult {
-  return Object.freeze({
-    mode: "static",
-    reason,
-    report: Object.freeze({
-      readiness: "staticReady",
-      selectedRendition: null,
-      candidates: Object.freeze([])
-    })
   });
 }
 
