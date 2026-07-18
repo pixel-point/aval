@@ -55,9 +55,9 @@ Delete the marker root, marker spheres, latitude cage, nested rotation, breathin
 
 Create one matte graphite sphere and twelve identical pale-cyan great-circle seams at 15-degree intervals over 180 degrees. Parent every visible moving part to the same tilted root. Retain a static camera, subdued lighting, dark background, and soft contact floor.
 
-**Step 3: Drive every frame from `timeline.py`**
+**Step 3: Bake every frame from `timeline.py`**
 
-Use `pose_for_frame(scene.frame_current + scene.frame_subframe)` for one absolute Z rotation and uniform material illumination. Set motion-blur shutter to `0.20` and call `validate_timeline()` before saving or rendering.
+Use a static X/Y tilt parent and one animated Z-spin child. Bake `pose_for_frame(frame)` into linear rotation and material keyframes from frame -1 through 96 so the saved `.blend` is playable and motion-blur sampling has forward runway on both ends. Set motion-blur shutter to `0.20` and call `validate_timeline()` before saving or rendering.
 
 **Step 4: Run source checks**
 
@@ -95,7 +95,7 @@ Replace the idle and hover portal arrays and set the two event portal wait bound
 
 **Step 1: Make analytic validation a render prerequisite**
 
-Run the pure timeline test before Blender, then render frames 0–95 and encode the existing 512×512, 24 fps, yuv420p H.264 source.
+Run the pure timeline test before Blender, launch Blender with factory startup, then render frames 0–95 and encode the existing 512×512, 24 fps, yuv420p H.264 source at CRF 16.
 
 **Step 2: Expand the contact sheet**
 
@@ -163,7 +163,7 @@ Replace "One frame to react" and "≤ 42 ms" with two-frame/83 ms wording while 
 
 Run: `npm run compile:kinetic-orb`
 
-Expected: one H.264 AVAL asset and a regenerated build report.
+Expected: one CRF 16 H.264 AVAL asset and a regenerated build report.
 
 **Step 3: Update integrity**
 

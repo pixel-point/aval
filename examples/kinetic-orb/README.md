@@ -1,12 +1,13 @@
 # Kinetic orb hover example
 
 This example is a Blender-authored proof of continuous interactive video. A
-graphite orb rotates in every state, its inner shell powers on during hover,
-and a separately authored forward-playing exit returns it to idle without
-reversing the rotation.
+graphite calibration ball rotates in every state, its meridian seams and shell
+light uniformly during hover, and a separately authored forward-playing exit
+returns it to idle without reversing or resetting the rotation.
 
-The 512×512 source is opaque H.264 at 24 fps. The first proof compiles only an
-H.264 `.avl` rendition:
+The 512×512 source is opaque H.264 at 24 fps. The source and compiled rendition
+both use CRF 16 to keep independently encoded state boundaries visually quiet.
+The first proof compiles only an H.264 `.avl` rendition:
 
 - `intro`: `[0, 24)`
 - `idle-loop`: `[24, 48)`
@@ -14,22 +15,37 @@ H.264 `.avl` rendition:
 - `hover-loop`: `[60, 84)`
 - `hover-out`: `[84, 96)`
 
-The orb advances 15 degrees per frame after the intro. Its repeated rib
-geometry is visually equivalent every 30 degrees, so loop portals are authored
-after every odd frame. Hover entry and exit therefore wait at most one frame,
-or about 42 ms, for a safe transition point.
+The ball advances exactly 5 degrees on every source frame, including the
+intro. Twelve identical great-circle seams make the complete visible object
+equivalent every 15 degrees. Loop portals are therefore authored on local
+frames `[2, 5, 8, 11, 14, 17, 20, 23]`; hover entry and exit wait at most two
+frames, or about 83 ms, for the next safe transition point.
+
+All five units share one absolute source-frame angle. Idle and hover loops use
+constant illumination, while the transition endpoints match those exact
+levels. The saved `.blend` contains baked linear keyframes from frame -1
+through 96 so the editable scene and Blender motion-blur samples preserve the
+same forward velocity across every source boundary.
 
 ## Regenerate the source
 
-Blender 5.1 and FFmpeg with `libx264` are required. From the repository root:
+Python 3.10+, Blender 5.1, and FFmpeg with `libx264` are required. From the
+repository root:
 
 ```sh
 npm run render:kinetic-orb
 ```
 
-The render script regenerates `kinetic-orb.blend`, writes 96 PNGs to
-`source/frames/`, encodes `source/kinetic-orb.mp4`, and creates a seam contact
-sheet. Set `BLENDER_BIN` when Blender is installed somewhere other than
+The render script first runs the pure timeline contract test, regenerates
+`kinetic-orb.blend`, writes 96 PNGs to `source/frames/`, encodes
+`source/kinetic-orb.mp4`, and creates a seam contact sheet. The sheet is ordered
+by global source frame:
+
+`23, 24, 26, 29, 32, 35, 38, 41, 44, 47, 48, 59, 60, 62, 65, 68, 71, 74, 77, 80, 83, 84, 95`
+
+That sequence contains every unit boundary and all idle/hover portal source
+frames; frames 48 and 84 are their respective transition targets. Set
+`BLENDER_BIN` when Blender is installed somewhere other than
 `/Applications/Blender.app`.
 
 ## Compile and preview

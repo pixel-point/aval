@@ -88,6 +88,8 @@ These sampled endpoints intentionally duplicate only material values. Rotation a
 
 `examples/kinetic-orb/blender/generate_scene.py` remains the deterministic source of the `.blend` and all rendered frames. Its setup code will be simplified to remove the marker root, marker spheres, latitude loops, secondary angular function, and sequential charge logic.
 
+The fixed X/Y tilt lives on a static parent while the authored Z spin lives on one child, so Euler composition cannot rotate the ball around the wrong effective axis. Rotation and illumination are baked as linear keyframes from frame -1 through frame 96; those runway keys preserve forward motion-blur sampling and make the saved `.blend` independently playable. Rendering starts from Blender's factory startup, and both the source MP4 and compiled H.264 rendition use CRF 16 to minimize compression changes between independently encoded units.
+
 `examples/kinetic-orb/blender/render.sh` continues to render frames 0–95, encode `source/kinetic-orb.mp4`, and produce `source/contact-sheet.jpg`. The contact sheet will include every global unit seam, every declared portal source frame, and the transition target frames so visual review covers source playback, runtime looping, and event-driven cuts.
 
 After rendering, `motion.json` is updated with the new portal frames and wait bound, then the H.264 `.avl` is recompiled. The `<source>` integrity value in `index.html` must be replaced with the value emitted by the compiler.

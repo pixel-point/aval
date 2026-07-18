@@ -1,4 +1,4 @@
-"""Generate and render the deterministic kinetic-orb Blender scene."""
+"""Generate and render the deterministic kinetic-orb calibration scene."""
 
 from __future__ import annotations
 
@@ -11,13 +11,28 @@ import bpy
 from mathutils import Matrix, Vector
 
 
-FPS = 24
-FRAME_START = 0
-FRAME_END = 95
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.dont_write_bytecode = True
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from timeline import (  # noqa: E402
+    FRAME_END,
+    FRAME_START,
+    FPS,
+    HOVER_ENERGY,
+    IDLE_ENERGY,
+    pose_for_frame,
+    validate_timeline,
+)
+
+
 SIZE = 512
-EXAMPLE_DIR = Path(__file__).resolve().parents[1]
+EXAMPLE_DIR = SCRIPT_DIR.parent
 BLEND_PATH = EXAMPLE_DIR / "kinetic-orb.blend"
 FRAMES_DIR = EXAMPLE_DIR / "source" / "frames"
+SEAM_COUNT = 12
+SEAM_SPACING_DEGREES = 15.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,15 +41,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--smoke-frame", type=int)
     return parser.parse_args(args)
-
-
-def smoothstep(value: float) -> float:
-    value = max(0.0, min(1.0, value))
-    return value * value * (3.0 - 2.0 * value)
-
-
-def mix(start: float, end: float, amount: float) -> float:
-    return start + (end - start) * amount
 
 
 def clear_scene() -> None:
@@ -63,7 +69,7 @@ def principled_material(
 ) -> bpy.types.Material:
     material = bpy.data.materials.new(name)
     material.use_nodes = True
-    shader = material.node_tree.nodes.get("Principled BSDF")
+    shader = material.node_tree.nodes["Principled BSDF"]
     shader.inputs["Base Color"].default_value = base_color
     shader.inputs["Metallic"].default_value = metallic
     shader.inputs["Roughness"].default_value = roughness
@@ -119,28 +125,28 @@ def add_curve_loop(
     return obj
 
 
-def great_circle_points(radius: float, phase: float, samples: int = 128) -> list[tuple[float, float, float]]:
+def great_circle_points(
+    radius: float,
+    phase: float,
+    samples: int = 192,
+) -> list[tuple[float, float, float]]:
     points: list[tuple[float, float, float]] = []
+    rotation = Matrix.Rotation(phase, 4, "Z")
     for index in range(samples):
         angle = math.tau * index / samples
         local = Vector((radius * math.sin(angle), 0.0, radius * math.cos(angle)))
-        local.rotate(Matrix.Rotation(phase, 4, "Z"))
+        local.rotate(rotation)
         points.append(tuple(local))
     return points
 
 
-def circle_points(radius: float, z: float, samples: int = 128) -> list[tuple[float, float, float]]:
-    return [
-        (
-            radius * math.cos(math.tau * index / samples),
-            radius * math.sin(math.tau * index / samples),
-            z,
-        )
-        for index in range(samples)
-    ]
-
-
-def add_area_light(name: str, location: tuple[float, float, float], energy: float, color: tuple[float, float, float], size: float) -> None:
+def add_area_light(
+    name: str,
+    location: tuple[float, float, float],
+    energy: float,
+    color: tuple[float, float, float],
+    size: float,
+) -> None:
     data = bpy.data.lights.new(name, type="AREA")
     data.energy = energy
     data.color = color
@@ -156,6 +162,42 @@ def point_at(obj: bpy.types.Object, target: tuple[float, float, float]) -> None:
     obj.rotation_euler = (Vector(target) - obj.location).to_track_quat("-Z", "Y").to_euler()
 
 
+def shader(material: bpy.types.Material) -> bpy.types.Node:
+    return material.node_tree.nodes["Principled BSDF"]
+
+
+def mix(start: float, end: float, amount: float) -> float:
+    return start + (end - start) * amount
+
+
+def mix_color(
+    start: tuple[float, float, float, float],
+    end: tuple[float, float, float, float],
+    amount: float,
+) -> tuple[float, float, float, float]:
+    return tuple(mix(left, right, amount) for left, right in zip(start, end, strict=True))
+
+
+def energy_ramp(
+    energy: float,
+    off: float | tuple[float, float, float, float],
+    idle: float | tuple[float, float, float, float],
+    hover: float | tuple[float, float, float, float],
+) -> float | tuple[float, float, float, float]:
+    if energy <= IDLE_ENERGY:
+        amount = max(0.0, energy / IDLE_ENERGY)
+        start, end = off, idle
+    else:
+        amount = min(1.0, (energy - IDLE_ENERGY) / (HOVER_ENERGY - IDLE_ENERGY))
+        start, end = idle, hover
+
+    if isinstance(start, tuple) and isinstance(end, tuple):
+        return mix_color(start, end, amount)
+    if isinstance(start, float) and isinstance(end, float):
+        return mix(start, end, amount)
+    raise TypeError("energy ramp values must have matching types")
+
+
 def setup_scene() -> dict[str, object]:
     clear_scene()
     scene = bpy.context.scene
@@ -165,223 +207,170 @@ def setup_scene() -> dict[str, object]:
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGB"
+    scene.render.image_settings.color_depth = "8"
     scene.render.film_transparent = False
     scene.render.fps = FPS
     scene.frame_start = FRAME_START
     scene.frame_end = FRAME_END
-    scene.render.image_settings.color_depth = "8"
     scene.render.use_file_extension = True
     scene.render.filepath = str(FRAMES_DIR / "frame-")
-    scene.render.engine = "BLENDER_EEVEE"
     scene.render.use_motion_blur = True
-    scene.render.motion_blur_shutter = 0.72
-    scene.render.image_settings.color_mode = "RGB"
-    scene.view_settings.exposure = 0.35
+    scene.render.motion_blur_shutter = 0.20
+    scene.view_settings.look = "AgX - Medium High Contrast"
+    scene.view_settings.exposure = 0.1
 
-    world = bpy.data.worlds.new("Orb World") if bpy.data.worlds.get("Orb World") is None else bpy.data.worlds["Orb World"]
+    world = bpy.data.worlds.get("Calibration World") or bpy.data.worlds.new("Calibration World")
     world.use_nodes = True
-    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.0015, 0.003, 0.007, 1.0)
-    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.12
+    background = world.node_tree.nodes["Background"]
+    background.inputs["Color"].default_value = (0.001, 0.002, 0.004, 1.0)
+    background.inputs["Strength"].default_value = 0.08
     scene.world = world
 
     shell_material = principled_material(
-        "Graphite Shell",
-        (0.012, 0.02, 0.028, 1.0),
-        metallic=0.92,
-        roughness=0.2,
-        emission_color=(0.0, 0.32, 0.7, 1.0),
-        emission_strength=0.03,
-    )
-    core_material = principled_material(
-        "Energy Core",
-        (0.002, 0.035, 0.055, 1.0),
+        "Graphite Ball",
+        (0.002, 0.004, 0.006, 1.0),
         metallic=0.18,
-        roughness=0.16,
-        emission_color=(0.0, 0.42, 0.72, 1.0),
-        emission_strength=0.3,
+        roughness=0.52,
+        emission_color=(0.0, 0.32, 0.55, 1.0),
+        emission_strength=0.0,
     )
-    marker_material = principled_material(
-        "Energy Markers",
-        (0.04, 0.6, 1.0, 1.0),
-        metallic=0.1,
-        roughness=0.12,
-        emission_color=(0.0, 0.65, 1.0, 1.0),
+    seam_material = principled_material(
+        "Calibration Seams",
+        (0.001, 0.003, 0.005, 1.0),
+        metallic=0.05,
+        roughness=0.32,
+        emission_color=(0.0, 0.68, 1.0, 1.0),
         emission_strength=0.0,
     )
     floor_material = principled_material(
         "Ground",
-        (0.003, 0.006, 0.012, 1.0),
-        metallic=0.25,
-        roughness=0.32,
+        (0.003, 0.005, 0.009, 1.0),
+        metallic=0.02,
+        roughness=0.62,
     )
 
     bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0.0, 0.0, 0.0))
+    tilt_root = bpy.context.object
+    tilt_root.name = "Calibration Ball Tilt"
+    tilt_root.rotation_mode = "XYZ"
+    tilt_root.rotation_euler.x = math.radians(-18.0)
+    tilt_root.rotation_euler.y = math.radians(22.0)
+
+    bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0.0, 0.0, 0.0))
     root = bpy.context.object
-    root.name = "Orb Root"
+    root.name = "Calibration Ball Spin"
     root.rotation_mode = "XYZ"
-    root.rotation_euler.x = math.radians(-11.0)
-    root.rotation_euler.y = math.radians(18.0)
+    root.parent = tilt_root
 
-    shell = add_uv_sphere("Graphite Inner Shell", 1.06, shell_material)
+    shell = add_uv_sphere("Calibration Ball", 1.15, shell_material)
     shell.parent = root
-    bevel = shell.modifiers.new("Micro bevel", type="BEVEL")
-    bevel.width = 0.012
-    bevel.segments = 2
 
-    core = add_uv_sphere("Energy Core", 0.72, core_material, segments=64, rings=48)
-    core.parent = root
-
-    rib_materials: list[bpy.types.Material] = []
-    for index in range(6):
-        material = principled_material(
-            f"Rib Glow {index + 1:02d}",
-            (0.002, 0.08, 0.13, 1.0),
-            metallic=0.3,
-            roughness=0.18,
-            emission_color=(0.0, 0.55, 1.0, 1.0),
-            emission_strength=0.5,
+    for index in range(SEAM_COUNT):
+        seam = add_curve_loop(
+            f"Meridian Seam {index + 1:02d}",
+            great_circle_points(1.171, math.radians(index * SEAM_SPACING_DEGREES)),
+            0.019,
+            seam_material,
         )
-        rib_materials.append(material)
-        rib = add_curve_loop(
-            f"Meridian Rib {index + 1:02d}",
-            great_circle_points(1.468, math.radians(index * 30.0)),
-            0.018,
-            material,
-        )
-        rib.parent = root
+        seam.parent = root
 
-    accent_material = principled_material(
-        "Latitude Glow",
-        (0.002, 0.05, 0.08, 1.0),
-        metallic=0.3,
-        roughness=0.18,
-        emission_color=(0.0, 0.42, 0.82, 1.0),
-        emission_strength=0.28,
-    )
-    for index, z in enumerate((-0.64, 0.0, 0.64), start=1):
-        radius = math.sqrt(max(0.0, 1.468 * 1.468 - z * z))
-        latitude = add_curve_loop(f"Latitude {index:02d}", circle_points(radius, z), 0.012, accent_material)
-        latitude.parent = root
-
-    marker_root = bpy.data.objects.new("Marker Root", None)
-    bpy.context.collection.objects.link(marker_root)
-    marker_root.parent = root
-    for index in range(12):
-        angle = math.tau * index / 12
-        bpy.ops.mesh.primitive_uv_sphere_add(
-            segments=24,
-            ring_count=16,
-            radius=0.065,
-            location=(0.56 * math.cos(angle), 0.56 * math.sin(angle), 0.08 * math.sin(angle * 2)),
-        )
-        marker = bpy.context.object
-        marker.name = f"Inner Marker {index + 1:02d}"
-        marker.data.materials.append(marker_material)
-        marker.parent = marker_root
-
-    bpy.ops.mesh.primitive_plane_add(size=24.0, location=(0.0, 0.0, -1.62))
+    bpy.ops.mesh.primitive_plane_add(size=24.0, location=(0.0, 0.0, -1.34))
     floor = bpy.context.object
     floor.name = "Ground Plane"
     floor.data.materials.append(floor_material)
 
-    bpy.ops.object.camera_add(location=(0.0, -7.7, 0.55))
+    bpy.ops.object.camera_add(location=(0.0, -6.4, 0.34))
     camera = bpy.context.object
-    camera.name = "Orb Camera"
+    camera.name = "Calibration Camera"
     camera.data.lens = 58
     camera.data.sensor_width = 36
-    point_at(camera, (0.0, 0.0, 0.0))
+    point_at(camera, (0.0, 0.0, -0.02))
     scene.camera = camera
 
-    add_area_light("Key", (-3.8, -4.2, 5.4), 1050.0, (0.28, 0.58, 1.0), 4.2)
-    add_area_light("Rim", (4.1, 0.5, 3.0), 1280.0, (0.0, 0.34, 1.0), 3.1)
-    add_area_light("Top", (0.0, 1.0, 6.5), 850.0, (0.22, 0.72, 1.0), 3.2)
-    add_area_light("Softbox", (0.0, -4.6, -0.4), 420.0, (0.3, 0.55, 1.0), 2.0)
+    add_area_light("Key", (-3.8, -4.0, 4.8), 920.0, (0.48, 0.68, 1.0), 4.6)
+    add_area_light("Rim", (3.7, 0.2, 2.6), 1150.0, (0.0, 0.40, 1.0), 3.4)
+    add_area_light("Top", (0.0, 1.5, 5.8), 620.0, (0.28, 0.65, 1.0), 3.8)
+    add_area_light("Front Fill", (0.0, -4.2, -0.3), 260.0, (0.35, 0.55, 0.85), 3.0)
 
     return {
         "root": root,
-        "marker_root": marker_root,
-        "core_material": core_material,
         "shell_material": shell_material,
-        "marker_material": marker_material,
-        "rib_materials": rib_materials,
-        "accent_material": accent_material,
+        "seam_material": seam_material,
     }
 
 
-def shader(material: bpy.types.Material) -> bpy.types.Node:
-    return material.node_tree.nodes["Principled BSDF"]
+def set_visual_values(objects: dict[str, object], energy: float) -> None:
+    shell_shader = shader(objects["shell_material"])
+    shell_shader.inputs["Base Color"].default_value = energy_ramp(
+        energy,
+        (0.002, 0.004, 0.006, 1.0),
+        (0.014, 0.027, 0.040, 1.0),
+        (0.020, 0.085, 0.145, 1.0),
+    )
+    shell_shader.inputs["Emission Strength"].default_value = energy_ramp(energy, 0.0, 0.16, 0.82)
+
+    seam_shader = shader(objects["seam_material"])
+    seam_shader.inputs["Base Color"].default_value = energy_ramp(
+        energy,
+        (0.001, 0.003, 0.005, 1.0),
+        (0.006, 0.16, 0.25, 1.0),
+        (0.035, 0.46, 0.72, 1.0),
+    )
+    seam_shader.inputs["Emission Strength"].default_value = energy_ramp(energy, 0.0, 1.15, 5.4)
 
 
-def pose_for_frame(frame: float) -> tuple[float, float, float, float]:
-    if frame < 24.0:
-        t = max(0.0, frame) / 23.0
-        angle = (-2 * t**3 + 3 * t**2) * 165.0 + (t**3 - t**2) * 345.0
-        energy = mix(0.0, 0.22, smoothstep(t))
-        return angle, energy, 0.0, t
-    if frame < 48.0:
-        local = frame - 24.0
-        return local * 15.0, 0.2 + 0.025 * math.sin(math.tau * local / 24.0), 0.0, 1.0
-    if frame < 60.0:
-        local = frame - 48.0
-        progress = smoothstep((local + 1.0) / 12.0)
-        return local * 15.0, mix(0.22, 1.0, progress), progress, 1.0
-    if frame < 84.0:
-        local = frame - 60.0
-        energy = 0.9 + 0.1 * math.cos(math.tau * local / 24.0)
-        return local * 15.0, energy, 1.0, 1.0
-    local = frame - 84.0
-    progress = smoothstep((local + 1.0) / 12.0)
-    return local * 15.0, mix(1.0, 0.22, progress), 1.0 - progress, 1.0
+def bake_animation(objects: dict[str, object]) -> None:
+    root = objects["root"]
+    shell_shader = shader(objects["shell_material"])
+    seam_shader = shader(objects["seam_material"])
 
+    for frame in range(FRAME_START - 1, FRAME_END + 2):
+        pose = pose_for_frame(frame)
+        root.rotation_euler.z = math.radians(pose.angle_degrees)
+        root.keyframe_insert(data_path="rotation_euler", index=2, frame=frame)
+        set_visual_values(objects, pose.energy)
+        shell_shader.inputs["Base Color"].keyframe_insert(data_path="default_value", frame=frame)
+        shell_shader.inputs["Emission Strength"].keyframe_insert(data_path="default_value", frame=frame)
+        seam_shader.inputs["Base Color"].keyframe_insert(data_path="default_value", frame=frame)
+        seam_shader.inputs["Emission Strength"].keyframe_insert(data_path="default_value", frame=frame)
 
-def install_animation_handler(objects: dict[str, object]) -> None:
-    def apply_pose(scene: bpy.types.Scene, _depsgraph: bpy.types.Depsgraph | None = None) -> None:
-        frame = scene.frame_current + scene.frame_subframe
-        angle, core_energy, marker_energy, intro_energy = pose_for_frame(frame)
-        root = objects["root"]
-        root.rotation_euler.z = math.radians(angle)
-        marker_root = objects["marker_root"]
-        marker_root.rotation_euler.z = math.radians(angle * 1.7)
-        marker_root.scale = (1.0 + marker_energy * 0.08,) * 3
+    animation_owners = (
+        root,
+        objects["shell_material"].node_tree,
+        objects["seam_material"].node_tree,
+    )
+    for owner in animation_owners:
+        action = owner.animation_data.action if owner.animation_data is not None else None
+        if action is None:
+            continue
+        for fcurve in action_fcurves(action):
+            for keyframe in fcurve.keyframe_points:
+                keyframe.interpolation = "LINEAR"
 
-        core_shader = shader(objects["core_material"])
-        core_shader.inputs["Emission Strength"].default_value = mix(0.18, 7.5, core_energy)
-        core_shader.inputs["Base Color"].default_value = (
-            mix(0.002, 0.01, core_energy),
-            mix(0.025, 0.16, core_energy),
-            mix(0.045, 0.34, core_energy),
-            1.0,
-        )
-        marker_shader = shader(objects["marker_material"])
-        marker_shader.inputs["Emission Strength"].default_value = marker_energy * 12.0
-
-        activation = max(0.0, min(1.0, (core_energy - 0.22) / 0.78))
-        shell_shader = shader(objects["shell_material"])
-        shell_shader.inputs["Emission Strength"].default_value = mix(0.03, 1.55, activation)
-        shell_shader.inputs["Base Color"].default_value = (
-            mix(0.012, 0.008, activation),
-            mix(0.02, 0.11, activation),
-            mix(0.028, 0.24, activation),
-            1.0,
-        )
-
-        for index, material in enumerate(objects["rib_materials"]):
-            charge = smoothstep((intro_energy * 7.5) - index)
-            strength = mix(0.08, 2.2, charge) + marker_energy * 1.8
-            shader(material).inputs["Emission Strength"].default_value = strength
-        shader(objects["accent_material"]).inputs["Emission Strength"].default_value = 0.35 + marker_energy * 2.2
-
-    bpy.app.handlers.frame_change_pre.clear()
-    bpy.app.handlers.frame_change_pre.append(apply_pose)
     bpy.context.scene.frame_set(FRAME_START)
-    apply_pose(bpy.context.scene)
+
+
+def action_fcurves(action: bpy.types.Action) -> list[bpy.types.FCurve]:
+    """Return curves from legacy actions and Blender 5 layered actions."""
+
+    if hasattr(action, "fcurves"):
+        return list(action.fcurves)
+    return [
+        fcurve
+        for layer in action.layers
+        for strip in layer.strips
+        for channelbag in strip.channelbags
+        for fcurve in channelbag.fcurves
+    ]
 
 
 def main() -> None:
     options = parse_args()
+    validate_timeline()
     FRAMES_DIR.mkdir(parents=True, exist_ok=True)
     objects = setup_scene()
-    install_animation_handler(objects)
+    bake_animation(objects)
+    bpy.context.preferences.filepaths.save_version = 0
     bpy.ops.wm.save_as_mainfile(filepath=str(BLEND_PATH))
 
     if options.smoke_frame is not None:

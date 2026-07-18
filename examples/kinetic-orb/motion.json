@@ -22,7 +22,7 @@
       "codec": "h264",
       "preset": "medium",
       "renditions": [
-        { "id": "video.1x", "width": 512, "height": 512, "crf": 20 }
+        { "id": "video.1x", "width": 512, "height": 512, "crf": 16 }
       ]
     }
   ],
@@ -43,7 +43,7 @@
         {
           "id": "default",
           "entryFrame": 0,
-          "portalFrames": [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23]
+          "portalFrames": [2, 5, 8, 11, 14, 17, 20, 23]
         }
       ]
     },
@@ -67,7 +67,7 @@
         {
           "id": "default",
           "entryFrame": 0,
-          "portalFrames": [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23]
+          "portalFrames": [2, 5, 8, 11, 14, 17, 20, 23]
         }
       ]
     },
@@ -99,7 +99,7 @@
         "type": "portal",
         "sourcePort": "default",
         "targetPort": "default",
-        "maxWaitFrames": 1
+        "maxWaitFrames": 2
       },
       "continuity": "exact-authored"
     },
@@ -136,7 +136,7 @@
         "type": "portal",
         "sourcePort": "default",
         "targetPort": "default",
-        "maxWaitFrames": 1
+        "maxWaitFrames": 2
       },
       "continuity": "exact-authored"
     },

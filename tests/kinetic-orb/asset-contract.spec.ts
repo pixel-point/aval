@@ -13,7 +13,10 @@ const HTML_PATH = resolve(EXAMPLE_PATH, "index.html");
 
 test("preserves the phase-locked H.264 graph", async () => {
   const project = JSON.parse(await readFile(PROJECT_PATH, "utf8")) as {
-    encodings: { codec: string }[];
+    encodings: {
+      codec: string;
+      renditions: { id: string; width: number; height: number; crf: number }[];
+    }[];
     units: {
       id: string;
       kind: "one-shot" | "body";
@@ -54,12 +57,19 @@ test("preserves the phase-locked H.264 graph", async () => {
       integrity: string;
       sha256: string;
     }[];
+    encodings: {
+      codec: string;
+      renditions: { id: string; width: number; height: number; crf: number }[];
+    }[];
   };
   const bytes = await readFile(ASSET_PATH);
   const html = await readFile(HTML_PATH, "utf8");
   const front = parseFrontIndex(bytes);
 
   expect(project.encodings.map(({ codec }) => codec)).toEqual(["h264"]);
+  expect(project.encodings[0]?.renditions).toEqual([
+    { id: "video.1x", width: 512, height: 512, crf: 16 }
+  ]);
   expect(project.units.map(({ id, range }) => ({ id, range }))).toEqual([
     { id: "intro", range: [0, 24] },
     { id: "idle-loop", range: [24, 48] },
@@ -68,7 +78,7 @@ test("preserves the phase-locked H.264 graph", async () => {
     { id: "hover-out", range: [84, 96] }
   ]);
 
-  const densePortals = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23];
+  const densePortals = [2, 5, 8, 11, 14, 17, 20, 23];
   expect(project.units.find(({ id }) => id === "idle-loop")?.ports?.[0]?.portalFrames)
     .toEqual(densePortals);
   expect(project.units.find(({ id }) => id === "hover-loop")?.ports?.[0]?.portalFrames)
@@ -77,12 +87,15 @@ test("preserves the phase-locked H.264 graph", async () => {
     .filter(({ start }) => start.type === "portal")
     .map(({ id, start }) => ({ id, wait: start.maxWaitFrames })))
     .toEqual([
-      { id: "idle.entering", wait: 1 },
-      { id: "hover.exiting", wait: 1 }
+      { id: "idle.entering", wait: 2 },
+      { id: "hover.exiting", wait: 2 }
     ]);
 
   expect(report.assets).toHaveLength(1);
   expect(report.assets[0]).toMatchObject({ codec: "h264", path: "h264.avl" });
+  expect(report.encodings[0]?.renditions).toEqual([
+    { id: "video.1x", width: 512, height: 512, crf: 16 }
+  ]);
   expect(report.assets[0]?.bytes).toBe(bytes.byteLength);
   const digest = createHash("sha256").update(bytes).digest();
   expect(report.assets[0]?.sha256).toBe(digest.toString("hex"));
