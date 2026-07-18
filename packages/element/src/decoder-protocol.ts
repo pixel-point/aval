@@ -3,6 +3,7 @@ import {
   isDecoderFailureDiagnostic,
   type DecoderFailureDiagnostic
 } from "./decoder-diagnostics.js";
+import { isPlainRecord } from "./plain-record.js";
 
 export const DECODER_RING_SIZE = 12 as const;
 
@@ -136,15 +137,7 @@ function validRun(value: unknown): value is number {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  try {
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
-  } catch {
-    return false;
-  }
+  return isPlainRecord(value);
 }
 
 function hasExactKeys(

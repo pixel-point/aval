@@ -164,7 +164,7 @@ test("decoder limits and accounting follow the captured window across adoption",
 }) => {
   test.skip(
     browserName !== "chromium",
-    "requires WebCodecs animation and active decoder leases; Firefox/WebKit correctly use static fallback"
+    "requires WebCodecs animation and active decoder leases"
   );
   test.setTimeout(90_000);
   await loadDefinition(page, "decoder-realm-adoption", true);
@@ -206,6 +206,20 @@ test("decoder limits and accounting follow the captured window across adoption",
         }
       };
     };
+    const prepare = async (player: AvalPlayerElement, stage: string) => {
+      try {
+        await player.prepare({ timeoutMs: 30_000 });
+      } catch (error) {
+        const failure = error instanceof Error && "failure" in error
+          ? (error as Error & { readonly failure: unknown }).failure
+          : null;
+        throw new Error(`${stage}: ${JSON.stringify({
+          name: error instanceof Error ? error.name : typeof error,
+          failure,
+          diagnostics: player.getDiagnostics()
+        })}`);
+      }
+    };
 
     const frame = document.createElement("iframe");
     frame.style.cssText =
@@ -215,7 +229,7 @@ test("decoder limits and accounting follow the captured window across adoption",
 
     const adopted = createPlayer();
     document.body.append(adopted);
-    await adopted.prepare({ timeoutMs: 30_000 });
+    await prepare(adopted, "before-adoption");
     const beforeAdoption = {
       main: snapshot(main),
       adopted: snapshot(adopted)
@@ -224,7 +238,7 @@ test("decoder limits and accounting follow the captured window across adoption",
     secondDocument.adoptNode(adopted);
     secondDocument.body.append(adopted);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    await adopted.prepare({ timeoutMs: 30_000 });
+    await prepare(adopted, "after-adoption");
     const afterAdoption = {
       main: snapshot(main),
       adopted: snapshot(adopted)
@@ -232,7 +246,7 @@ test("decoder limits and accounting follow the captured window across adoption",
 
     const secondInFirstWindow = createPlayer();
     document.body.append(secondInFirstWindow);
-    await secondInFirstWindow.prepare({ timeoutMs: 30_000 });
+    await prepare(secondInFirstWindow, "independent-claim");
     const afterIndependentClaim = {
       main: snapshot(main),
       adopted: snapshot(adopted),
@@ -254,22 +268,29 @@ test("decoder limits and accounting follow the captured window across adoption",
     localLease: 1,
     decoderState: "granted"
   };
+  const queued = {
+    readiness: "staticReady",
+    mode: "static",
+    staticReason: "decoder-queued",
+    localLease: 0,
+    decoderState: "queued"
+  };
   expect(result).toMatchObject({
     beforeAdoption: {
-      main: { ...active, page: { participants: 2, active: 2, queued: 0 } },
-      adopted: { ...active, page: { participants: 2, active: 2, queued: 0 } }
+      main: { ...active, page: { participants: 2, active: 2, queued: 1 } },
+      adopted: { ...queued, page: { participants: 2, active: 2, queued: 1 } }
     },
     afterAdoption: {
-      main: { ...active, page: { participants: 1, active: 1, queued: 0 } },
-      adopted: { ...active, page: { participants: 1, active: 1, queued: 0 } }
+      main: { ...active, page: { participants: 1, active: 2, queued: 0 } },
+      adopted: { ...active, page: { participants: 1, active: 2, queued: 0 } }
     },
     afterIndependentClaim: {
-      main: { ...active, page: { participants: 2, active: 2, queued: 0 } },
+      main: { ...active, page: { participants: 2, active: 2, queued: 1 } },
       secondInFirstWindow: {
-        ...active,
-        page: { participants: 2, active: 2, queued: 0 }
+        ...queued,
+        page: { participants: 2, active: 2, queued: 1 }
       },
-      adopted: { ...active, page: { participants: 1, active: 1, queued: 0 } }
+      adopted: { ...active, page: { participants: 1, active: 2, queued: 0 } }
     }
   });
 });

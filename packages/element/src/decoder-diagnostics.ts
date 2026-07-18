@@ -1,3 +1,5 @@
+import { isPlainRecord } from "./plain-record.js";
+
 export type DecoderDiagnosticPhase =
   | "probe"
   | "configure"
@@ -329,15 +331,7 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  try {
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
-  } catch {
-    return false;
-  }
+  return isPlainRecord(value);
 }
 
 function hasExactKeys(

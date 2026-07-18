@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -18,6 +19,27 @@ afterEach(() => {
 });
 
 describe("decoder worker protocol", () => {
+  it("accepts plain structured records delivered from another realm", () => {
+    class Frame {}
+    const VideoFrameConstructor = Frame as unknown as typeof VideoFrame;
+    const configured = runInNewContext("({ t: 'configured', supported: true })");
+    const diagnostic = runInNewContext(`({
+      phase: 'probe',
+      code: 'unsupported-config',
+      run: null,
+      decodeOrdinal: null,
+      exception: { name: 'NotSupportedError', message: 'unsupported' },
+      firstFrame: null
+    })`);
+
+    expect(isDecoderWorkerEvent(configured, VideoFrameConstructor)).toBe(true);
+    expect(isDecoderFailureDiagnostic(diagnostic)).toBe(true);
+    expect(isDecoderWorkerEvent(
+      runInNewContext("({ t: 'error', diagnostic })", { diagnostic }),
+      VideoFrameConstructor
+    )).toBe(true);
+  });
+
   it("accepts only exact command and event shapes", () => {
     class Frame {}
     const VideoFrameConstructor = Frame as unknown as typeof VideoFrame;
