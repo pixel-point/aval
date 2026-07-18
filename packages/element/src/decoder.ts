@@ -6,6 +6,14 @@ import {
   type DecoderRunEvent
 } from "./decoder-protocol.js";
 import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
+import {
+  captureDecoderFrameMetadata,
+  createDecoderFailureDiagnostic,
+  type DecoderDiagnosticCode,
+  type DecoderDiagnosticPhase,
+  type DecoderFailureDiagnostic,
+  type DecoderFrameMetadata
+} from "./decoder-diagnostics.js";
 
 export interface DecodeSample {
   readonly data: ArrayBuffer;
@@ -44,6 +52,13 @@ export interface DecoderLimits {
   readonly clearTimeout?: (handle: number) => void;
 }
 
+export interface DecoderSnapshot {
+  readonly workerCount: number;
+  readonly openFrames: number;
+  readonly openFrameBytes: number;
+  readonly diagnostic: Readonly<DecoderFailureDiagnostic> | null;
+}
+
 const PROGRESS_MS = 2_000;
 const MAX_BYTES = Number.MAX_SAFE_INTEGER;
 
@@ -73,6 +88,7 @@ export class Decoder {
   #configured = false;
   #disposed = false;
   #error: Error | undefined;
+  #diagnostic: Readonly<DecoderFailureDiagnostic> | null = null;
 
   public constructor(
     config: Readonly<VideoDecoderConfig>,
@@ -110,12 +126,27 @@ export class Decoder {
     this.#worker.addEventListener("message", (event: MessageEvent<unknown>) => {
       this.#receive(event.data);
     });
-    this.#worker.addEventListener("error", () => this.#fail());
-    this.#worker.addEventListener("messageerror", () => this.#fail());
+    this.#worker.addEventListener("error", (event) => {
+      const reason = workerErrorReason(event);
+      this.#fail(reason, this.#localDiagnostic(
+        "frame-transfer",
+        "transport",
+        reason
+      ));
+    });
+    this.#worker.addEventListener("messageerror", () => {
+      const reason = new Error("AVAL decoder message transport failed");
+      this.#fail(reason, this.#localDiagnostic(
+        "frame-transfer",
+        "transport",
+        reason
+      ));
+    });
     try {
       this.#post({ t: "configure", config: { ...config } });
-    } catch {
-      this.#fail();
+    } catch (reason) {
+      const error = asError(reason, "AVAL decoder configuration transport failed");
+      this.#fail(error, this.#localDiagnostic("probe", "transport", reason));
     }
     void this.#support.promise.catch(() => undefined);
     void this.#failure.promise.catch(() => undefined);
@@ -156,7 +187,7 @@ export class Decoder {
       (bytes) => this.#claimDecodedBytes(bytes),
       (bytes) => this.#releaseDecodedBytes(bytes),
       () => this.#closeRun(run),
-      (error) => this.#fail(error),
+      (error, diagnostic) => this.#fail(error, diagnostic),
       this.#setTimeout,
       this.#clearTimeout
     );
@@ -175,21 +206,24 @@ export class Decoder {
     run.activate();
     try {
       this.#post({ t: "start", run: run.generation });
-    } catch {
-      this.#fail();
+    } catch (reason) {
+      const error = asError(reason, "AVAL decoder start transport failed");
+      this.#fail(error, this.#localDiagnostic(
+        "configure",
+        "transport",
+        reason,
+        run.generation
+      ));
     }
     return run;
   }
 
-  public snapshot(): Readonly<{
-    workerCount: number;
-    openFrames: number;
-    openFrameBytes: number;
-  }> {
+  public snapshot(): Readonly<DecoderSnapshot> {
     return Object.freeze({
       workerCount: this.#disposed || this.#error !== undefined ? 0 : 1,
       openFrames: this.#run?.openFrames ?? 0,
-      openFrameBytes: this.#decodedBytes
+      openFrameBytes: this.#decodedBytes,
+      diagnostic: this.#diagnostic
     });
   }
 
@@ -220,24 +254,39 @@ export class Decoder {
     }
     if (!isDecoderWorkerEvent(value, this.#VideoFrame)) {
       closeTransferredFrame(value, this.#VideoFrame);
-      this.#fail();
+      const reason = new Error("AVAL decoder received an invalid worker message");
+      this.#fail(reason, this.#localDiagnostic(
+        "frame-transfer",
+        "transport",
+        reason
+      ));
       return;
     }
     if (value.t === "configured") {
       if (this.#configured) {
-        this.#fail();
+        const reason = new Error("AVAL decoder was configured more than once");
+        this.#fail(reason, this.#localDiagnostic(
+          "configure",
+          "decoder-operation",
+          reason
+        ));
         return;
       }
       this.#configured = value.supported;
       this.#support.resolve(value.supported);
       if (!value.supported) {
-        this.#fail(new Error("AVAL decoder configuration is unsupported"));
+        const reason = new Error("AVAL decoder configuration is unsupported");
+        this.#fail(reason, this.#localDiagnostic(
+          "probe",
+          "unsupported-config",
+          reason
+        ));
         return;
       }
       return;
     }
     if (value.t === "error") {
-      this.#fail();
+      this.#fail(new Error("AVAL decoder failed"), value.diagnostic);
       return;
     }
     this.#receiveRun(value);
@@ -276,18 +325,39 @@ export class Decoder {
     }
     if (lane.phase === "retained") {
       if (event.t === "frame") event.frame.close();
-      this.#fail();
+      const reason = new Error("AVAL decoder emitted after flush");
+      this.#fail(reason, this.#runDiagnostic(
+        "output-validation",
+        "invalid-output",
+        reason,
+        lane.run,
+        event
+      ));
       return;
     }
     if (event.t === "closed") {
-      this.#fail();
+      const reason = new Error("AVAL decoder closed an active run");
+      this.#fail(reason, this.#runDiagnostic(
+        "decode",
+        "decoder-operation",
+        reason,
+        lane.run,
+        event
+      ));
       return;
     }
     try {
       lane.run.receive(event);
     } catch (error) {
       if (event.t === "frame") event.frame.close();
-      this.#fail(error instanceof Error ? error : undefined);
+      const reason = asError(error, "AVAL decoder run failed");
+      this.#fail(reason, this.#runDiagnostic(
+        "decode",
+        "decoder-operation",
+        error,
+        lane.run,
+        event
+      ));
       return;
     }
     if (event.t === "flushed") this.#retain(lane.run);
@@ -296,12 +366,24 @@ export class Decoder {
   #receiveStale(event: DecoderRunEvent): void {
     if (isDecoderTerminalEvent(event)) return;
     if (event.t === "frame") event.frame.close();
-    this.#fail();
+    const reason = new Error("AVAL decoder emitted a stale run event");
+    this.#fail(reason, this.#localDiagnostic(
+      "frame-transfer",
+      "transport",
+      reason,
+      event.run
+    ));
   }
 
   #rejectRunEvent(event: DecoderRunEvent): void {
     if (event.t === "frame") event.frame.close();
-    this.#fail();
+    const reason = new Error("AVAL decoder emitted an unexpected run event");
+    this.#fail(reason, this.#localDiagnostic(
+      "frame-transfer",
+      "transport",
+      reason,
+      event.run
+    ));
   }
 
   #settleClosed(run: DecodeRun): void {
@@ -341,8 +423,14 @@ export class Decoder {
     this.#lane = { phase: "closing", run };
     try {
       this.#post({ t: "close", run: run.generation });
-    } catch {
-      this.#fail();
+    } catch (reason) {
+      const error = asError(reason, "AVAL decoder close transport failed");
+      this.#fail(error, this.#localDiagnostic(
+        "flush",
+        "transport",
+        reason,
+        run.generation
+      ));
     }
   }
 
@@ -378,14 +466,24 @@ export class Decoder {
 
   #releaseDecodedBytes(bytes: number): void {
     if (bytes > this.#decodedBytes) {
-      this.#fail(new Error("AVAL decoded surface accounting failed"));
+      const reason = new Error("AVAL decoded surface accounting failed");
+      this.#fail(reason, this.#localDiagnostic(
+        "decode",
+        "decoder-operation",
+        reason
+      ));
       return;
     }
     this.#decodedBytes -= bytes;
     try {
       this.#onDecodedBytes?.(this.#decodedBytes);
     } catch (error) {
-      this.#fail(error instanceof Error ? error : new Error("decoded byte observer failed"));
+      const reason = asError(error, "decoded byte observer failed");
+      this.#fail(reason, this.#localDiagnostic(
+        "decode",
+        "decoder-operation",
+        error
+      ));
     }
   }
 
@@ -395,13 +493,61 @@ export class Decoder {
     this.#encodedBytes -= run.encodedBytes;
     try { this.#onEncodedBytes?.(this.#encodedBytes); }
     catch (error) {
-      this.#fail(error instanceof Error ? error : new Error("encoded byte observer failed"));
+      const reason = asError(error, "encoded byte observer failed");
+      this.#fail(reason, this.#localDiagnostic(
+        "decode",
+        "decoder-operation",
+        error
+      ));
     }
   }
 
-  #fail(error = new Error("AVAL decoder failed")): void {
+  #localDiagnostic(
+    phase: DecoderDiagnosticPhase,
+    code: DecoderDiagnosticCode,
+    reason: unknown,
+    run = this.#run?.generation ?? null,
+    decodeOrdinal: number | null = null,
+    firstFrame = this.#run?.diagnosticFirstFrame ?? null
+  ): Readonly<DecoderFailureDiagnostic> {
+    return createDecoderFailureDiagnostic({
+      phase,
+      code,
+      reason,
+      run,
+      decodeOrdinal,
+      firstFrame
+    });
+  }
+
+  #runDiagnostic(
+    phase: DecoderDiagnosticPhase,
+    code: DecoderDiagnosticCode,
+    reason: unknown,
+    run: DecodeRun,
+    event: DecoderRunEvent
+  ): Readonly<DecoderFailureDiagnostic> {
+    return createDecoderFailureDiagnostic({
+      phase,
+      code,
+      reason,
+      run: run.generation,
+      decodeOrdinal: event.t === "frame" ? run.ordinal(event.timestamp) : null,
+      firstFrame: run.diagnosticFirstFrame
+    });
+  }
+
+  #fail(
+    error = new Error("AVAL decoder failed"),
+    diagnostic = this.#localDiagnostic(
+      "decode",
+      "decoder-operation",
+      error
+    )
+  ): void {
     if (this.#disposed || this.#error !== undefined) return;
     this.#error = error;
+    this.#diagnostic = diagnostic;
     this.#failure.reject(error);
     this.#support.reject(error);
     const run = this.#run;
@@ -422,7 +568,10 @@ export class DecodeRun {
   readonly #claimBytes: (bytes: number) => void;
   readonly #releaseBytes: (bytes: number) => void;
   readonly #retire: () => void;
-  readonly #fatal: (error?: Error) => void;
+  readonly #fatal: (
+    error: Error,
+    diagnostic: Readonly<DecoderFailureDiagnostic>
+  ) => void;
   readonly #setTimeout: (callback: () => void, delay: number) => number;
   readonly #clearTimeout: (handle: number) => void;
   readonly #frames = new Map<number, VideoFrame>();
@@ -449,6 +598,7 @@ export class DecodeRun {
   #closed = false;
   #error: Error | undefined;
   #progressTimer: number | undefined;
+  #firstFrame: Readonly<DecoderFrameMetadata> | null = null;
 
   public readonly frameCount: number;
   public readonly encodedBytes: number;
@@ -463,7 +613,10 @@ export class DecodeRun {
     claimBytes: (bytes: number) => void,
     releaseBytes: (bytes: number) => void,
     retire: () => void,
-    fatal: (error?: Error) => void,
+    fatal: (
+      error: Error,
+      diagnostic: Readonly<DecoderFailureDiagnostic>
+    ) => void,
     setTimeout: (callback: () => void, delay: number) => number,
     clearTimeout: (handle: number) => void
   ) {
@@ -519,6 +672,13 @@ export class DecodeRun {
   public get openFrames(): number { return this.#frames.size + this.#leased.size; }
   public get outstanding(): number { return this.#outstanding; }
   public get closed(): boolean { return this.#closed; }
+  public get diagnosticFirstFrame(): Readonly<DecoderFrameMetadata> | null {
+    return this.#firstFrame;
+  }
+
+  public ordinal(timestamp: number): number | null {
+    return this.#outputs.get(timestamp)?.index ?? null;
+  }
 
   public activate(): void {
     if (this.#activated || this.#closed) return;
@@ -532,14 +692,26 @@ export class DecodeRun {
       return;
     }
     if (event.t === "started") {
-      if (this.#started) throw new Error("duplicate decoder start");
+      if (this.#started) {
+        this.#failOperation(
+          new Error("duplicate decoder start"),
+          "configure",
+          "decoder-operation"
+        );
+      }
       this.#started = true;
       this.pump();
       this.#updateProgressWatchdog(true);
       return;
     }
     if (event.t === "accepted") {
-      if (!this.#batchInFlight) throw new Error("unexpected decoder acceptance");
+      if (!this.#batchInFlight) {
+        this.#failOperation(
+          new Error("unexpected decoder acceptance"),
+          "decode",
+          "decoder-operation"
+        );
+      }
       this.#batchInFlight = false;
       this.pump();
       this.#updateProgressWatchdog(true);
@@ -551,7 +723,13 @@ export class DecodeRun {
         this.#batchInFlight ||
         this.#nextSample !== this.#samples.length ||
         this.#received !== this.frameCount
-      ) throw new Error("AVAL decoder output is incomplete");
+      ) {
+        this.#failOperation(
+          new Error("AVAL decoder output is incomplete"),
+          "output-validation",
+          "invalid-output"
+        );
+      }
       this.#flushed = true;
       this.#clearProgressWatchdog();
       this.#wake();
@@ -561,6 +739,8 @@ export class DecodeRun {
       this.#clearProgressWatchdog();
       return;
     }
+    const frameMetadata = captureFrameMetadata(event.frame);
+    this.#firstFrame ??= frameMetadata;
     const expected = this.#outputs.get(event.timestamp);
     if (
       expected === undefined ||
@@ -568,16 +748,47 @@ export class DecodeRun {
       this.#outstanding < 1 ||
       this.#seen.has(event.timestamp)
     ) {
-      throw new Error("AVAL decoder returned an unknown frame");
+      this.#failOperation(
+        new Error("AVAL decoder returned an unknown frame"),
+        "output-validation",
+        "invalid-output",
+        expected?.index ?? null
+      );
     }
-    const frameBytes = validateFrame(
-      event.frame,
-      event.timestamp,
-      expected.duration,
-      this.#expectation
-    );
-    if (this.#frames.has(expected.index)) throw new Error("duplicate decoded frame");
-    this.#claimBytes(frameBytes);
+    let frameBytes: number;
+    try {
+      frameBytes = validateFrame(
+        event.frame,
+        event.timestamp,
+        expected.duration,
+        this.#expectation
+      );
+    } catch (reason) {
+      this.#failOperation(
+        asError(reason, "AVAL decoder returned an invalid frame"),
+        "output-validation",
+        "invalid-output",
+        expected.index
+      );
+    }
+    if (this.#frames.has(expected.index)) {
+      this.#failOperation(
+        new Error("duplicate decoded frame"),
+        "output-validation",
+        "invalid-output",
+        expected.index
+      );
+    }
+    try {
+      this.#claimBytes(frameBytes);
+    } catch (reason) {
+      this.#failOperation(
+        asError(reason, "AVAL decoder could not retain an output frame"),
+        "decode",
+        "decoder-operation",
+        expected.index
+      );
+    }
     try {
       this.#seen.add(event.timestamp);
       this.#frames.set(expected.index, event.frame);
@@ -698,10 +909,16 @@ export class DecodeRun {
       this.#batchInFlight = true;
       try {
         this.#post({ t: "decode", run: this.#id, chunks }, transfer);
-      } catch {
+      } catch (reason) {
         this.#batchInFlight = false;
         this.#outstanding -= reserved;
-        this.#fatal();
+        const error = asError(reason, "AVAL decoder chunk transport failed");
+        this.#fatal(error, this.#diagnostic(
+          "frame-transfer",
+          "transport",
+          reason,
+          this.#nextOutputOrdinal()
+        ));
       }
       this.#updateProgressWatchdog(true);
       return;
@@ -710,8 +927,14 @@ export class DecodeRun {
       this.#flushSent = true;
       try {
         this.#post({ t: "flush", run: this.#id });
-      } catch {
-        this.#fatal();
+      } catch (reason) {
+        const error = asError(reason, "AVAL decoder flush transport failed");
+        this.#fatal(error, this.#diagnostic(
+          "frame-transfer",
+          "transport",
+          reason,
+          null
+        ));
       }
       this.#updateProgressWatchdog(true);
       return;
@@ -762,7 +985,13 @@ export class DecodeRun {
     this.#clearProgressWatchdog();
     this.#progressTimer = this.#setTimeout(() => {
       this.#progressTimer = undefined;
-      this.#fatal(decodeTimeout());
+      const error = decodeTimeout();
+      this.#fatal(error, this.#diagnostic(
+        this.#flushSent ? "flush" : "decode",
+        "watchdog-timeout",
+        error,
+        this.#nextOutputOrdinal()
+      ));
     }, PROGRESS_MS);
   }
 
@@ -774,6 +1003,44 @@ export class DecodeRun {
   #wake(): void {
     for (const resolve of this.#waiters) resolve();
     this.#waiters.clear();
+  }
+
+  #nextOutputOrdinal(): number | null {
+    for (const [timestamp, output] of this.#outputs) {
+      if (!this.#seen.has(timestamp)) return output.index;
+    }
+    return null;
+  }
+
+  #diagnostic(
+    phase: DecoderDiagnosticPhase,
+    code: DecoderDiagnosticCode,
+    reason: unknown,
+    decodeOrdinal: number | null
+  ): Readonly<DecoderFailureDiagnostic> {
+    return createDecoderFailureDiagnostic({
+      phase,
+      code,
+      reason,
+      run: this.#id,
+      decodeOrdinal,
+      firstFrame: this.#firstFrame
+    });
+  }
+
+  #failOperation(
+    error: Error,
+    phase: DecoderDiagnosticPhase,
+    code: DecoderDiagnosticCode,
+    decodeOrdinal: number | null = null
+  ): never {
+    this.#fatal(error, this.#diagnostic(
+      phase,
+      code,
+      error,
+      decodeOrdinal
+    ));
+    throw error;
   }
 }
 
@@ -934,6 +1201,27 @@ function closeTransferredFrame(
     "frame" in value &&
     value.frame instanceof VideoFrameConstructor
   ) value.frame.close();
+}
+
+function captureFrameMetadata(
+  frame: VideoFrame
+): Readonly<DecoderFrameMetadata> | null {
+  try { return captureDecoderFrameMetadata(frame); }
+  catch { return null; }
+}
+
+function workerErrorReason(event: Event): Error {
+  try {
+    if ("error" in event && event.error instanceof Error) return event.error;
+    if ("message" in event && typeof event.message === "string") {
+      return new Error(event.message || "AVAL decoder worker failed");
+    }
+  } catch { /* use stable terminal reason */ }
+  return new Error("AVAL decoder worker failed");
+}
+
+function asError(reason: unknown, message: string): Error {
+  return reason instanceof Error ? reason : new Error(message);
 }
 
 function deferred<T>(): Readonly<{

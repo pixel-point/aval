@@ -2,6 +2,7 @@ import type {
   AvalElement,
   AvalElementAttributes,
   AvalElementEventMap,
+  AvalDecoderDiagnostic,
   AvalErrorDetail,
   AvalFit,
   AvalPublicFailure,
@@ -19,6 +20,7 @@ declare const detail: Readonly<AvalErrorDetail>;
 declare const readinessDetail: Readonly<AvalReadinessChangeDetail>;
 declare const playbackError: AvalPlaybackError;
 declare const events: AvalElementEventMap;
+declare const decoderDiagnostic: Readonly<AvalDecoderDiagnostic>;
 
 const decoderWorkers: 2 = ELEMENT_DECODER_CAPACITY.workerCount;
 void decoderWorkers;
@@ -34,6 +36,12 @@ element.readyFor("author.state");
 element.pause();
 void element.resume();
 element.getDiagnostics({ trace: true });
+const diagnostics = element.getDiagnostics();
+const retainedDecoderDiagnostics: readonly Readonly<AvalDecoderDiagnostic>[] =
+  diagnostics.runtime.decoderDiagnostics;
+void retainedDecoderDiagnostics;
+void decoderDiagnostic.sourceGeneration;
+void decoderDiagnostic.exception?.message;
 
 const attributes: AvalElementAttributes = {
   motion: "reduce",
@@ -93,6 +101,10 @@ playbackError.generation = 9;
 playbackError.failure.code = "renderer-failure";
 // @ts-expect-error public failure operation is immutable
 playbackError.failure.operation = null;
+// @ts-expect-error decoder diagnostics are immutable
+decoderDiagnostic.sourceGeneration = 7;
+// @ts-expect-error nested decoder exception evidence is immutable
+decoderDiagnostic.exception!.message = "forged";
 // @ts-expect-error fit is closed
 const badFit: AvalFit = "scale-down";
 void badFit;

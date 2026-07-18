@@ -255,6 +255,55 @@ export interface AvalDiagnosticsCounters {
   readonly cleanup: number;
 }
 
+/** Bounded, byte-free evidence for the first terminal failure on one decoder lane. */
+export interface AvalDecoderDiagnostic {
+  readonly sourceGeneration: number;
+  readonly sourceIndex: number;
+  readonly rendition: string;
+  readonly codec: string;
+  readonly unit: string | null;
+  readonly lane: 0 | 1;
+  readonly phase:
+    | "probe"
+    | "configure"
+    | "decode"
+    | "flush"
+    | "output-validation"
+    | "frame-transfer";
+  readonly code:
+    | "unsupported-config"
+    | "decoder-operation"
+    | "invalid-output"
+    | "transport"
+    | "watchdog-timeout";
+  readonly run: number | null;
+  readonly decodeOrdinal: number | null;
+  readonly exception: Readonly<{
+    readonly name: string;
+    readonly message: string;
+  }> | null;
+  readonly firstFrame: Readonly<{
+    readonly timestamp: number;
+    readonly duration: number | null;
+    readonly codedWidth: number;
+    readonly codedHeight: number;
+    readonly displayWidth: number;
+    readonly displayHeight: number;
+    readonly visibleRect: Readonly<{
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    }> | null;
+    readonly colorSpace: readonly [
+      primaries: string | null,
+      transfer: string | null,
+      matrix: string | null,
+      fullRange: boolean | null
+    ] | null;
+  }> | null;
+}
+
 /**
  * Immutable terminal ownership proof for the most recently retired source.
  * Participant-scoped fields must reach zero even when other elements still
@@ -368,6 +417,7 @@ export interface AvalDiagnostics {
     contextLossCount: number;
     contextRecoveryCount: number;
     cleanupFailureCount: number;
+    decoderDiagnostics: readonly Readonly<AvalDecoderDiagnostic>[];
   }>;
   readonly motion: Readonly<{
     configured: AvalMotion;

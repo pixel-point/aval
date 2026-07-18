@@ -697,6 +697,7 @@ function playerSnapshot(live: boolean): Readonly<PlayerSnapshot> {
     openFrames: live ? 2 : 0,
     contextLossCount: 0,
     contextRecoveryCount: 0,
+    decoderDiagnostics: Object.freeze([]),
     presentation: Object.freeze({
       cssWidth: 16,
       cssHeight: 16,

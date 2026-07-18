@@ -83,6 +83,56 @@ export interface AvalCleanupReceipt {
 // @public (undocumented)
 export type AvalCrossOrigin = "anonymous" | "use-credentials";
 
+// @public
+export interface AvalDecoderDiagnostic {
+    // (undocumented)
+    readonly code: "unsupported-config" | "decoder-operation" | "invalid-output" | "transport" | "watchdog-timeout";
+    // (undocumented)
+    readonly codec: string;
+    // (undocumented)
+    readonly decodeOrdinal: number | null;
+    // (undocumented)
+    readonly exception: Readonly<{
+        readonly name: string;
+        readonly message: string;
+    }> | null;
+    // (undocumented)
+    readonly firstFrame: Readonly<{
+        readonly timestamp: number;
+        readonly duration: number | null;
+        readonly codedWidth: number;
+        readonly codedHeight: number;
+        readonly displayWidth: number;
+        readonly displayHeight: number;
+        readonly visibleRect: Readonly<{
+            readonly x: number;
+            readonly y: number;
+            readonly width: number;
+            readonly height: number;
+        }> | null;
+        readonly colorSpace: readonly [
+        primaries: string | null,
+        transfer: string | null,
+        matrix: string | null,
+        fullRange: boolean | null
+        ] | null;
+    }> | null;
+    // (undocumented)
+    readonly lane: 0 | 1;
+    // (undocumented)
+    readonly phase: "probe" | "configure" | "decode" | "flush" | "output-validation" | "frame-transfer";
+    // (undocumented)
+    readonly rendition: string;
+    // (undocumented)
+    readonly run: number | null;
+    // (undocumented)
+    readonly sourceGeneration: number;
+    // (undocumented)
+    readonly sourceIndex: number;
+    // (undocumented)
+    readonly unit: string | null;
+}
+
 // @public (undocumented)
 export interface AvalDiagnostics {
     // (undocumented)
@@ -191,6 +241,8 @@ export interface AvalDiagnostics {
         reclamationCount: number;
         contextLossCount: number;
         contextRecoveryCount: number;
+        cleanupFailureCount: number;
+        decoderDiagnostics: readonly Readonly<AvalDecoderDiagnostic>[];
     }>;
     // (undocumented)
     readonly runtimeTrace?: readonly Readonly<AvalRuntimeTraceRecord>[];
@@ -331,8 +383,6 @@ export interface AvalElementEventMap {
     // (undocumented)
     readonly error: CustomEvent<Readonly<AvalErrorDetail>>;
     // (undocumented)
-    readonly fallback: CustomEvent<Readonly<AvalFallbackDetail>>;
-    // (undocumented)
     readonly readinesschange: CustomEvent<Readonly<AvalReadinessChangeDetail>>;
     // (undocumented)
     readonly requestedstatechange: CustomEvent<Readonly<AvalRequestedStateChangeDetail>>;
@@ -362,18 +412,6 @@ export interface AvalErrorDetail {
 }
 
 // @public (undocumented)
-export interface AvalFallbackDetail {
-    // (undocumented)
-    readonly generation: number;
-    // (undocumented)
-    readonly reason: StaticReason;
-    // (undocumented)
-    readonly requestedState: string | null;
-    // (undocumented)
-    readonly visualState: string | null;
-}
-
-// @public (undocumented)
 export type AvalFit = "contain" | "cover" | "fill" | "none";
 
 // @public (undocumented)
@@ -385,6 +423,15 @@ export type AvalMotion = "auto" | "reduce" | "full";
 // @public (undocumented)
 export class AvalNotReadyError extends Error {
     constructor(message?: string);
+}
+
+// @public (undocumented)
+export class AvalPlaybackError extends Error {
+    constructor(failure: Readonly<AvalPublicFailure>, generation: number);
+    // (undocumented)
+    readonly failure: Readonly<AvalPublicFailure>;
+    // (undocumented)
+    readonly generation: number;
 }
 
 // @public (undocumented)
@@ -453,7 +500,6 @@ export interface AvalRuntimeTraceRecord {
     // (undocumented)
     readonly counters: Readonly<{
         readonly underflows: number;
-        readonly fallbacks: number;
         readonly settledRequests: number;
         readonly cleanedFrames: number;
     }>;
@@ -471,7 +517,7 @@ export interface AvalRuntimeTraceRecord {
     // (undocumented)
     readonly index: number;
     // (undocumented)
-    readonly kind: "operation" | "content-tick" | "readiness" | "fallback" | "cleanup";
+    readonly kind: "operation" | "content-tick" | "readiness" | "cleanup";
     // (undocumented)
     readonly media: Readonly<Record<string, unknown>> | null;
     // (undocumented)
@@ -588,7 +634,7 @@ export type RuntimeReadinessResult = {
 };
 
 // @public (undocumented)
-export type StaticReason = "reduced-motion" | "no-video-rendition" | "worker-unavailable" | "renderer-unavailable" | "codec-unsupported" | "resource-budget" | "readiness-failed" | "preparation-timeout" | "animation-failure" | "fallback-failure" | "visibility-suspended" | "decoder-queued";
+export type StaticReason = "reduced-motion" | "visibility-suspended" | "decoder-queued";
 
 // Warnings were encountered during analysis:
 //

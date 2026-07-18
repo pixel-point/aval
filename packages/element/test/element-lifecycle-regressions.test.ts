@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   Player,
+  PlayerDecoderDiagnostic,
   PlayerInput,
   PlayerSnapshot
 } from "../src/player-contract.js";
@@ -82,6 +83,7 @@ vi.mock("../src/player.js", () => ({
     let disposed = false;
     let animationRetired = false;
     let disposal: Promise<void> | null = null;
+    let decoderDiagnostics: readonly Readonly<PlayerDecoderDiagnostic>[] = Object.freeze([]);
     const metadata = Object.freeze({
       initialState: "idle",
       stateNames: Object.freeze(["idle", "hover"]),
@@ -113,6 +115,7 @@ vi.mock("../src/player.js", () => ({
       openFrames: 0,
       contextLossCount: 0,
       contextRecoveryCount: 0,
+      decoderDiagnostics,
       presentation: Object.freeze({
         cssWidth: disposed || animationRetired ? 0 : 16,
         cssHeight: disposed || animationRetired ? 0 : 16,
@@ -226,6 +229,24 @@ vi.mock("../src/player.js", () => ({
         return disposal;
       },
       failActive: () => {
+        const diagnostic: Readonly<PlayerDecoderDiagnostic> = Object.freeze({
+          sourceIndex: 0,
+          rendition: "main",
+          codec: "avc1.64001E",
+          unit: "idle-body",
+          lane: 0,
+          phase: "decode",
+          code: "decoder-operation",
+          run: 1,
+          decodeOrdinal: 0,
+          exception: Object.freeze({
+            name: "Error",
+            message: "synthetic decoder failure"
+          }),
+          firstFrame: null
+        });
+        decoderDiagnostics = Object.freeze([diagnostic]);
+        input.onDecoderDiagnostics?.(decoderDiagnostics);
         animationRetired = true;
         input.onAnimationResourcesRetired();
         return input.onPlaybackFailure("worker-decode-failure", "playback");
@@ -307,6 +328,32 @@ describe("element lifecycle regressions", () => {
     const { element, source } = createConnectedElement("motion.avl");
     await element.prepare();
     const player = playerAt(0);
+    const rejectedProbe: Readonly<PlayerDecoderDiagnostic> = Object.freeze({
+      sourceIndex: 0,
+      rendition: "av1",
+      codec: "av01.0.08M.10",
+      unit: null,
+      lane: 1,
+      phase: "probe",
+      code: "unsupported-config",
+      run: null,
+      decodeOrdinal: null,
+      exception: Object.freeze({
+        name: "NotSupportedError",
+        message: "decoder configuration is unsupported"
+      }),
+      firstFrame: null
+    });
+    inputAt(0).onDecoderDiagnostics?.(Object.freeze([rejectedProbe]));
+    inputAt(0).onDecoderDiagnostics?.(Object.freeze([]));
+    expect(element.getDiagnostics().runtime.decoderDiagnostics).toMatchObject([
+      {
+        sourceGeneration: 1,
+        lane: 1,
+        rendition: "av1",
+        code: "unsupported-config"
+      }
+    ]);
     const events: CustomEvent[] = [];
     let diagnosticsAtEvent: ReturnType<AvalElement["getDiagnostics"]> | null = null;
     element.addEventListener("error", ((event: CustomEvent) => {
@@ -328,19 +375,68 @@ describe("element lifecycle regressions", () => {
         declaredFileBytes: 0,
         activeLeaseCount: 0,
         pageParticipantCount: 0,
-        pagePhysicalBytes: 0
+        pagePhysicalBytes: 0,
+        decoderDiagnostics: [
+          {
+            sourceGeneration: 1,
+            sourceIndex: 0,
+            rendition: "main",
+            codec: "avc1.64001E",
+            unit: "idle-body",
+            lane: 0,
+            phase: "decode",
+            code: "decoder-operation",
+            run: 1,
+            decodeOrdinal: 0,
+            exception: {
+              name: "Error",
+              message: "synthetic decoder failure"
+            },
+            firstFrame: null
+          },
+          {
+            sourceGeneration: 1,
+            sourceIndex: 0,
+            rendition: "av1",
+            codec: "av01.0.08M.10",
+            unit: null,
+            lane: 1,
+            phase: "probe",
+            code: "unsupported-config",
+            run: null,
+            decodeOrdinal: null,
+            exception: {
+              name: "NotSupportedError",
+              message: "decoder configuration is unsupported"
+            },
+            firstFrame: null
+          }
+        ]
       }
     });
+    const capturedAtEvent = diagnosticsAtEvent as unknown as ReturnType<
+      AvalElement["getDiagnostics"]
+    >;
+    const [diagnosticAtEvent, probeAtEvent] =
+      capturedAtEvent.runtime.decoderDiagnostics;
+    expect(Object.isFrozen(diagnosticAtEvent)).toBe(true);
+    expect(Object.isFrozen(diagnosticAtEvent?.exception)).toBe(true);
+    expect(Object.isFrozen(probeAtEvent)).toBe(true);
     await expect(element.prepare()).rejects.toBe(error);
     expect(events).toHaveLength(1);
 
     await eventually(() => player.disposed());
     expect(element.getDiagnostics().outstanding.player).toBe(0);
+    expect(element.getDiagnostics().runtime.decoderDiagnostics).toEqual([
+      diagnosticAtEvent,
+      probeAtEvent
+    ]);
 
     source.setAttribute("src", "replacement.avl");
     FakeMutationObserver.instances[0]!.enqueue(attributeMutation(source));
     await expect(element.prepare()).resolves.toMatchObject({ mode: "animated" });
     expect(element.getDiagnostics().lastFailure).toBeNull();
+    expect(element.getDiagnostics().runtime.decoderDiagnostics).toEqual([]);
   });
 
   it("does not let deferred terminal retirement cancel an error-listener replacement", async () => {

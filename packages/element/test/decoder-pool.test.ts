@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   DecoderPool,
+  type DecoderPoolDiagnostic,
   type DecoderPoolRunIdentity
 } from "../src/decoder-pool.js";
+import {
+  createDecoderFailureDiagnostic,
+  type DecoderFailureDiagnostic
+} from "../src/decoder-diagnostics.js";
 import type { DecoderLimits, DecodeSample } from "../src/decoder.js";
 import {
   isDecoderCommand,
@@ -51,7 +56,8 @@ describe("DecoderPool", () => {
     expect(pool.snapshot()).toEqual({
       workerCount: 2,
       openFrames: 1,
-      openFrameBytes: 1_024
+      openFrameBytes: 1_024,
+      decoderDiagnostics: []
     });
 
     pool.dispose();
@@ -158,7 +164,8 @@ describe("DecoderPool", () => {
     expect(pool.snapshot()).toEqual({
       workerCount: 2,
       openFrames: 2,
-      openFrameBytes: 2_048
+      openFrameBytes: 2_048,
+      decoderDiagnostics: []
     });
     expect(decodedBytes).toEqual([1_024, 2_048]);
 
@@ -171,7 +178,8 @@ describe("DecoderPool", () => {
     expect(pool.snapshot()).toEqual({
       workerCount: 0,
       openFrames: 0,
-      openFrameBytes: 0
+      openFrameBytes: 0,
+      decoderDiagnostics: []
     });
     expect(pool.encodedBytes).toBe(0);
     expect(decodedBytes.at(-1)).toBe(0);
@@ -206,7 +214,12 @@ describe("DecoderPool", () => {
     expect(pool.snapshot()).toEqual({
       workerCount: 1,
       openFrames: 1,
-      openFrameBytes: 1_024
+      openFrameBytes: 1_024,
+      decoderDiagnostics: [expect.objectContaining({
+        lane: 1,
+        phase: "decode",
+        code: "decoder-operation"
+      })]
     });
     expect(harness.workers[0]!.terminated).toBe(false);
     expect(harness.workers[1]!.terminated).toBe(true);
@@ -248,12 +261,27 @@ describe("DecoderPool", () => {
     await configure(pool, harness.workers);
     const failure = pool.failure();
 
-    harness.workers[1]!.emit({ t: "error" });
+    const diagnostic = workerDiagnostic({
+      phase: "configure",
+      code: "decoder-operation",
+      run: null,
+      decodeOrdinal: null,
+      reason: new Error("candidate worker failed")
+    });
+    harness.workers[1]!.emit({ t: "error", diagnostic });
 
     await expect(failure).rejects.toThrow("AVAL decoder failed");
     expect(pool.candidateAvailable).toBe(false);
     expect(harness.workers[1]!.terminated).toBe(true);
+    expect(pool.snapshot().decoderDiagnostics).toEqual([{
+      lane: 1,
+      ...diagnostic
+    }]);
     pool.dispose();
+    expect(pool.snapshot().decoderDiagnostics).toEqual([{
+      lane: 1,
+      ...diagnostic
+    }]);
   });
 
   it("surfaces a fatal worker failure while the promoted lane retires", async () => {
@@ -281,13 +309,77 @@ describe("DecoderPool", () => {
     });
     const failure = pool.failure();
 
-    harness.workers[0]!.emit({ t: "error" });
+    const diagnostic = workerDiagnostic({
+      phase: "flush",
+      code: "decoder-operation",
+      run: foreground.generation,
+      decodeOrdinal: null,
+      reason: new Error("retiring lane failed")
+    });
+    harness.workers[0]!.emit({ t: "error", diagnostic });
 
     await expect(failure).rejects.toThrow("AVAL decoder failed");
     expect(pool.candidateAvailable).toBe(false);
     expect(harness.workers[0]!.terminated).toBe(true);
+    expect(pool.snapshot().decoderDiagnostics).toEqual([{
+      lane: 0,
+      ...diagnostic
+    }]);
     pool.dispose();
   });
+
+  it.each([
+    [0, 1],
+    [1, 0]
+  ] as const)(
+    "retains at most one diagnostic per physical lane when lane %i fails first",
+    async (firstLane, secondLane) => {
+      const harness = fakeWorker();
+      const pool = configuredPool(harness);
+      await configure(pool, harness.workers);
+      const failure = pool.failure();
+      const diagnostics = [
+        workerDiagnostic({
+          phase: "decode",
+          code: "decoder-operation",
+          run: 1,
+          decodeOrdinal: 0,
+          reason: new Error("foreground lane failed")
+        }),
+        workerDiagnostic({
+          phase: "flush",
+          code: "watchdog-timeout",
+          run: 2,
+          decodeOrdinal: 4,
+          reason: new DOMException("candidate lane stalled", "TimeoutError")
+        })
+      ] as const;
+
+      harness.workers[firstLane]!.emit({
+        t: "error",
+        diagnostic: diagnostics[firstLane]
+      });
+      harness.workers[secondLane]!.emit({
+        t: "error",
+        diagnostic: diagnostics[secondLane]
+      });
+
+      await expect(failure).rejects.toThrow("AVAL decoder failed");
+      const retained: readonly Readonly<DecoderPoolDiagnostic>[] =
+        pool.snapshot().decoderDiagnostics;
+      expect(retained).toHaveLength(2);
+      expect(retained.map(({ lane }) => lane)).toEqual([0, 1]);
+      expect(retained[0]).toEqual({ lane: 0, ...diagnostics[0] });
+      expect(retained[1]).toEqual({ lane: 1, ...diagnostics[1] });
+      expect(Object.isFrozen(retained)).toBe(true);
+      expect(Object.isFrozen(retained[0])).toBe(true);
+
+      pool.dispose();
+      const afterDispose = pool.snapshot().decoderDiagnostics;
+      expect(afterDispose).toBe(retained);
+      expect(afterDispose).toHaveLength(2);
+    }
+  );
 });
 
 function configuredPool(
@@ -411,4 +503,17 @@ class FakeVideoFrame {
   ) {}
 
   public close(): void { this.closed = true; }
+}
+
+function workerDiagnostic(input: Readonly<{
+  phase: DecoderFailureDiagnostic["phase"];
+  code: DecoderFailureDiagnostic["code"];
+  run: number | null;
+  decodeOrdinal: number | null;
+  reason: unknown;
+}>): Readonly<DecoderFailureDiagnostic> {
+  return createDecoderFailureDiagnostic({
+    ...input,
+    firstFrame: null
+  });
 }

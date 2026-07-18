@@ -5,11 +5,15 @@ import type {
   RuntimeReadinessResult
 } from "./public-types.js";
 import type { AvalPlaybackError } from "./errors.js";
+import type { DecoderFailureDiagnostic } from "./decoder-diagnostics.js";
+import type { DecoderPoolLaneId } from "./decoder-pool.js";
 
 export interface Source {
   readonly src: string;
   readonly codec: string;
   readonly integrity: string;
+  /** Original direct-child source position before invalid candidates are filtered. */
+  readonly sourceIndex?: number;
 }
 
 export interface Metadata {
@@ -23,6 +27,14 @@ export interface Metadata {
     pixelAspect: readonly [number, number];
     fit: "contain" | "cover" | "fill" | "none";
   }>;
+}
+
+export interface PlayerDecoderDiagnostic extends DecoderFailureDiagnostic {
+  readonly sourceIndex: number;
+  readonly rendition: string;
+  readonly codec: string;
+  readonly unit: string | null;
+  readonly lane: DecoderPoolLaneId;
 }
 
 export interface PlayerSnapshot {
@@ -45,6 +57,7 @@ export interface PlayerSnapshot {
   readonly contextLossCount: number;
   readonly contextRecoveryCount: number;
   readonly cleanupFailureCount?: number;
+  readonly decoderDiagnostics: readonly Readonly<PlayerDecoderDiagnostic>[];
   readonly presentation: Readonly<{
     cssWidth: number;
     cssHeight: number;
@@ -136,4 +149,7 @@ export interface PlayerInput {
     code: RuntimeFailureCode,
     operation: string
   ) => AvalPlaybackError;
+  readonly onDecoderDiagnostics?: (
+    diagnostics: readonly Readonly<PlayerDecoderDiagnostic>[]
+  ) => void;
 }

@@ -46,7 +46,8 @@ describe("element inputs", () => {
     expect(read.sources).toEqual([{
       src: "/valid.avl",
       codec: "avc1.64001E",
-      integrity: ""
+      integrity: "",
+      sourceIndex: 1
     }]);
     expect(Object.isFrozen(read)).toBe(true);
     expect(Object.isFrozen(read.sources)).toBe(true);
@@ -101,7 +102,7 @@ describe("element inputs", () => {
       } as unknown as HTMLElement;
       expect(readSources(host), codec).toEqual(valid
         ? {
-            sources: [{ src: "/motion.avl", codec, integrity: "" }],
+            sources: [{ src: "/motion.avl", codec, integrity: "", sourceIndex: 0 }],
             failures: []
           }
         : {
@@ -133,8 +134,18 @@ describe("element inputs", () => {
       children: collection([first, container, duplicate, foreign])
     } as unknown as HTMLElement);
     expect(read.sources).toEqual([
-      { src: "/motion.avl", codec: "av01.0.08M.10", integrity: "" },
-      { src: "/motion.avl", codec: "av01.0.08M.10", integrity: "" }
+      {
+        src: "/motion.avl",
+        codec: "av01.0.08M.10",
+        integrity: "",
+        sourceIndex: 0
+      },
+      {
+        src: "/motion.avl",
+        codec: "av01.0.08M.10",
+        integrity: "",
+        sourceIndex: 1
+      }
     ]);
     expect(read.failures).toEqual([]);
   });

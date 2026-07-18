@@ -5,6 +5,7 @@ export {
   type AvalAutoplay,
   type AvalBindings,
   type AvalCrossOrigin,
+  type AvalDecoderDiagnostic,
   type AvalCleanupReceipt,
   type AvalDiagnostics,
   type AvalElement,

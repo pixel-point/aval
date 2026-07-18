@@ -121,6 +121,37 @@ describe("decoder worker protocol", () => {
       },
       { ...valid, exception: { name: "Error", message: "//private.invalid/a" } },
       { ...valid, exception: { name: "Error", message: "aval-preview://private/a" } },
+      { ...valid, exception: { name: "Error", message: "/private/media.av1?token=x" } },
+      { ...valid, exception: { name: "Error", message: "private.example/media.av1" } },
+      { ...valid, exception: { name: "Error", message: "/Users/alex/private.av1" } },
+      { ...valid, exception: { name: "Error", message: "C:\\Users\\alex\\private.av1" } },
+      { ...valid, exception: { name: "Error", message: "assets/private.av1" } },
+      {
+        ...valid,
+        exception: {
+          name: "Error",
+          message: "failed [/private/media.av1?token=SECRET(LEAK)]"
+        }
+      },
+      {
+        ...valid,
+        exception: {
+          name: "Error",
+          message: "\\\\server\\share\\media.av1?token=SECRET"
+        }
+      },
+      {
+        ...valid,
+        exception: { name: "Error", message: "192.168.1.10?token=SECRET" }
+      },
+      {
+        ...valid,
+        exception: { name: "Error", message: "private.xn--p1ai?token=SECRET" }
+      },
+      {
+        ...valid,
+        exception: { name: "Error", message: "[2001:db8::1]?token=SECRET" }
+      },
       { ...valid, firstFrame: new Uint8Array([1, 2, 3]) },
       { ...valid, firstFrame: { config: { codec: "avc1.640020" } } },
       { ...valid, firstFrame: new Frame() },
@@ -169,6 +200,12 @@ describe("decoder worker protocol", () => {
           "ftp://private.invalid/archive " +
           "chrome-extension://private/page " +
           "//private.invalid/cdn aval-preview://private/asset " +
+          "/media.av1?token=SECRET private.example/asset " +
+          "/Users/alex/private.av1 C:\\Users\\alex\\private.av1 " +
+          "assets/private.av1 failed [/private/media.av1?token=SECRET(LEAK)] " +
+          "\\\\server\\share\\media.av1?token=SECRET " +
+          "192.168.1.10?token=SECRET private.xn--p1ai?token=SECRET " +
+          "[2001:db8::1]?token=SECRET " +
           "m".repeat(700),
         stack: "private stack",
         cause: new Error("private cause"),
@@ -186,7 +223,15 @@ describe("decoder worker protocol", () => {
     expect(diagnostic.exception?.message).not.toContain("private.invalid");
     expect(diagnostic.exception?.message).not.toContain("chrome-extension");
     expect(diagnostic.exception?.message).not.toContain("aval-preview");
-    expect(diagnostic.exception?.message.match(/\[redacted-url\]/gu)).toHaveLength(5);
+    expect(diagnostic.exception?.message).not.toContain("SECRET");
+    expect(diagnostic.exception?.message).not.toContain("Users");
+    expect(diagnostic.exception?.message).not.toContain("token=");
+    expect(diagnostic.exception?.message).not.toContain("LEAK");
+    expect(diagnostic.exception?.message).not.toContain("server");
+    expect(diagnostic.exception?.message).not.toContain("192.168");
+    expect(diagnostic.exception?.message).not.toContain("xn--");
+    expect(diagnostic.exception?.message).not.toContain("2001:db8");
+    expect(diagnostic.exception?.message.match(/\[redacted-url\]/gu)).toHaveLength(15);
     expect(Object.keys(diagnostic.exception ?? {})).toEqual(["name", "message"]);
     expect(diagnostic.firstFrame).toEqual({
       timestamp: 41,

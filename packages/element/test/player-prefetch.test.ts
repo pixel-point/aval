@@ -20,7 +20,8 @@ const media = vi.hoisted(() => ({
   decoderFailures: [] as Array<{
     promise: Promise<never>;
     reject: (reason: unknown) => void;
-  }>
+  }>,
+  decoderDiagnostics: [] as unknown[]
 }));
 
 vi.mock("../src/asset.js", () => {
@@ -206,6 +207,8 @@ vi.mock("../src/decoder.js", () => ({
     public encodedBytes = 0;
     public readonly lane = media.decoderCount++;
     readonly #failure: Promise<never>;
+    #runSequence = 0;
+    #activeRun: number | null = null;
     public constructor() {
       let rejectFailure!: (reason: unknown) => void;
       this.#failure = new Promise<never>((_resolve, reject) => {
@@ -213,7 +216,20 @@ vi.mock("../src/decoder.js", () => ({
       });
       media.decoderFailures[this.lane] = {
         promise: this.#failure,
-        reject: rejectFailure
+        reject: (reason) => {
+          media.decoderDiagnostics[this.lane] = Object.freeze({
+            phase: "decode",
+            code: "decoder-operation",
+            run: this.#activeRun,
+            decodeOrdinal: 0,
+            exception: Object.freeze({
+              name: "Error",
+              message: reason instanceof Error ? reason.message : String(reason)
+            }),
+            firstFrame: null
+          });
+          rejectFailure(reason);
+        }
       };
       void this.#failure.catch(() => undefined);
     }
@@ -221,6 +237,8 @@ vi.mock("../src/decoder.js", () => ({
     public async supported(): Promise<boolean> { return true; }
     public failure(): Promise<never> { return this.#failure; }
     public createRun(samples: readonly { timestamp: number; displayedFrames: number }[]) {
+      const generation = ++this.#runSequence;
+      this.#activeRun = generation;
       const label = samples[0]!.timestamp;
       const tracked = {
         id: media.runs.length + 1,
@@ -252,7 +270,7 @@ vi.mock("../src/decoder.js", () => ({
         queueMicrotask(releaseReadiness);
       }
       return {
-        generation: media.runs.length,
+        generation,
         frameCount: samples[0]!.displayedFrames,
         openFrames: 0,
         outstanding: 0,
@@ -275,7 +293,14 @@ vi.mock("../src/decoder.js", () => ({
         }
       };
     }
-    public snapshot() { return { workerCount: 1, openFrames: 0, openFrameBytes: 0 }; }
+    public snapshot() {
+      return {
+        workerCount: 1,
+        openFrames: 0,
+        openFrameBytes: 0,
+        diagnostic: media.decoderDiagnostics[this.lane] ?? null
+      };
+    }
     public dispose(): void {}
   }
 }));
@@ -328,6 +353,7 @@ afterEach(() => {
   media.assetDisposeHold = null;
   media.assetDisposeReached = null;
   media.decoderFailures.length = 0;
+  media.decoderDiagnostics.length = 0;
   vi.unstubAllGlobals();
 });
 
@@ -470,6 +496,25 @@ describe("player multi-route prefetch", () => {
       workerCount: 0,
       cleanupFailureCount: 1
     });
+    const [diagnostic] = player.snapshot(false).decoderDiagnostics;
+    expect(diagnostic).toMatchObject({
+      sourceIndex: 0,
+      rendition: "main",
+      codec: "avc1.640020",
+      unit: "idle-intro",
+      lane: intro.lane,
+      phase: "decode",
+      code: "decoder-operation",
+      run: 1,
+      decodeOrdinal: 0,
+      exception: {
+        name: "Error",
+        message: "AVAL decoder failed"
+      },
+      firstFrame: null
+    });
+    expect(Object.isFrozen(diagnostic)).toBe(true);
+    expect(Object.isFrozen(diagnostic?.exception)).toBe(true);
 
     await player.dispose();
   });

@@ -288,6 +288,7 @@ function runtime(
     openFrames: override.openFrames ?? 0,
     contextLossCount: 0,
     contextRecoveryCount: 0,
+    decoderDiagnostics: Object.freeze([]),
     presentation: Object.freeze({
       cssWidth: 0,
       cssHeight: 0,

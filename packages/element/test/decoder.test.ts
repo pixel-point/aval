@@ -5,6 +5,10 @@ import {
   type DecoderLimits
 } from "../src/decoder.js";
 import {
+  createDecoderFailureDiagnostic,
+  type DecoderFailureDiagnostic
+} from "../src/decoder-diagnostics.js";
+import {
   isDecoderCommand,
   type DecoderCommand,
   type DecoderWorkerEvent
@@ -74,14 +78,28 @@ describe("Decoder output certification", () => {
     decoder.dispose();
   });
 
-  it("rejects contradictory browser color metadata", async () => {
+  it.each([
+    ["color", (frame: VideoFrame) => {
+      Object.defineProperty(frame, "colorSpace", {
+        value: Object.freeze({
+          fullRange: false,
+          matrix: "bt709",
+          primaries: "smpte170m",
+          transfer: "iec61966-2-1"
+        })
+      });
+    }],
+    ["geometry", (frame: VideoFrame) => {
+      Object.defineProperty(frame, "visibleRect", {
+        value: Object.freeze({ x: 31, y: 0, width: 2, height: 2 })
+      });
+    }],
+    ["timing", (frame: VideoFrame) => {
+      Object.defineProperty(frame, "duration", { value: 2 });
+    }]
+  ] as const)("retains local %s output-validation evidence", async (_kind, mutate) => {
     const Worker = fakeWorker();
-    const VideoFrame = fakeVideoFrame({
-      fullRange: false,
-      matrix: "bt709",
-      primaries: "smpte170m",
-      transfer: "iec61966-2-1"
-    });
+    const VideoFrame = fakeVideoFrame();
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoFrame", VideoFrame);
     const decoder = configuredDecoder();
@@ -91,17 +109,107 @@ describe("Decoder output certification", () => {
     const run = oneFrameRun(decoder);
     worker.emit({ t: "started", run: run.generation });
     worker.emit({ t: "accepted", run: run.generation });
+    const frame = new VideoFrame(32, 34);
+    mutate(frame);
     worker.emit({
       t: "frame",
       run: run.generation,
       timestamp: 0,
-      frame: new VideoFrame(32, 34)
+      frame
     });
 
     await expect(run.take(0)).rejects.toThrow(
       "AVAL decoder returned an invalid frame"
     );
+    expect(decoder.snapshot().diagnostic).toMatchObject({
+      phase: "output-validation",
+      code: "invalid-output",
+      run: run.generation,
+      decodeOrdinal: 0,
+      exception: {
+        name: "Error",
+        message: "AVAL decoder returned an invalid frame"
+      },
+      firstFrame: {
+        timestamp: 0,
+        codedWidth: 32,
+        codedHeight: 34,
+        displayWidth: 2,
+        displayHeight: 2
+      }
+    });
+    expect(Object.isFrozen(decoder.snapshot().diagnostic)).toBe(true);
+    expect(Object.isFrozen(decoder.snapshot().diagnostic?.firstFrame)).toBe(true);
     decoder.dispose();
+  });
+
+  it("retains the exact first structured worker diagnostic through teardown", async () => {
+    const Worker = fakeWorker();
+    const VideoFrame = fakeVideoFrame();
+    vi.stubGlobal("Worker", Worker);
+    vi.stubGlobal("VideoFrame", VideoFrame);
+    const decoder = configuredDecoder();
+    const failure = decoder.failure();
+    const worker = Worker.latest();
+    worker.emit({ t: "configured", supported: true });
+    await decoder.supported();
+    const diagnostic = structuredClone(workerDiagnostic({
+      phase: "decode",
+      code: "decoder-operation",
+      run: 4,
+      decodeOrdinal: 2,
+      reason: new DOMException(
+        "Decode failed at https://private.invalid/media.av1 " + "x".repeat(700),
+        "EncodingError"
+      )
+    })) as DecoderFailureDiagnostic;
+    expect(Object.isFrozen(diagnostic)).toBe(false);
+
+    worker.emit({ t: "error", diagnostic });
+
+    await expect(failure).rejects.toThrow("AVAL decoder failed");
+    expect(decoder.snapshot().diagnostic).toBe(diagnostic);
+    expect(Object.isFrozen(diagnostic)).toBe(true);
+    expect(Object.isFrozen(diagnostic.exception)).toBe(true);
+    expect(diagnostic.exception?.message).toContain("[redacted-url]");
+    expect(diagnostic.exception?.message).not.toContain("private.invalid");
+    expect(diagnostic.exception?.message.length).toBeLessThanOrEqual(512);
+    decoder.dispose();
+    expect(decoder.snapshot().diagnostic).toBe(diagnostic);
+
+    worker.emitTransport("messageerror");
+    expect(decoder.snapshot().diagnostic).toBe(diagnostic);
+  });
+
+  it("synthesizes bounded transport evidence for messageerror", async () => {
+    const Worker = fakeWorker();
+    const VideoFrame = fakeVideoFrame();
+    vi.stubGlobal("Worker", Worker);
+    vi.stubGlobal("VideoFrame", VideoFrame);
+    const decoder = configuredDecoder();
+    const failure = decoder.failure();
+    const worker = Worker.latest();
+    worker.emit({ t: "configured", supported: true });
+    await decoder.supported();
+    const run = oneFrameRun(decoder);
+
+    worker.emitTransport("messageerror");
+
+    await expect(failure).rejects.toThrow("AVAL decoder message transport failed");
+    expect(decoder.snapshot().diagnostic).toEqual({
+      phase: "frame-transfer",
+      code: "transport",
+      run: run.generation,
+      decodeOrdinal: null,
+      exception: {
+        name: "Error",
+        message: "AVAL decoder message transport failed"
+      },
+      firstFrame: null
+    });
+    const retained = decoder.snapshot().diagnostic;
+    decoder.dispose();
+    expect(decoder.snapshot().diagnostic).toBe(retained);
   });
 
   it("accepts frames from the generation-captured realm constructor", async () => {
@@ -158,7 +266,8 @@ describe("Decoder output certification", () => {
     expect(decoder.snapshot()).toEqual({
       workerCount: 1,
       openFrames: 1,
-      openFrameBytes: 4_352
+      openFrameBytes: 4_352,
+      diagnostic: null
     });
     expect(decodedBytes).toEqual([4_352]);
     const frame = await run.take(0);
@@ -167,7 +276,8 @@ describe("Decoder output certification", () => {
     expect(decoder.snapshot()).toEqual({
       workerCount: 1,
       openFrames: 0,
-      openFrameBytes: 0
+      openFrameBytes: 0,
+      diagnostic: null
     });
     expect(decodedBytes).toEqual([4_352, 0]);
     worker.emit({ t: "flushed", run: run.generation });
@@ -212,7 +322,11 @@ describe("Decoder output certification", () => {
     expect(decoder.snapshot()).toEqual({
       workerCount: 0,
       openFrames: 0,
-      openFrameBytes: 0
+      openFrameBytes: 0,
+      diagnostic: expect.objectContaining({
+        phase: "decode",
+        code: "decoder-operation"
+      })
     });
     expect(worker.terminated).toBe(true);
     decoder.dispose();
@@ -245,7 +359,8 @@ describe("Decoder output certification", () => {
     expect(decoder.snapshot()).toEqual({
       workerCount: 1,
       openFrames: 6,
-      openFrameBytes: 319_488
+      openFrameBytes: 319_488,
+      diagnostic: null
     });
 
     for (let index = 0; index < 6; index += 1) run.release(await run.take(index));
@@ -282,7 +397,11 @@ describe("Decoder output certification", () => {
     expect(decoder.snapshot()).toEqual({
       workerCount: 0,
       openFrames: 0,
-      openFrameBytes: 0
+      openFrameBytes: 0,
+      diagnostic: expect.objectContaining({
+        phase: "output-validation",
+        code: "invalid-output"
+      })
     });
     expect(worker.terminated).toBe(true);
     decoder.dispose();
@@ -313,7 +432,12 @@ describe("Decoder output certification", () => {
     expect(decoder.snapshot()).toEqual({
       workerCount: 0,
       openFrames: 0,
-      openFrameBytes: 0
+      openFrameBytes: 0,
+      diagnostic: expect.objectContaining({
+        phase: "decode",
+        code: "watchdog-timeout",
+        run: run.generation
+      })
     });
     expect(worker.terminated).toBe(true);
     decoder.dispose();
@@ -447,14 +571,22 @@ describe("Decoder output certification", () => {
     worker.emit({ t: "accepted", run: first.generation });
     first.close();
 
-    worker.emit({ t: "error" });
+    const diagnostic = workerDiagnostic({
+      phase: "flush",
+      code: "decoder-operation",
+      run: first.generation,
+      decodeOrdinal: null,
+      reason: new Error("flush failed")
+    });
+    worker.emit({ t: "error", diagnostic });
 
     await expect(failure).rejects.toThrow("AVAL decoder failed");
     expect(worker.terminated).toBe(true);
     expect(decoder.snapshot()).toEqual({
       workerCount: 0,
       openFrames: 0,
-      openFrameBytes: 0
+      openFrameBytes: 0,
+      diagnostic
     });
     decoder.dispose();
   });
@@ -622,22 +754,25 @@ interface FakeWorkerInstance {
   readonly posted: readonly DecoderCommand[];
   readonly terminated: boolean;
   emit(value: DecoderWorkerEvent): void;
+  emitTransport(type: "error" | "messageerror"): void;
 }
 
 function fakeWorker(): {
   new(): Worker;
   latest(): FakeWorkerInstance;
 } {
-  type Listener = (event: MessageEvent<unknown>) => void;
+  type Listener = EventListener;
   let latest: (Worker & FakeWorkerInstance) | null = null;
   class StubWorker {
-    readonly #messages = new Set<Listener>();
+    readonly #listeners = new Map<string, Set<Listener>>();
     public readonly posted: DecoderCommand[] = [];
     public terminated = false;
 
     public constructor() { latest = this as unknown as Worker & FakeWorkerInstance; }
     public addEventListener(type: string, listener: EventListener): void {
-      if (type === "message") this.#messages.add(listener as Listener);
+      const listeners = this.#listeners.get(type) ?? new Set<Listener>();
+      listeners.add(listener);
+      this.#listeners.set(type, listeners);
     }
     public postMessage(value: unknown): void {
       if (!isDecoderCommand(value)) throw new Error("invalid decoder command");
@@ -645,8 +780,13 @@ function fakeWorker(): {
     }
     public terminate(): void { this.terminated = true; }
     public emit(value: DecoderWorkerEvent): void {
-      for (const listener of this.#messages) {
+      for (const listener of this.#listeners.get("message") ?? []) {
         listener({ data: value } as MessageEvent<unknown>);
+      }
+    }
+    public emitTransport(type: "error" | "messageerror"): void {
+      for (const listener of this.#listeners.get(type) ?? []) {
+        listener(new Event(type));
       }
     }
   }
@@ -655,6 +795,19 @@ function fakeWorker(): {
       if (latest === null) throw new Error("worker was not constructed");
       return latest;
     }
+  });
+}
+
+function workerDiagnostic(input: Readonly<{
+  phase: DecoderFailureDiagnostic["phase"];
+  code: DecoderFailureDiagnostic["code"];
+  run: number | null;
+  decodeOrdinal: number | null;
+  reason: unknown;
+}>): Readonly<DecoderFailureDiagnostic> {
+  return createDecoderFailureDiagnostic({
+    ...input,
+    firstFrame: null
   });
 }
 

@@ -21,7 +21,9 @@ import {
 } from "./decoder.js";
 import {
   DecoderPool,
-  type DecoderPoolCandidate
+  type DecoderPoolCandidate,
+  type DecoderPoolDiagnostic,
+  type DecoderPoolLaneId
 } from "./decoder-pool.js";
 import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 import {
@@ -41,6 +43,7 @@ import {
 import type {
   Metadata,
   Player,
+  PlayerDecoderDiagnostic,
   PlayerInput,
   PlayerSnapshot
 } from "./player-contract.js";
@@ -132,7 +135,10 @@ async function selectPlayer(
   let retained: Asset | null = null;
   let unavailable: CandidateRejectionReason = "codec-unsupported";
   const reports: Readonly<CandidateReport>[] = [];
-  for (const source of input.sources) {
+  let selectionDecoderDiagnostics: readonly Readonly<PlayerDecoderDiagnostic>[] =
+    Object.freeze([]);
+  for (const [inputIndex, source] of input.sources.entries()) {
+    const sourceIndex = source.sourceIndex ?? inputIndex;
     deadline.signal.throwIfAborted();
     if (retained !== null) {
       await retained.dispose();
@@ -163,13 +169,16 @@ async function selectPlayer(
     }
     if (!input.visible) {
       return new PlayerImpl(
-        input, asset, first, null, null, deadline, publications, "visibility-suspended",
+        input, asset, first, sourceIndex, selectionDecoderDiagnostics, null, null,
+        deadline, publications, "visibility-suspended",
         reports, firstRank
       );
     }
     if (reduced(input.motion, input.reduced)) {
-      return new PlayerImpl(input, asset, first, null, null, deadline, publications,
-        "reduced-motion", reports, firstRank);
+      return new PlayerImpl(
+        input, asset, first, sourceIndex, selectionDecoderDiagnostics, null, null,
+        deadline, publications, "reduced-motion", reports, firstRank
+      );
     }
     if (input.platform.Worker === null || input.platform.VideoDecoder === null ||
       input.platform.VideoFrame === null) {
@@ -178,8 +187,10 @@ async function selectPlayer(
       throw unsupportedProfileError();
     }
     if (!input.decoderReady()) {
-      return new PlayerImpl(input, asset, first, null, null, deadline, publications,
-        "decoder-queued", reports, firstRank);
+      return new PlayerImpl(
+        input, asset, first, sourceIndex, selectionDecoderDiagnostics, null, null,
+        deadline, publications, "decoder-queued", reports, firstRank
+      );
     }
     for (const rendition of asset.manifest.renditions) {
       deadline.signal.throwIfAborted();
@@ -257,10 +268,22 @@ async function selectPlayer(
         setTimeout: input.platform.setTimeout,
         clearTimeout: input.platform.clearTimeout
       });
+      const disposeDecoders = (): void => {
+        selectionDecoderDiagnostics = mergePlayerDecoderDiagnostics(
+          selectionDecoderDiagnostics,
+          publishDecoderDiagnostics(
+            input,
+            decoders.snapshot().decoderDiagnostics,
+            sourceIndex,
+            rendition
+          )
+        );
+        decoders.dispose();
+      };
       let supported = false;
       try { supported = await limit(decoders.supported(), deadline.signal); }
       catch (error) {
-        decoders.dispose();
+        disposeDecoders();
         if (deadline.timedOut) {
           await asset.dispose();
           reportResourceBytes(input, null);
@@ -271,7 +294,7 @@ async function selectPlayer(
         throw error;
       }
       if (!supported) {
-        decoders.dispose();
+        disposeDecoders();
         unavailable = "codec-unsupported";
         reports.push(candidateReport(rendition.id, rank, unavailable));
         continue;
@@ -297,7 +320,7 @@ async function selectPlayer(
         });
         rendererRef = renderer;
       } catch (error) {
-        decoders.dispose();
+        disposeDecoders();
         rendererRef?.dispose();
         rendererRef = null;
         await asset.dispose();
@@ -309,7 +332,7 @@ async function selectPlayer(
         assertCandidateBudget(asset, rendition, renderer, plan);
       }
       catch (error) {
-        decoders.dispose();
+        disposeDecoders();
         renderer.dispose();
         rendererRef = null;
         reportResourceBytes(input, asset);
@@ -323,7 +346,8 @@ async function selectPlayer(
         continue;
       }
       const player = new PlayerImpl(
-        input, asset, rendition, decoders, renderer, deadline, publications, null, reports, rank
+        input, asset, rendition, sourceIndex, selectionDecoderDiagnostics,
+        decoders, renderer, deadline, publications, null, reports, rank
       );
       contextChange = (state) => player.contextChanged(state);
       return player;
@@ -346,6 +370,7 @@ class PlayerImpl implements Player {
   readonly #publications: PublicationGate;
   readonly #manifest: Readonly<Manifest>;
   readonly #rendition: Readonly<Rendition>;
+  readonly #sourceIndex: number;
   readonly #candidateRank: number;
   readonly #candidateReports: readonly Readonly<CandidateReport>[];
   readonly #reportCurrent: boolean;
@@ -406,12 +431,21 @@ class PlayerImpl implements Player {
   #contextRecoveries = 0;
   #cleanupFailureCount = 0;
   #animationResourcesRetired = false;
+  #decoderDiagnostics: readonly Readonly<PlayerDecoderDiagnostic>[];
+  #capturedPoolDiagnostics: readonly Readonly<DecoderPoolDiagnostic>[] =
+    Object.freeze([]);
+  readonly #decoderUnitByLane: [
+    Readonly<{ run: number; unit: string }> | null,
+    Readonly<{ run: number; unit: string }> | null
+  ] = [null, null];
   readonly #contextRestored: () => void;
 
   public constructor(
     input: Readonly<PlayerInput>,
     asset: Asset,
     rendition: Readonly<Rendition>,
+    sourceIndex: number,
+    decoderDiagnostics: readonly Readonly<PlayerDecoderDiagnostic>[],
     decoders: DecoderPool | null,
     renderer: Renderer | null,
     deadline: PreparationDeadline,
@@ -435,6 +469,8 @@ class PlayerImpl implements Player {
     this.#publications = publications;
     this.#manifest = asset.manifest;
     this.#rendition = rendition;
+    this.#sourceIndex = sourceIndex;
+    this.#decoderDiagnostics = decoderDiagnostics;
     this.#candidateRank = candidateRank;
     this.#candidateReports = Object.freeze([...candidateReports]);
     this.#reportCurrent = reportCurrent;
@@ -652,7 +688,13 @@ class PlayerImpl implements Player {
 
   public snapshot(trace: boolean): Readonly<PlayerSnapshot> {
     const asset = this.#asset.snapshot();
-    const decoders = this.#decoders?.snapshot() ?? { workerCount: 0, openFrames: 0 };
+    const decoders = this.#decoders?.snapshot() ?? {
+      workerCount: 0,
+      openFrames: 0,
+      openFrameBytes: 0,
+      decoderDiagnostics: Object.freeze([])
+    };
+    this.#captureDecoderDiagnostics(decoders.decoderDiagnostics);
     const presentation = (this.#renderer ?? this.#retiredRenderer)?.snapshot() ?? {
       cssWidth: 0,
       cssHeight: 0,
@@ -695,6 +737,7 @@ class PlayerImpl implements Player {
         presentation.contextRecoveryCount
       ),
       cleanupFailureCount: this.#cleanupFailureCount,
+      decoderDiagnostics: this.#decoderDiagnostics,
       presentation,
       trace: trace ? Object.freeze([...this.#trace]) : Object.freeze([])
     });
@@ -967,7 +1010,11 @@ class PlayerImpl implements Player {
       ...this.#resident.values(),
       ...(renderer === null ? [] : [renderer.settled()])
     ]);
-    this.#decoders?.dispose();
+    const decoders = this.#decoders;
+    if (decoders !== null) {
+      this.#captureDecoderDiagnostics(decoders.snapshot().decoderDiagnostics);
+      decoders.dispose();
+    }
     this.#decoders = null;
     renderer?.dispose();
     this.#renderer = null;
@@ -1591,6 +1638,7 @@ class PlayerImpl implements Player {
     }
     if (role === "foreground") {
       const run = decoders.createForegroundRun(samples);
+      this.#rememberDecoderUnit(run, unit.id);
       this.#reportResourceBytes();
       if (run.frameCount !== unit.frameCount) {
         run.close();
@@ -1599,6 +1647,7 @@ class PlayerImpl implements Player {
       return run;
     }
     const candidate = decoders.createCandidate(unit.id, samples);
+    this.#rememberDecoderUnit(candidate.run, unit.id);
     this.#reportResourceBytes();
     if (candidate.run.frameCount !== unit.frameCount) {
       candidate.cancel();
@@ -1611,6 +1660,39 @@ class PlayerImpl implements Player {
     const span = unit.chunks.find(({ rendition }) => rendition === this.#rendition.id);
     if (span === undefined) throw new Error("Invalid AVAL asset");
     return span;
+  }
+
+  #rememberDecoderUnit(run: DecodeRun, unit: string): void {
+    const decoders = this.#decoders;
+    if (decoders === null) return;
+    const { lane } = decoders.identity(run);
+    this.#decoderUnitByLane[lane] = Object.freeze({
+      run: run.generation,
+      unit
+    });
+  }
+
+  #captureDecoderDiagnostics(
+    diagnostics: readonly Readonly<DecoderPoolDiagnostic>[]
+  ): void {
+    if (diagnostics === this.#capturedPoolDiagnostics) return;
+    this.#capturedPoolDiagnostics = diagnostics;
+    if (diagnostics.length === 0) return;
+    this.#decoderDiagnostics = mergePlayerDecoderDiagnostics(
+      this.#decoderDiagnostics,
+      publishDecoderDiagnostics(
+        this.#input,
+        diagnostics,
+        this.#sourceIndex,
+        this.#rendition,
+        (diagnostic) => {
+          const current = this.#decoderUnitByLane[diagnostic.lane];
+          return current !== null && current.run === diagnostic.run
+            ? current.unit
+            : null;
+        }
+      )
+    );
   }
 
   #ensureResident(unit: Unit): Promise<void> {
@@ -2239,6 +2321,48 @@ function checkedProduct(values: readonly number[]): number {
   return product;
 }
 
+function publishDecoderDiagnostics(
+  input: Readonly<PlayerInput>,
+  diagnostics: readonly Readonly<DecoderPoolDiagnostic>[],
+  sourceIndex: number,
+  rendition: Readonly<Rendition>,
+  unitFor: (diagnostic: Readonly<DecoderPoolDiagnostic>) => string | null =
+    () => null
+): readonly Readonly<PlayerDecoderDiagnostic>[] {
+  const enriched = Object.freeze(diagnostics.map((diagnostic) =>
+    Object.freeze({
+      ...diagnostic,
+      sourceIndex,
+      rendition: rendition.id,
+      codec: rendition.codec,
+      unit: unitFor(diagnostic)
+    }) satisfies Readonly<PlayerDecoderDiagnostic>
+  ));
+  if (enriched.length > 0) {
+    try { input.onDecoderDiagnostics?.(enriched); }
+    catch { /* diagnostics cannot replace the playback outcome */ }
+  }
+  return enriched;
+}
+
+function mergePlayerDecoderDiagnostics(
+  current: readonly Readonly<PlayerDecoderDiagnostic>[],
+  incoming: readonly Readonly<PlayerDecoderDiagnostic>[]
+): readonly Readonly<PlayerDecoderDiagnostic>[] {
+  if (incoming.length === 0) return current;
+  const byLane = new Map(
+    current.map((diagnostic) => [diagnostic.lane, diagnostic] as const)
+  );
+  for (const diagnostic of incoming.slice(0, 2)) {
+    byLane.set(diagnostic.lane, diagnostic);
+  }
+  return Object.freeze(
+    [...byLane.values()]
+      .sort((left, right) => left.lane - right.lane)
+      .slice(0, 2)
+  );
+}
+
 class PublicationGate {
   public readonly input: Readonly<PlayerInput>;
   readonly #pending: Array<() => void> = [];
@@ -2272,7 +2396,11 @@ class PublicationGate {
       onPlaybackFailure: (
         code: Parameters<PlayerInput["onPlaybackFailure"]>[0],
         operation: string
-      ) => target.onPlaybackFailure(code, operation)
+      ) => target.onPlaybackFailure(code, operation),
+      onDecoderDiagnostics: (
+        diagnostics: readonly Readonly<PlayerDecoderDiagnostic>[]
+      ) =>
+        target.onDecoderDiagnostics?.(diagnostics)
     });
   }
 

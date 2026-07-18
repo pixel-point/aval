@@ -175,6 +175,7 @@ describe("player rendition selection", () => {
     vi.stubGlobal("VideoDecoder", class {});
     const controller = new AbortController();
     const canvas = new EventTarget() as HTMLCanvasElement;
+    const diagnosticPublications: unknown[][] = [];
     const player = await createPlayer({
       canvas,
       platform: testPlatform(),
@@ -202,7 +203,10 @@ describe("player rendition selection", () => {
       onRestart: () => undefined,
       onEvent: () => undefined,
       onFailure: () => undefined,
-      onPlaybackFailure: defaultPlaybackFailure
+      onPlaybackFailure: defaultPlaybackFailure,
+      onDecoderDiagnostics: (diagnostics) => {
+        diagnosticPublications.push([...diagnostics]);
+      }
     });
     player.activate();
 
@@ -210,6 +214,18 @@ describe("player rendition selection", () => {
     expect(selection.opens).toBe(1);
     expect(Worker.instances()).toHaveLength(4);
     expect(selection.rendererCreations).toBe(1);
+    expect(diagnosticPublications.some((diagnostics) =>
+      diagnostics.length === 2 && diagnostics.every((diagnostic) =>
+        typeof diagnostic === "object" && diagnostic !== null &&
+        (diagnostic as { code?: unknown }).code === "unsupported-config" &&
+        (diagnostic as { sourceIndex?: unknown }).sourceIndex === 0 &&
+        (diagnostic as { rendition?: unknown }).rendition === "high"
+      )
+    )).toBe(true);
+    expect(diagnosticPublications.at(-1)).toHaveLength(2);
+    expect(player.snapshot(false).decoderDiagnostics).toEqual(
+      diagnosticPublications.at(-1)
+    );
     await player.dispose();
   });
 
@@ -404,13 +420,19 @@ describe("player rendition selection", () => {
     const controller = new AbortController();
     const terminal = playbackError("worker-decode-failure", "prepare", 4);
     const failures: string[] = [];
+    const decoderDiagnostics: unknown[][] = [];
     const creation = createPlayer({
       canvas: new EventTarget() as HTMLCanvasElement,
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
       sources: [
-        { src: "first.avl", codec: "avc1.640028", integrity: "" },
+        {
+          src: "first.avl",
+          codec: "avc1.640028",
+          integrity: "",
+          sourceIndex: 1
+        },
         { src: "second.avl", codec: "avc1.640028", integrity: "" }
       ],
       credentials: "same-origin",
@@ -433,6 +455,9 @@ describe("player rendition selection", () => {
       onPlaybackFailure: (code, operation) => {
         failures.push(`${code}:${operation}`);
         return terminal;
+      },
+      onDecoderDiagnostics: (diagnostics) => {
+        decoderDiagnostics.push([...diagnostics]);
       }
     });
 
@@ -440,6 +465,17 @@ describe("player rendition selection", () => {
     expect(failures).toEqual(["worker-decode-failure:prepare"]);
     expect(selection.opens).toBe(1);
     expect(Worker.instances()).toHaveLength(2);
+    expect(decoderDiagnostics.at(-1)).toMatchObject([{
+      sourceIndex: 1,
+      rendition: "high",
+      codec: "avc1.640028",
+      unit: null,
+      lane: 0,
+      phase: "frame-transfer",
+      code: "transport",
+      run: null,
+      decodeOrdinal: null
+    }]);
   });
 
   it("treats asset-wide readiness declaration failure as terminal", async () => {

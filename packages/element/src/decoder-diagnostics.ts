@@ -94,10 +94,17 @@ const EXCEPTION_KEYS = Object.freeze(["name", "message"]);
 const NAME_LIMIT = 64;
 const MESSAGE_LIMIT = 512;
 const COLOR_TOKEN_LIMIT = 32;
+const TEXT_INSPECTION_LIMIT = 1_024;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/gu;
 const CONTROL_CHARACTERS_TEST = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
 const URL_LIKE = /(?:\b[a-z][a-z0-9+.-]{0,31}:(?:\/\/)?[^\s"'<>]+|(?<!:)\/\/[^\s"'<>]+|\bwww\.[^\s"'<>]+)/giu;
 const URL_LIKE_TEST = /(?:\b[a-z][a-z0-9+.-]{0,31}:(?:\/\/)?[^\s"'<>]+|(?<!:)\/\/[^\s"'<>]+|\bwww\.[^\s"'<>]+)/iu;
+const QUERY_LIKE = /[^\s"'<>]*[?&][^\s"'<>]*=[^\s"'<>]*/gu;
+const QUERY_LIKE_TEST = /[^\s"'<>]*[?&][^\s"'<>]*=[^\s"'<>]*/u;
+const PATH_LIKE = /[^\s"'<>]*[\\/][^\s"'<>]*/giu;
+const PATH_LIKE_TEST = /[^\s"'<>]*[\\/][^\s"'<>]*/iu;
+const BARE_HOST = /(?:\b(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:.]+\]|\blocalhost|\b(?:[a-z0-9](?:[a-z0-9-]{0,62})\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59}))(?![a-z0-9-])(?::\d{1,5})?(?:[/?#][^\s"'<>]*)?/giu;
+const BARE_HOST_TEST = /(?:\b(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:.]+\]|\blocalhost|\b(?:[a-z0-9](?:[a-z0-9-]{0,62})\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59}))(?![a-z0-9-])(?::\d{1,5})?(?:[/?#][^\s"'<>]*)?/iu;
 
 export function createDecoderFailureDiagnostic(
   input: Readonly<DecoderFailureDiagnosticInput>
@@ -256,8 +263,12 @@ function boundedColorToken(value: unknown): string | null {
 
 function sanitizeText(value: string, limit: number): string {
   return value
+    .slice(0, TEXT_INSPECTION_LIMIT)
     .replace(CONTROL_CHARACTERS, " ")
+    .replace(QUERY_LIKE, "[redacted-url]")
+    .replace(BARE_HOST, "[redacted-url]")
     .replace(URL_LIKE, "[redacted-url]")
+    .replace(PATH_LIKE, "[redacted-url]")
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, limit);
@@ -273,6 +284,9 @@ function isSanitizedText(
     (emptyAllowed || value.length > 0) &&
     !CONTROL_CHARACTERS_TEST.test(value) &&
     !URL_LIKE_TEST.test(value) &&
+    !QUERY_LIKE_TEST.test(value) &&
+    !PATH_LIKE_TEST.test(value) &&
+    !BARE_HOST_TEST.test(value) &&
     sanitizeText(value, limit) === value;
 }
 

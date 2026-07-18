@@ -6,6 +6,7 @@ import {
   type DecodeSample
 } from "./decoder.js";
 import { ELEMENT_DECODER_LANE_IDS } from "./decoder-capacity.js";
+import type { DecoderFailureDiagnostic } from "./decoder-diagnostics.js";
 
 const MAX_BYTES = Number.MAX_SAFE_INTEGER;
 
@@ -25,10 +26,15 @@ export interface DecoderPoolRunIdentity {
   readonly lane: DecoderPoolLaneId;
 }
 
+export interface DecoderPoolDiagnostic extends DecoderFailureDiagnostic {
+  readonly lane: DecoderPoolLaneId;
+}
+
 export interface DecoderPoolSnapshot {
   readonly workerCount: number;
   readonly openFrames: number;
   readonly openFrameBytes: number;
+  readonly decoderDiagnostics: readonly Readonly<DecoderPoolDiagnostic>[];
 }
 
 /**
@@ -53,12 +59,18 @@ export class DecoderPool {
   readonly #onDecodedBytes: ((bytes: number) => void) | undefined;
   readonly #onEncodedBytes: ((bytes: number) => void) | undefined;
   readonly #failure: Promise<never>;
+  readonly #diagnosticByLane: [
+    Readonly<DecoderPoolDiagnostic> | null,
+    Readonly<DecoderPoolDiagnostic> | null
+  ] = [null, null];
   #foreground: DecoderPoolLane;
   #candidate: DecoderPoolLane;
   #foregroundRun: DecodeRun | null = null;
   #candidateRun: DecodeRun | null = null;
   #sequence = 0;
   #disposed = false;
+  #decoderDiagnostics: readonly Readonly<DecoderPoolDiagnostic>[] =
+    Object.freeze([]);
 
   public constructor(
     config: Readonly<VideoDecoderConfig>,
@@ -200,10 +212,12 @@ export class DecoderPool {
   public snapshot(): DecoderPoolSnapshot {
     const first = this.#lanes[0].decoder.snapshot();
     const second = this.#lanes[1].decoder.snapshot();
+    this.#captureDecoderDiagnostics(first.diagnostic, second.diagnostic);
     return Object.freeze({
       workerCount: first.workerCount + second.workerCount,
       openFrames: first.openFrames + second.openFrames,
-      openFrameBytes: first.openFrameBytes + second.openFrameBytes
+      openFrameBytes: first.openFrameBytes + second.openFrameBytes,
+      decoderDiagnostics: this.#decoderDiagnostics
     });
   }
 
@@ -220,6 +234,9 @@ export class DecoderPool {
 
   public dispose(): void {
     if (this.#disposed) return;
+    const first = this.#lanes[0].decoder.snapshot().diagnostic;
+    const second = this.#lanes[1].decoder.snapshot().diagnostic;
+    this.#captureDecoderDiagnostics(first, second);
     this.#disposed = true;
     let failure: unknown;
     for (const lane of this.#lanes) {
@@ -254,6 +271,30 @@ export class DecoderPool {
         this.#onEncodedBytes
       )
     });
+  }
+
+  #captureDecoderDiagnostics(
+    first: Readonly<DecoderFailureDiagnostic> | null,
+    second: Readonly<DecoderFailureDiagnostic> | null
+  ): void {
+    let changed = false;
+    for (const [lane, diagnostic] of [first, second].entries()) {
+      if (diagnostic === null || this.#diagnosticByLane[lane] !== null) continue;
+      const id = ELEMENT_DECODER_LANE_IDS[lane];
+      if (id === undefined) continue;
+      this.#diagnosticByLane[id] = Object.freeze({
+        lane: id,
+        ...diagnostic
+      });
+      changed = true;
+    }
+    if (!changed) return;
+    this.#decoderDiagnostics = Object.freeze(
+      this.#diagnosticByLane.filter(
+        (diagnostic): diagnostic is Readonly<DecoderPoolDiagnostic> =>
+          diagnostic !== null
+      )
+    );
   }
 
   #createRun(
