@@ -5,6 +5,9 @@
 - Terminal capability or playback failure rejects with `AvalPlaybackError` and
   raises one fatal `error` event. Branch on `failure.code`, then inspect bounded
   `runtime.decoderDiagnostics`; do not parse browser exception text.
+- `unsupported-browser` during `configure` on a phone commonly means the page
+  was opened through a private-LAN HTTP URL. Check `window.isSecureContext` and
+  `typeof window.crypto?.subtle?.digest`; use HTTPS rather than changing codecs.
 - Range errors usually indicate transformed encoding, missing/malformed
   `Content-Range`, or a changing/missing strong ETag.
 - External integrity mismatch means the complete fetched bytes are not the

@@ -14,11 +14,14 @@ npm run dev
 Here `npx avl` resolves the `avl` executable from the compiler package
 installed on the preceding line.
 
-Open the printed loopback URL. This is the immediately runnable end-to-end
+Open the printed loopback URL. Browsers can treat HTTP loopback as potentially
+trustworthy, but copying the server's private-LAN address to a phone is not the
+same security context. Use HTTPS through a trusted local certificate or tunnel
+when testing on another device. This is the immediately runnable end-to-end
 path: the generated directory includes source frames, project, exact package
-dependencies, and watch compiler. When integrating the built
-asset into a package-aware web application, register the element once and use
-ordinary markup like this illustrative snippet:
+dependencies, and watch compiler. When integrating the built asset into a
+package-aware web application, register the element once and use ordinary
+markup like this illustrative snippet:
 
 ```html
 <script type="module" src="/motion.js"></script>

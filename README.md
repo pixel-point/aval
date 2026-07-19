@@ -6,8 +6,8 @@ reversals, and packed transparency.
 
 One logical animation is published as a codec bundle. Each codec gets its own
 AVAL 1.0 file—AV1, VP9, H.265/HEVC, or H.264—and the browser selects the first
-ordered `<source>` with a supported rendition. The state graph and authored
-timing are identical in every file.
+ordered `<source>` that decodes, validates, and presents an initial frame. The
+state graph and authored timing are identical in every file.
 
 ## Five-minute start
 
@@ -159,10 +159,13 @@ npm run build
 npm run test:browser:reference
 ```
 
-Browser animation is qualified in authored source order. Unsupported codec
-candidates fall through to the next `<source>`; when none can run, preparation
-rejects and one fatal `error` event identifies the failed source generation.
-AVAL never selects or reveals alternate application content.
+Browser animation is qualified in authored source order. A positive WebCodecs
+configuration probe remains provisional; unsupported configurations and
+codec-specific startup qualification failures fall through to the next
+`<source>`. Once `interactiveReady` is published, the selected codec never
+hot-switches. When no candidate qualifies, preparation rejects and one fatal
+`error` event identifies the failed source generation. AVAL never selects or
+reveals alternate application content.
 
 ## TODO
 

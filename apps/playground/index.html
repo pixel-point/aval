@@ -12,7 +12,8 @@
       <h1>One motion, four codec sources</h1>
       <p class="lede">
         The player evaluates these direct-child sources in author order and
-        keeps the first exact WebCodecs configuration this browser supports.
+        keeps the first one that decodes, validates, and presents an initial
+        frame.
       </p>
       <section class="stage" aria-labelledby="source-order">
         <div class="motion-frame">
@@ -33,7 +34,10 @@
         </div>
         <div class="codec-panel">
           <h2 id="source-order">Try this codec first</h2>
-          <p class="codec-help">Choose a source. Unsupported codecs fall through to the next browser-compatible file.</p>
+          <p class="codec-help">
+            Choose a source. Unsupported configurations and codec-specific
+            startup failures fall through to the next authored file.
+          </p>
           <ol id="codec-list" aria-label="Preferred codec">
             <li>
               <button class="codec-choice" type="button" data-codec="av1" aria-pressed="true" disabled>

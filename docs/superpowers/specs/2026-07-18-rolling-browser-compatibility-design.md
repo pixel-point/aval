@@ -160,10 +160,13 @@ Only this result is called **playback qualified**. The proof is not a parallel
 demo decoder and does not duplicate production logic.
 
 Failure before qualification retires that candidate and advances to the next
-authored codec source when the failure is codec-, decoder-, frame-, or
-presentation-path specific. Network, integrity, malformed-format, and policy
-failures retain their distinct codes and do not get disguised as codec
-unavailability.
+authored codec source only for a narrowly classified decoder qualification
+failure. The failure must be `worker-decode-failure` with bounded evidence of
+unsupported configuration, invalid output, or an `EncodingError`/
+`NotSupportedError` during configure, decode, flush, or output validation.
+Network, integrity, malformed-format, worker transport, renderer/presentation,
+resource, cleanup, abort, watchdog, and policy failures retain their distinct
+codes and do not get disguised as codec unavailability.
 
 Once an animated candidate is qualified and published, AVAL does not hot-switch
 codecs during active playback. A later fatal failure terminates the generation

@@ -27,11 +27,13 @@ set readiness to `error`, reject with `AvalPlaybackError`, and remain in
 `lastFailure` until a newer source generation starts. Expected supersession,
 disconnect, and disposal aborts are quiet.
 
-`runtime.decoderDiagnostics` contains at most one terminal record per physical
-decoder lane. It preserves sanitized phase/code/exception and first-frame
-metadata without asset bytes, URLs, stack traces, decoder configs, or frame
-objects. This bounded failure evidence is present even when verbose trace
-capture is disabled.
+`runtime.decoderDiagnostics` contains the latest terminal record for each
+`(sourceIndex, lane)` pair. The element retains two decoder lanes for up to 128
+authored sources (256 records maximum), so rejected-source evidence can coexist
+with diagnostics from the selected source. Records preserve sanitized
+phase/code/exception and first-frame metadata without asset bytes, URLs, stack
+traces, decoder configs, or frame objects. This bounded failure evidence is
+present even when verbose trace capture is disabled.
 
 `cleanup` is either `null` or the immutable receipt for the most recently
 retired source and identifies both element and source generations. A receipt is

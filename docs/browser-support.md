@@ -28,17 +28,25 @@ present a real initial frame. It does not sniff the user agent or call media
 element `canPlayType()`.
 
 A deterministically unsupported codec/configuration advances to the next
-source. Network, CORS/CSP, integrity, malformed-asset, WebGL/resource, and
-general decoder failures are terminal for that generation. They reject
-`prepare()` with `AvalPlaybackError` and raise one fatal
-`error` event; the application decides how to respond. Within a file,
-renditions remain in authored quality order. The runtime never silently changes
-canvas size, frame rate, or active codec.
+authored rendition or source. A pre-commit decoder failure also advances when
+its bounded diagnostic evidence identifies a codec qualification failure:
+unsupported configuration, invalid decoded output, or an `EncodingError`/
+`NotSupportedError` during configure, decode, flush, or output validation.
+Network, CORS/CSP, integrity, malformed-asset, worker transport,
+WebGL/resource, renderer/context, cleanup, abort, and watchdog failures remain
+terminal for that generation. They reject `prepare()` with
+`AvalPlaybackError` and raise one fatal `error` event; the application decides
+how to respond. Within a file, renditions remain in authored quality order.
+After `interactiveReady`, a fatal decoder failure is terminal and never
+re-enters source selection. The runtime never silently changes canvas size,
+frame rate, or active codec.
 
 H.264 8-bit 4:2:0 is the mandatory compatibility rendition and should use the
 minimum practical profile and level for the asset. AV1, VP9, and H.265/HEVC are
 optional efficiency paths and are reported as playable only after production
-qualification succeeds. Ten-bit AV1 is not a baseline requirement.
+qualification succeeds. Authors normally place them before H.264 in preferred
+order; source order, not a hardcoded codec ranking, defines the ladder. Ten-bit
+AV1 is not a baseline requirement.
 
 <!-- BEGIN GENERATED SUPPORT -->
 | Profile | Fatal error boundary | Runtime scheduling | Observed display |

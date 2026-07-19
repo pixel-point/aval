@@ -14,15 +14,24 @@ URLs and integrity belong only to direct-child `<source>` elements.
 
 Each direct child requires nonempty `src` and an exact
 `application/vnd.aval; codecs="..."` type; its `integrity` is optional.
-`crossorigin` is shared by the host. Child order is author preference. The
-first file containing an eligible, exactly supported rendition wins. Same-task
-source mutations coalesce. A new source snapshot first completely disposes the
-old generation; only the newest pending snapshot may start. Policy, fit, input,
-state, and size changes do not replace the asset.
+`crossorigin` is shared by the host. Child order is author preference. A
+positive `VideoDecoder.isConfigSupported()` result is provisional: an animated
+candidate wins only after the production path decodes, transfers, validates,
+and presents its initial frame. With sources authored as AV1, VP9, HEVC, then
+H.264, that order is the startup ladder; AVAL does not impose a codec order of
+its own. Same-task source mutations coalesce. A new source snapshot first
+completely disposes the old generation; only the newest pending snapshot may
+start. Policy, fit, input, state, and size changes do not replace the asset.
 
-Unsupported codec/configuration outcomes advance to the next source. Network,
-CORS/CSP, integrity, malformed-asset, resource, and decoder failures are
-terminal for that generation. The active codec never hot-switches.
+An unsupported configuration advances to the next authored rendition or
+source. Before `interactiveReady`, a decoder startup failure advances only
+when bounded diagnostics identify codec qualification evidence such as
+unsupported configuration, invalid output, or `EncodingError`/
+`NotSupportedError` during configure, decode, flush, or output validation.
+Network, CORS/CSP, integrity, malformed-asset, resource, worker transport,
+renderer/context, cleanup, abort, and watchdog failures are terminal for that
+generation. Once a candidate reaches `interactiveReady`, every later fatal
+failure is terminal and the active codec never hot-switches.
 
 Properties validate synchronously and never mutate on invalid input. Invalid
 HTML attribute text falls back to the documented default and emits a nonfatal,
