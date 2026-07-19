@@ -2,8 +2,8 @@
 
 **Date:** 2026-07-18
 
-**Status:** Approved; desktop-matrix amendment approved by the user's
-autonomous-continuation instruction on 2026-07-19
+**Status:** Approved; desktop-matrix and Firefox WebCodecs-floor amendments
+approved by the user's autonomous-continuation instruction on 2026-07-19
 
 **Decision:** AVAL owns deterministic playback qualification and structured
 failure reporting. It does not generate, select, reveal, or otherwise own
@@ -36,14 +36,14 @@ to make a browser test pass.
 Every release is certified on these reference configurations:
 
 - Windows 11 with the current, previous, and previous-two stable Chrome and
-  Firefox releases plus each browser's retained build nearest the 24-month
-  boundary, and branded Brave current and boundary releases whose exact
-  Chromium builds are recorded;
+  Firefox releases, Chrome's retained build nearest the 24-month boundary,
+  Firefox 130 as its decoder-primitive floor, and branded Brave current and
+  boundary releases whose exact Chromium builds are recorded;
 - the current supported macOS generation and the macOS generation nearest the
   24-month boundary, using the three latest available stable Safari point
   releases, the current/previous/previous-two stable Chrome and Firefox
-  releases plus their 24-month sentinels, and branded Brave current and
-  boundary releases;
+  releases plus Chrome's 24-month sentinel and Firefox 130, and branded Brave
+  current and boundary releases;
 - the three latest current-generation Mobile Safari point releases on real
   iPhones, plus the previous iOS major closest to the 24-month boundary;
 - Android 15 with the exactly observed Chrome installed by the device provider,
@@ -81,15 +81,20 @@ readiness signal that disagrees with the canvas fails the configuration.
 ### 2.2 Compatibility boundary
 
 The release also exercises the browser and OS builds closest to the 24-month
-boundary, currently Chrome 127, Firefox 128, Safari/iOS 18, Android 15, and the
-corresponding retained macOS generation available from the device provider.
-Full interaction is required on a certified reference device. iOS 17 and
-Android 14 may be run as informational beyond-policy diagnostics, but do not
-gate a release. A configuration that cannot provide the required decoder or
-renderer path is compatibility-safe outside the certified tier only when AVAL
-terminates deterministically and raises the public failure contract. It is not
-reported as playback-compatible. AVAL itself does not display alternate
-content.
+boundary, currently Chrome 127, Safari/iOS 18, Android 15, and the corresponding
+retained macOS generation available from the device provider. Firefox is the
+one feature-floor exception: Mozilla first shipped the required desktop
+WebCodecs decoder primitive in Firefox 130, so Firefox 130 is the oldest
+certified playback release. Firefox 128 and 129 remain mandatory negative
+sentinels that must reject preparation with one deterministic public error;
+they are never reported as playback-compatible. Supporting them would require
+a different media backend, which is outside this design. Full interaction is
+required on every certified reference device. iOS 17 and Android 14 may be run
+as informational beyond-policy diagnostics, but do not gate a release. Any
+other configuration that cannot provide the required decoder or renderer path
+is compatibility-safe outside the certified tier only when AVAL terminates
+deterministically and raises the public failure contract. AVAL itself does not
+display alternate content.
 
 Brave results must come from a branded Brave binary. Chromium or Chrome results
 may guide diagnosis but cannot be relabeled as Brave certification. When the
@@ -289,10 +294,12 @@ Playwright engine tests remain the fast CI gate but are not treated as branded
 browser certification. Before release, BrowserStack or equivalent real-browser
 evidence covers:
 
-- Windows 11 Chrome and Firefox current/current-1/current-2 plus the 24-month
-  sentinels, and branded Brave current plus its 24-month sentinel;
+- Windows 11 Chrome current/current-1/current-2 plus its 24-month sentinel,
+  Firefox current/current-1/current-2 plus Firefox 130, Firefox 128/129 negative
+  capability sentinels, and branded Brave current plus its 24-month sentinel;
 - current and boundary macOS generations with Safari current/current-1/
-  current-2, Chrome and Firefox current/current-1/current-2 plus their 24-month
+  current-2, Chrome current/current-1/current-2 plus its 24-month sentinel,
+  Firefox current/current-1/current-2 plus Firefox 130 and the 128/129 negative
   sentinels, and branded Brave current plus its 24-month sentinel;
 - real iPhones for current, previous, and boundary Safari generations; and
 - Android 15 on a real Samsung or comparable device; Android 16 joins the
@@ -348,9 +355,10 @@ This design does not:
 
 The work is complete when:
 
-1. current and boundary Chrome, Firefox, Safari, Brave, iOS, and Android
+1. current and boundary Chrome, Firefox 130+, Safari, Brave, iOS, and Android
    reference configurations qualify, render correctly, and complete authored
-   interaction states through the mandatory H.264 path;
+   interaction states through the mandatory H.264 path, while Firefox 128/129
+   produce the required deterministic unsupported error;
 2. optional codecs are reported playable only after real qualification;
 3. packed alpha is visually correct on the Android reference devices;
 4. every terminal failure produces one actionable public error and rejected
@@ -358,8 +366,9 @@ The work is complete when:
 5. no tested failure leaves a blank-but-nonterminal or indefinitely preparing
    generation;
 6. every in-policy 24-month sentinel qualifies and completes its interaction
-   witness; deterministic terminal errors remain the required behavior only
-   outside the certified window;
+   witness except the explicit Firefox 128/129 decoder-primitive sentinels,
+   which must terminate deterministically; other deterministic terminal errors
+   remain the required behavior only outside the certified window;
 7. every required Windows, macOS, iOS, and Android branded-browser slot has
    exact-version playback and state-transition evidence; and
 8. the branded-browser evidence and documented support matrix are committed for
