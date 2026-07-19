@@ -10,6 +10,7 @@ import {
 } from "@pixel-point/aval-player-web";
 
 import { ForegroundMeasurementGuard, type MeasurementInterruption } from "./foreground-guard.js";
+import { deriveBrowserEnvironmentIdentity } from "./environment-identity.js";
 import { runLifecycleStress } from "./lifecycle-stress.js";
 import { LOCAL_NETWORK_FAULTS, runNetworkFaultStress } from "./network-fault-stress.js";
 import { createPublicMotionElement, preparePublicMotion, retirePublicMotion } from "./public-element-host.js";
@@ -327,10 +328,21 @@ export class CertificationApp implements CertificationBrowserApi {
     });
     const scenarios = full
       ? LOCAL_NETWORK_FAULTS
-      : (["ignored-initial-range", "changed-etag", "corrupt-bootstrap-unit"] as const);
+      : (["fatal-boundary-network"] as const);
+    const environmentIdentity = await deriveBrowserEnvironmentIdentity(config.environment);
     const network = signal.aborted
       ? Object.freeze([])
-      : await runNetworkFaultStress({ parent: this.#stage, scenarios, timeoutMs: full ? 20_000 : 8_000 });
+      : await runNetworkFaultStress({
+          parent: this.#stage,
+          scenarios,
+          timeoutMs: full ? 20_000 : 8_000,
+          candidateManifestDigest: config.candidateManifestDigest,
+          fixtureDigest: config.fixtureDigest,
+          harnessDigest: config.harnessDigest,
+          runId: config.runId,
+          profileId: environmentIdentity.profileId,
+          environmentDigest: environmentIdentity.environmentDigest
+        });
     const failures = [
       ...(lifecycle.status === "failed" ? lifecycle.failures : []),
       ...network.filter(({ status }) => status === "failed").map(({ scenario }) => `network-fault-${scenario}`)
@@ -435,10 +447,8 @@ function browserCapabilities(): Readonly<Record<string, boolean | number | strin
 
 function alternateSource(sourceUrl: string): string {
   const url = new URL(sourceUrl, location.href);
-  if (url.pathname === "/__m8__/asset") {
-    url.searchParams.set("session", "m9-alternate");
-  }
-  return `${url.pathname}${url.search}`;
+  url.hash = "aval-certification-alternate";
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function emptyLifecycle(requestedCycles: number): Awaited<ReturnType<typeof runLifecycleStress>> {

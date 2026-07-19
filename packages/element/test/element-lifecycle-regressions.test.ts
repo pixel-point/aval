@@ -323,6 +323,38 @@ describe("element lifecycle regressions", () => {
     expect(element.getDiagnostics().lastFailure).toBeNull();
   });
 
+  it.each(["setState", "resume"] as const)(
+    "rejects a %s continuation with the retained terminal error",
+    async (operation) => {
+      harness.brokerMode = "immediate";
+      const { element } = createConnectedElement("motion.avl");
+      await element.prepare();
+      if (operation === "resume") element.pause();
+      const events: CustomEvent[] = [];
+      element.addEventListener("error", ((event: CustomEvent) => {
+        events.push(event);
+      }) as EventListener);
+
+      const pending = operation === "setState"
+        ? element.setState("hover")
+        : element.resume();
+      void pending.catch(() => undefined);
+      const terminal = playerAt(0).failActive();
+
+      await expect(pending).rejects.toBe(terminal);
+      expect(events).toHaveLength(1);
+      expect(events[0]!.detail).toMatchObject({ fatal: true, generation: 1 });
+      expect(events[0]!.detail.failure).toBe(terminal.failure);
+      await expect(element.prepare()).rejects.toBe(terminal);
+      await eventually(() => playerAt(0).disposed());
+      expect(element.getDiagnostics()).toMatchObject({
+        readiness: "error",
+        lastFailure: terminal.failure,
+        outstanding: { player: 0, decoder: 0, bytes: 0 }
+      });
+    }
+  );
+
   it("retires an active failed generation before publishing one retained error", async () => {
     harness.brokerMode = "immediate";
     const { element, source } = createConnectedElement("motion.avl");

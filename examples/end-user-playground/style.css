@@ -187,7 +187,12 @@ h1 {
   image-rendering: auto;
 }
 
-.motion-target aval-player > img {
+.motion-target > aval-player,
+.motion-target > img {
+  grid-area: 1 / 1;
+}
+
+.motion-target > img {
   width: 104px;
   height: 104px;
   object-fit: contain;
@@ -270,8 +275,7 @@ code {
   box-shadow: 0 0 0 4px rgba(77, 125, 54, 0.16);
 }
 
-.runtime-line:has([data-status="error"]) .status-dot,
-.runtime-line:has([data-status="fallback"]) .status-dot {
+.runtime-line:has([data-status="error"]) .status-dot {
   background: var(--orange);
   box-shadow: 0 0 0 4px rgba(240, 122, 58, 0.16);
 }

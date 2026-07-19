@@ -29,7 +29,7 @@ img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 ```
 
 Replace the asset origin and tighten unrelated directives for the host
-application. Serve application scripts and author fallback images as files
+application. Serve application scripts and any consumer-owned alternate images as files
 allowed by those directives; an inline `<script>`, inline `<style>`, style
 attribute, `data:` resource, or blob worker is not needed. No remote origin is
 needed when modules and assets are same-origin.

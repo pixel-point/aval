@@ -47,14 +47,15 @@
               <source src="/favorite/vp9.avl" type='application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"' integrity="sha256-wsVtq1+xLxCbigltiJVTDEgpOKgWJWh6psq42qs/pC0=">
               <source src="/favorite/h265.avl" type='application/vnd.aval; codecs="hvc1.1.6.L30.90"' integrity="sha256-Br1XVfIzuplvZ8UGAfxhsHSMJEdUCwYviHAi7nAsRf4=">
               <source src="/favorite/h264.avl" type='application/vnd.aval; codecs="avc1.64000A"' integrity="sha256-p31hZkAWL28axQTcObxdVczoPgknKGzJe8VjK7EPOJg=">
-              <img
-                slot="fallback"
-                src="/favorite.png"
-                alt=""
-                width="48"
-                height="48"
-              >
             </aval-player>
+            <img
+              id="favorite-unavailable"
+              src="/favorite.png"
+              alt=""
+              width="48"
+              height="48"
+              hidden
+            >
           </button>
           <p class="stage-hint">Hover or focus the icon</p>
         </div>
@@ -64,7 +65,7 @@
           <h2 id="demo-title">Favorite interaction</h2>
           <p class="description">
             This is ordinary HTML backed by a checked-in <code>.avl</code> asset.
-            The host-owned PNG stays available when the animated runtime is unsupported.
+            The application can reveal its own PNG if animated playback fails.
           </p>
 
           <div class="runtime-line" aria-live="polite" aria-atomic="true">

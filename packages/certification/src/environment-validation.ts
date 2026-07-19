@@ -3,6 +3,11 @@ import { canonicalJsonBytes } from "./canonical-json.js";
 import type { RuntimeEnvironment } from "./model.js";
 
 export function createPublicProfileId(environment: RuntimeEnvironment): string {
+  return `profile-${runtimeEnvironmentDigest(environment).slice(0, 20)}`;
+}
+
+/** Canonical identity shared by runtime reports and browser-produced evidence ledgers. */
+export function runtimeEnvironmentDigest(environment: RuntimeEnvironment): string {
   const publicFields = {
     platformClass: environment.platformClass,
     browser: environment.browser,
@@ -12,8 +17,7 @@ export function createPublicProfileId(environment: RuntimeEnvironment): string {
     power: environment.power,
     capabilities: environment.capabilities
   };
-  const digest = createHash("sha256").update(canonicalJsonBytes(publicFields)).digest("hex");
-  return `profile-${digest.slice(0, 20)}`;
+  return createHash("sha256").update(canonicalJsonBytes(publicFields)).digest("hex");
 }
 
 export function assertForegroundEnvironment(input: {

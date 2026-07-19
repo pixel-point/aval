@@ -11,7 +11,6 @@ const PUBLIC_RUNTIME_EXPORTS = Object.freeze([
   "PlayerResourceAccount",
   "RuntimeSessionLifecycle",
   "SourceSupportProbe",
-  "StateFallbackStore",
   "VideoCandidateFactory",
   "VideoSourceSelectionError",
   "VisibilityPolicyCoordinator",
@@ -63,6 +62,12 @@ const PRIVATE_RESOURCE_EXPORTS = Object.freeze([
   "verifySha256AndPromote"
 ] as const);
 
+const REMOVED_FALLBACK_EXPORTS = Object.freeze([
+  "PlaybackFallbackError",
+  "StateFallbackStore",
+  "summarizeStaticReason"
+] as const);
+
 const VIDEO_FIXTURE = createRuntimeTestAsset();
 
 describe("player-web public boundary", () => {
@@ -75,6 +80,14 @@ describe("player-web public boundary", () => {
     for (const name of PRIVATE_RESOURCE_EXPORTS) {
       expect(runtime[name], name).toBeUndefined();
     }
+    for (const name of REMOVED_FALLBACK_EXPORTS) {
+      expect(runtime[name], name).toBeUndefined();
+    }
+    expect(api.STATIC_REASONS).toEqual([
+      "reduced-motion",
+      "visibility-suspended",
+      "decoder-queued"
+    ]);
   });
 
   it("composes asset, page, decoder, reclamation, and lifecycle owners through only package exports", async () => {

@@ -43,7 +43,7 @@ export class IntegratedTraceHarness {
   readonly #records: Readonly<RuntimeTraceRecord>[] = [];
   #nextIndex = 0;
   #underflows = 0;
-  #fallbacks = 0;
+  #staticTransitions = 0;
   #settledRequests = 0;
   #cleanedFrames = 0;
 
@@ -132,10 +132,17 @@ export class IntegratedTraceHarness {
   }
 
   #updateGraphCounters(result: Readonly<MotionGraphResult>): void {
+    if (
+      result.operation === "begin-static" ||
+      result.operation === "recover-static"
+    ) {
+      this.#staticTransitions = checkedIncrement(
+        this.#staticTransitions,
+        "static transition count"
+      );
+    }
     for (const effect of result.effects) {
-      if (effect.type === "fallback") {
-        this.#fallbacks = checkedIncrement(this.#fallbacks, "fallback count");
-      } else if (effect.type === "settle") {
+      if (effect.type === "settle") {
         this.#settledRequests = checkedAdd(
           this.#settledRequests,
           effect.requestIds.length,
@@ -148,7 +155,7 @@ export class IntegratedTraceHarness {
   #counters(): Readonly<RuntimeTraceCounters> {
     return Object.freeze({
       underflows: this.#underflows,
-      fallbacks: this.#fallbacks,
+      staticTransitions: this.#staticTransitions,
       settledRequests: this.#settledRequests,
       cleanedFrames: this.#cleanedFrames
     });
@@ -170,7 +177,7 @@ function operationKind(
   result: Readonly<MotionGraphResult>
 ): RuntimeTraceRecord["kind"] {
   if (result.operation === "recover-static" || result.operation === "begin-static") {
-    return "fallback";
+    return "static-transition";
   }
   if (result.operation === "begin-animated") return "readiness";
   if (result.operation === "dispose") return "cleanup";
@@ -184,7 +191,7 @@ function graphTrace(
     operation: result.operation,
     snapshot: result.snapshot,
     presentation: result.presentation,
-    effects: result.effects
+    effects: Object.freeze([...result.effects])
   });
 }
 

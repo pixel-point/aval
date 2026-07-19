@@ -431,6 +431,7 @@ class PlayerImpl implements Player {
   #contextRecoveries = 0;
   #cleanupFailureCount = 0;
   #animationResourcesRetired = false;
+  #animationResourceRetirement: Promise<void> | null = null;
   #decoderDiagnostics: readonly Readonly<PlayerDecoderDiagnostic>[];
   #capturedPoolDiagnostics: readonly Readonly<DecoderPoolDiagnostic>[] =
     Object.freeze([]);
@@ -555,12 +556,22 @@ class PlayerImpl implements Player {
   public async setState(state: string): Promise<void> {
     if (!this.#states.has(state)) throw new RangeError("Unknown AVAL state");
     await this.prepare();
-    const result = this.#requireGraph().request(state);
-    const promise = this.#register(result);
-    this.#applyWithoutDraw(result);
-    this.#prepareRoutes(this.#requireGraph().snapshot());
-    this.#schedule();
-    return promise;
+    const preparedTerminal = this.#terminalWork;
+    if (preparedTerminal !== null) throw await preparedTerminal;
+    try {
+      const result = this.#requireGraph().request(state);
+      const promise = this.#register(result);
+      this.#applyWithoutDraw(result);
+      this.#prepareRoutes(this.#requireGraph().snapshot());
+      this.#schedule();
+      await promise;
+    } catch (error) {
+      const terminal = this.#terminalWork;
+      if (terminal !== null) throw await terminal;
+      throw error;
+    }
+    const settledTerminal = this.#terminalWork;
+    if (settledTerminal !== null) throw await settledTerminal;
   }
 
   public send(event: string): boolean {
@@ -604,10 +615,14 @@ class PlayerImpl implements Player {
   public async resume(): Promise<void> {
     const epoch = this.#pauseEpoch;
     await this.prepare();
+    const preparedTerminal = this.#terminalWork;
+    if (preparedTerminal !== null) throw await preparedTerminal;
     if (epoch !== this.#pauseEpoch) return;
     this.#paused = false;
     this.#resetClock();
     this.#schedule();
+    const resumedTerminal = this.#terminalWork;
+    if (resumedTerminal !== null) throw await resumedTerminal;
   }
 
   public async setMotion(
@@ -817,6 +832,8 @@ class PlayerImpl implements Player {
     if (this.#staticReason !== null) {
       this.#applyWithoutDraw(graph.beginStatic(this.#staticReason));
       await this.#retireAnimationResources();
+      const terminal = this.#terminalWork;
+      if (terminal !== null) throw await terminal;
       return this.#result();
     }
     this.#preparationDeadline.signal.throwIfAborted();
@@ -885,6 +902,8 @@ class PlayerImpl implements Player {
     }
     if (recovery !== null) this.#applyWithoutDraw(recovery);
     await this.#retireAnimationResources();
+    const terminal = this.#terminalWork;
+    if (terminal !== null) throw await terminal;
     this.#prepared = true;
     this.#preparationDeadline.complete();
     const result = this.#result();
@@ -990,8 +1009,23 @@ class PlayerImpl implements Player {
     }
   }
 
-  async #retireAnimationResources(): Promise<void> {
-    if (this.#animationResourcesRetired) return;
+  #retireAnimationResources(): Promise<void> {
+    if (this.#animationResourcesRetired) return Promise.resolve();
+    if (this.#animationResourceRetirement !== null) {
+      return this.#animationResourceRetirement;
+    }
+    const operation = this.#performAnimationResourceRetirement();
+    this.#animationResourceRetirement = operation;
+    const clear = (): void => {
+      if (this.#animationResourceRetirement === operation) {
+        this.#animationResourceRetirement = null;
+      }
+    };
+    void operation.then(clear, clear);
+    return operation;
+  }
+
+  async #performAnimationResourceRetirement(): Promise<void> {
     this.#cancelFrame();
     this.#preparationDeadline.cancel(abortError());
     const active = this.#active;
@@ -1312,9 +1346,6 @@ class PlayerImpl implements Player {
           else capability.reject(requestError(effect.outcome.error));
         }
       });
-      return;
-    }
-    if (effect.type === "fallback") {
       return;
     }
     if (effect.type === "requestedstatechange") {
@@ -1860,7 +1891,13 @@ class PlayerImpl implements Player {
   }
 
   #fail(reason: unknown): void {
-    if (this.#disposed || this.#failed || this.#staticReason !== null) return;
+    if (this.#disposed || this.#failed) return;
+    if (isAbort(reason) && (
+      this.#input.signal.aborted ||
+      this.#staticReason !== null ||
+      this.#animationResourceRetirement !== null ||
+      this.#animationResourcesRetired
+    )) return;
     void this.#terminate(playbackFailureCode(reason), "playback");
   }
 

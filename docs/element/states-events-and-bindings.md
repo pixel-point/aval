@@ -14,7 +14,12 @@ motion.send("retry.requested");
 Declarative state is latest-wins and may be set before metadata:
 
 ```html
-<aval-player src="status.avl" state="loading"></aval-player>
+<aval-player state="loading">
+  <source
+    src="status.avl"
+    type='application/vnd.aval; codecs="avc1.42E01E"'
+  >
+</aval-player>
 ```
 
 Automatic input never guesses a destination. It routes only the manifest's

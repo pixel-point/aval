@@ -16,22 +16,41 @@ installed on the preceding line.
 
 Open the printed loopback URL. This is the immediately runnable end-to-end
 path: the generated directory includes source frames, project, exact package
-dependencies, author fallback, and watch compiler. When integrating the built
+dependencies, and watch compiler. When integrating the built
 asset into a package-aware web application, register the element once and use
 ordinary markup like this illustrative snippet:
 
 ```html
 <script type="module" src="/motion.js"></script>
 
-<aval-player src="/my-motion.avl" width="320" height="320">
-  <img slot="fallback" src="/my-motion.png" alt="">
+<aval-player id="motion" width="320" height="320">
+  <source
+    src="/my-motion/h264.avl"
+    type='application/vnd.aval; codecs="avc1.42E01E"'
+  >
 </aval-player>
+<img id="motion-unavailable" src="/my-motion.png" alt="" hidden>
 ```
 
 ```js
 // motion.js, resolved by your package-aware web build
-import { defineAvalElement } from "@pixel-point/aval-element";
+import { AvalPlaybackError, defineAvalElement } from "@pixel-point/aval-element";
+
+const motion = document.querySelector("#motion");
+const unavailable = document.querySelector("#motion-unavailable");
+motion.addEventListener("error", (event) => {
+  if (event.detail.fatal) unavailable.hidden = false;
+});
+motion.addEventListener("readinesschange", () => {
+  if (motion.readiness === "interactiveReady") unavailable.hidden = true;
+});
 defineAvalElement();
+
+try {
+  await motion.prepare();
+} catch (error) {
+  if (!(error instanceof AvalPlaybackError)) throw error;
+}
 ```
 
 A one-state compiled body loops without JavaScript seeking or a loop range.

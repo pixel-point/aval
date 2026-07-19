@@ -34,6 +34,7 @@ interface RequestRecord {
 }
 
 const PREFIX = "/__aval_v1__/";
+const FATAL_BOUNDARY_PATH = "/__aval_certification__/fatal-boundary-network.avl";
 const SESSION = /^[A-Za-z0-9_-]{1,64}$/u;
 const CODECS = Object.freeze([...VIDEO_CODECS].reverse());
 const FIXTURE_ROOT = fileURLToPath(new URL("../../fixtures/conformance/v1/", import.meta.url));
@@ -68,6 +69,23 @@ export function v1HttpFixturePlugin(): Plugin {
     next: () => void
   ): Promise<void> {
     const url = new URL(request.url ?? "/", "http://aval.invalid");
+    if (url.pathname === FATAL_BOUNDARY_PATH) {
+      if (request.method !== "GET") return methodNotAllowed(response);
+      const fixture = await load();
+      const asset = fixture.assets.get("h264.avl");
+      if (asset === undefined) throw new Error("fatal-boundary fixture is unavailable");
+      const rangeHeader = header(request, "range");
+      const range = rangeHeader === null ? null : parseRange(rangeHeader, asset.bytes.byteLength);
+      if (range !== null && (range.start === 0 || range.start === 64)) {
+        const body = asset.bytes.subarray(range.start, range.end + 1);
+        response.setHeader("Accept-Ranges", "bytes");
+        response.setHeader("Content-Range", `bytes ${String(range.start)}-${String(range.end)}/${String(asset.bytes.byteLength)}`);
+        sendBytes(response, 206, body, "application/vnd.aval", asset.etag);
+        return;
+      }
+      writeJson(response, 503, { error: "injected-network-failure" });
+      return;
+    }
     if (!url.pathname.startsWith(PREFIX)) {
       next();
       return;

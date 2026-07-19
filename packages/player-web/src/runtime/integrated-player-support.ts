@@ -14,7 +14,6 @@ import {
 } from "./errors.js";
 import {
   IntegratedPlaybackInvariantError,
-  PlaybackFallbackError,
   type IntegratedCandidateAttempt,
   type IntegratedContentTickContext,
   type IntegratedPlaybackTraceState,
@@ -22,9 +21,9 @@ import {
   type IntegratedPreparedContentTick,
   type IntegratedPlayerOptions,
   type IntegratedRealtimeDriverOptions,
-  type IntegratedFallbackStore,
   type IntegratedTimerHost
 } from "./integrated-player-contracts.js";
+import type { IntegratedStateStore } from "./state-store.js";
 import type { RuntimeMediaPresentation } from "./model.js";
 import { MOTION_POLICIES } from "./motion-policy.js";
 import {
@@ -42,7 +41,7 @@ export const DEFAULT_INTEGRATED_TIMERS: IntegratedTimerHost = Object.freeze({
 });
 export const DEFAULT_INTEGRATED_PREPARATION_TIMEOUT_MS = 5_000 as const;
 
-export function disposeInvalidIntegratedFallbackStore(value: unknown): void {
+export function disposeInvalidIntegratedStateStore(value: unknown): void {
   if (value === null || typeof value !== "object") return;
   try {
     const dispose = Reflect.get(value, "dispose");
@@ -66,7 +65,7 @@ export function snapshotIntegratedRealtimeOptions(
 
 export function normalizeIntegratedAnimatedFailure(
   error: unknown,
-  fallbackCode: RuntimeFailureCode,
+  defaultCode: RuntimeFailureCode,
   context: Readonly<IntegratedContentTickContext>
 ): Readonly<RuntimeFailure> {
   if (isRuntimePlaybackError(error)) return error.failure;
@@ -74,12 +73,23 @@ export function normalizeIntegratedAnimatedFailure(
     ? Number(context.presentationOrdinal)
     : undefined;
   return normalizeRuntimeFailure(
-    fallbackCode,
+    defaultCode,
     error,
     ordinal === undefined
       ? { operation: "content-tick" }
       : { operation: "content-tick", ordinal }
   );
+}
+
+export function integratedReadinessError(
+  cause: unknown,
+  operation: string
+): RuntimePlaybackError {
+  return new RuntimePlaybackError(normalizeRuntimeFailure(
+    "readiness-failure",
+    cause,
+    { operation }
+  ));
 }
 
 export function integratedRealtimeDeadlineUs(deadlineMs: number): number {
@@ -97,9 +107,6 @@ export function validateIntegratedPlayerOptions(
     throw new TypeError("integrated player options must be an object");
   }
   const assetSource = captureIntegratedPlayerAssetSource(options);
-  if (typeof options.createFallbackStore !== "function") {
-    throw new TypeError("integrated player requires a fallback-store factory");
-  }
   if (
     options.candidateFactory === null ||
     typeof options.candidateFactory !== "object" ||
@@ -206,24 +213,22 @@ export function validateIntegratedPlayerOptions(
   return assetSource;
 }
 
-export function validateIntegratedFallbackStore(
-  store: IntegratedFallbackStore
+export function validateIntegratedStateStore(
+  store: IntegratedStateStore
 ): void {
   if (store === null || typeof store !== "object") {
-    throw new TypeError("fallback-store factory returned no store");
+    throw new TypeError("integrated state store is unavailable");
   }
   for (const method of [
     "installInitial",
     "validateAll",
     "presentState",
     "currentState",
-    "coverCurrent",
-    "revealAnimated",
     "settled",
     "dispose"
   ] as const) {
     if (typeof store[method] !== "function") {
-      throw new TypeError(`integrated fallback store is missing ${method}`);
+      throw new TypeError(`integrated state store is missing ${method}`);
     }
   }
 }
@@ -496,7 +501,7 @@ export function assertIntegratedStaticPresentation(
   state: string
 ): void {
   if (presentation.kind !== "static" || presentation.state !== state) {
-    throw new PlaybackFallbackError(
+    throw new IntegratedPlaybackInvariantError(
       "graph/static presentation identity did not match"
     );
   }

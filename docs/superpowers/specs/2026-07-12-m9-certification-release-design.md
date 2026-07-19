@@ -193,6 +193,11 @@ use canonical JSON with stable key ordering and newline behavior. The candidate
 digest appears in every certification report; both digests appear in the final
 release notes.
 
+The exact `certification.html` harness digest becomes certification authority
+only after a descriptor-backed stable read verifies the manifest length and
+digest. The artifact must use the `browser-harness` role and `text/html` media
+type; a manifest-only digest claim is insufficient.
+
 ## 5. Continuous-Integration Architecture
 
 CI uses least-privilege, SHA-pinned actions and a lockfile-only install. Jobs
@@ -447,10 +452,13 @@ The initial desktop matrix follows the master design and adds branded Edge:
   Chrome, Edge, and Firefox; Safari is recorded as unavailable; and
 - 60 Hz and 120 Hz modes where the named display/platform exposes each mode.
 
-"Current stable" is resolved only at run time and replaced in the report by an
-exact full version/build/channel. Every exact production AVC configuration is
+Rolling support labels are resolved into exact matrix-policy versions before a
+run starts; moving aliases are not policy authority. The report records an
+exact numeric dotted build and channel. Chrome, Microsoft Edge, and Firefox
+build majors must match their product-version major, while Safari/WebKit build
+identifiers remain independently numeric. Every exact production AVC configuration is
 probed. A browser that lacks it receives an `unsupported` animated result plus
-the required static-fallback conformance result. It is never silently tested
+the required fatal-error-boundary result. It is never silently tested
 with VP8, a different H.264 profile, Playwright's engine, or another browser.
 
 The 1.0 release requires at least one supported animated runtime scheduling

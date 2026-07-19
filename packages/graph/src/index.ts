@@ -4,6 +4,7 @@ export {
   type MotionGraphErrorCode
 } from "./errors.js";
 export { GRAPH_IDENTIFIER_PATTERN, GRAPH_LIMITS } from "./limits.js";
+export { MOTION_GRAPH_STATIC_REASONS } from "./model.js";
 export { MotionGraphEngine } from "./engine.js";
 export { sameGraphPresentation } from "./presentation.js";
 export {
@@ -38,11 +39,12 @@ export type {
   MotionGraphEffect,
   MotionGraphOperation,
   MotionGraphPhase,
+  MotionGraphPlaybackFailureOptions,
   MotionGraphReadiness,
   MotionGraphRecoveryOptions,
   MotionGraphResult,
   MotionGraphSnapshot,
-  MotionGraphStaticFailureOptions,
+  MotionGraphStaticReason,
   MotionGraphTickOptions,
   MotionGraphTraceRecord,
   ValidatedMotionGraph

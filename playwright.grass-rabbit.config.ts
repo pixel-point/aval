@@ -13,7 +13,7 @@ export default defineConfig({
   use: {
     baseURL,
     deviceScaleFactor: 2,
-    trace: "off",
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
     viewport: { width: 1280, height: 720 }
   },

@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeAssetCatalog } from "./asset-catalog.js";
 import { createIntegratedTestAsset } from "./asset-test-support.js";
+import { RuntimePlaybackError } from "./errors.js";
 import {
   IntegratedPlayer,
-  PlaybackFallbackError,
+  integratedStateStoreOption,
   type IntegratedCandidateAttempt,
   type IntegratedCandidateFactory,
   type IntegratedPlayerOptions,
-  type IntegratedFallbackStore
+  type IntegratedStateStore
 } from "./integrated-player.js";
 import {
   ManualTimers
@@ -26,7 +27,7 @@ import type {
 describe("IntegratedPlayer construction and resource admission", () => {
   it("rejects an undersized static baseline before constructing its store", () => {
     const bytes = createIntegratedTestAsset();
-    const createFallbackStore = vi.fn(() => new MinimalStaticStore());
+    const createStateStore = vi.fn(() => new MinimalStaticStore());
     const factory = new NeverCandidateFactory();
     let error: unknown;
 
@@ -34,7 +35,7 @@ describe("IntegratedPlayer construction and resource admission", () => {
       new IntegratedPlayer({
         bytes,
         selectedRenditionIndex: 0,
-        createFallbackStore,
+        ...integratedStateStoreOption(createStateStore),
         candidateFactory: factory,
         hostMaxRuntimeBytes: bytes.byteLength
       });
@@ -43,7 +44,7 @@ describe("IntegratedPlayer construction and resource admission", () => {
     }
 
     expect(error).toMatchObject({ code: "resource-rejection" });
-    expect(createFallbackStore).not.toHaveBeenCalled();
+    expect(createStateStore).not.toHaveBeenCalled();
     expect(factory.calls).toEqual([]);
   });
 
@@ -53,24 +54,26 @@ describe("IntegratedPlayer construction and resource admission", () => {
 
     expect(() => new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => ({ dispose } as unknown as IntegratedFallbackStore),
+      ...integratedStateStoreOption(() =>
+        ({ dispose } as unknown as IntegratedStateStore)
+      ),
       candidateFactory: factory
     })).toThrow("missing installInitial");
     expect(dispose).toHaveBeenCalledOnce();
 
     expect(() => new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => ({
+      ...integratedStateStoreOption(() => ({
         dispose() {
           throw new Error("injected malformed-store cleanup failure");
         }
-      } as unknown as IntegratedFallbackStore),
+      } as unknown as IntegratedStateStore)),
       candidateFactory: factory
     })).toThrow("missing installInitial");
   });
 
   it("snapshots a throwing availability getter before acquiring owned resources", () => {
-    const createFallbackStore = vi.fn(() => new MinimalStaticStore());
+    const createStateStore = vi.fn(() => new MinimalStaticStore());
     const currentCanvasBacking = vi.fn(() => Object.freeze({
       width: 1,
       height: 1
@@ -101,12 +104,12 @@ describe("IntegratedPlayer construction and resource admission", () => {
 
     expect(() => new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore,
+      ...integratedStateStoreOption(createStateStore),
       candidateFactory: factory
     })).toThrow("injected post-validation availability failure");
 
     expect(availabilityReads).toBe(5);
-    expect(createFallbackStore).not.toHaveBeenCalled();
+    expect(createStateStore).not.toHaveBeenCalled();
     expect(currentCanvasBacking).not.toHaveBeenCalled();
     expect(reserveCanvasResources).not.toHaveBeenCalled();
   });
@@ -118,10 +121,10 @@ describe("IntegratedPlayer construction and resource admission", () => {
     let motionPolicyReads = 0;
     const base = {
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: (ownedCatalog: RuntimeAssetCatalog) => {
+      ...integratedStateStoreOption((ownedCatalog: RuntimeAssetCatalog) => {
         catalogs.push(ownedCatalog);
         return store;
-      },
+      }),
       candidateFactory: candidateFactoryWithResourceHost(
         () => Object.freeze({ release })
       ),
@@ -160,7 +163,7 @@ describe("IntegratedPlayer construction and resource admission", () => {
   ])("rejects a $name canvas lease as stable admission failure", ({
     createLease
   }) => {
-    const createFallbackStore = vi.fn(() => new MinimalStaticStore());
+    const createStateStore = vi.fn(() => new MinimalStaticStore());
     const reserveCanvasResources = vi.fn(() => createLease() as never);
     const factory = candidateFactoryWithResourceHost(
       reserveCanvasResources
@@ -170,7 +173,7 @@ describe("IntegratedPlayer construction and resource admission", () => {
     try {
       new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-        createFallbackStore,
+        ...integratedStateStoreOption(createStateStore),
         candidateFactory: factory
       });
     } catch (caught) {
@@ -187,7 +190,7 @@ describe("IntegratedPlayer construction and resource admission", () => {
       "message",
       expect.stringContaining("private lease capability failure")
     );
-    expect(createFallbackStore).not.toHaveBeenCalled();
+    expect(createStateStore).not.toHaveBeenCalled();
     expect(reserveCanvasResources).toHaveBeenCalledOnce();
   });
 
@@ -205,7 +208,7 @@ describe("IntegratedPlayer construction and resource admission", () => {
     });
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new MinimalStaticStore(),
+      ...integratedStateStoreOption(() => new MinimalStaticStore()),
       candidateFactory: candidateFactoryWithResourceHost(
         () => lease as RuntimeCanvasResourceLease
       )
@@ -222,7 +225,7 @@ describe("IntegratedPlayer construction and resource admission", () => {
     let player: IntegratedPlayer | null = null;
     player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new WrongInitialStateStore(),
+      ...integratedStateStoreOption(() => new WrongInitialStateStore()),
       candidateFactory: new NeverCandidateFactory(),
       timers: new ManualTimers(),
       eventSink: () => {
@@ -231,7 +234,7 @@ describe("IntegratedPlayer construction and resource admission", () => {
     });
 
     await expect(player.prepare()).rejects.toBeInstanceOf(
-      PlaybackFallbackError
+      RuntimePlaybackError
     );
 
     expect(observedReadiness).not.toContain("visualReady");
@@ -239,7 +242,7 @@ describe("IntegratedPlayer construction and resource admission", () => {
   });
 });
 
-class MinimalStaticStore implements IntegratedFallbackStore {
+class MinimalStaticStore implements IntegratedStateStore {
   public disposeCalls = 0;
   #state: string | null = null;
 
@@ -260,9 +263,6 @@ class MinimalStaticStore implements IntegratedFallbackStore {
     return this.#state;
   }
 
-  public coverCurrent(): void {}
-
-  public revealAnimated(): void {}
 
   public async settled(): Promise<void> {}
 

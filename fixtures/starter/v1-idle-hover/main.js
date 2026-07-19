@@ -1,5 +1,22 @@
 const player = document.querySelector("#motion");
-if (!(player instanceof HTMLElement)) throw new Error("starter markup is incomplete");
+const unavailable = document.querySelector("#motion-unavailable");
+if (!(player instanceof HTMLElement) || !(unavailable instanceof HTMLImageElement)) {
+  throw new Error("starter markup is incomplete");
+}
+player.addEventListener("error", (event) => {
+  const diagnostics = player.getDiagnostics();
+  if (
+    event.detail.fatal === true &&
+    player.readiness === "error" &&
+    diagnostics.lastFailure !== null &&
+    event.detail.failure === diagnostics.lastFailure
+  ) {
+    unavailable.hidden = false;
+  }
+});
+player.addEventListener("readinesschange", () => {
+  if (player.readiness === "interactiveReady") unavailable.hidden = true;
+});
 
 try {
   const response = await fetch("./motion/build.json");
@@ -25,7 +42,8 @@ try {
     source.removeAttribute("data-aval-codec");
   }
 } catch (error) {
-  console.error("AVAL starter source setup failed; the fallback remains available.", error);
+  unavailable.hidden = false;
+  console.error("AVAL starter source setup failed.", error);
 }
 
 await import("@pixel-point/aval-element/auto");

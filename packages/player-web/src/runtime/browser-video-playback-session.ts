@@ -45,6 +45,11 @@ import {
   type BrowserNormalReady
 } from "./browser-playback-types.js";
 import { RUNTIME_TRACE_CAPACITY } from "./model.js";
+import {
+  BROWSER_PLAYBACK_TERMINAL_LISTENER,
+  type BrowserPlaybackTerminalListener,
+  type BrowserPlaybackTerminalSource
+} from "./browser-playback-terminal-listener.js";
 
 type BrowserPreparedTick = IntegratedPreparedContentTick & {
   readonly browserToken: true;
@@ -116,7 +121,8 @@ export function handoffBrowserVisibleEndpointToInverse(input: {
 
 /** Browser composition orchestrator; route owners contain all media mutation. */
 export class BrowserVideoPlaybackSession
-  implements IntegratedPlaybackSession, BrowserTrackedPlayback {
+  implements IntegratedPlaybackSession, BrowserTrackedPlayback,
+  BrowserPlaybackTerminalSource {
   readonly #candidate: Readonly<VideoCandidateReadinessSessionInput>;
   readonly #activation: Readonly<VideoCandidateActivationInput>;
   readonly #hub: BrowserVideoCandidateHub;
@@ -139,6 +145,8 @@ export class BrowserVideoPlaybackSession
   #deferredIntroCut: Readonly<GraphEdgeDefinition> | null = null;
   #pendingResidentCheckpoint: Readonly<CutResidentHandoff> | null = null;
   #fatal: RuntimePlaybackError | null = null;
+  #terminalListener: BrowserPlaybackTerminalListener | null = null;
+  #terminalNotified = false;
   #disposed = false;
 
   private constructor(options: {
@@ -475,13 +483,40 @@ export class BrowserVideoPlaybackSession
     });
   }
 
+  public [BROWSER_PLAYBACK_TERMINAL_LISTENER](
+    listener: BrowserPlaybackTerminalListener
+  ): () => void {
+    if (typeof listener !== "function") {
+      throw new TypeError("browser playback terminal listener must be callable");
+    }
+    if (this.#disposed) {
+      throw new Error("browser playback session is disposed");
+    }
+    if (this.#terminalListener !== null) {
+      throw new Error("browser playback terminal listener is already installed");
+    }
+    this.#terminalListener = listener;
+    if (this.#fatal !== null) this.#notifyTerminal(this.#fatal);
+    let linked = true;
+    return () => {
+      if (!linked) return;
+      linked = false;
+      if (this.#terminalListener === listener) {
+        this.#terminalListener = null;
+      }
+    };
+  }
+
   public async settled(): Promise<void> {
     this.#scheduleBackground();
     for (;;) {
       const background = this.#background;
       await this.#resident.settled();
       await this.#lane.settled();
-      if (background === this.#background && this.#lane.pending === 0) return;
+      if (background === this.#background && this.#lane.pending === 0) {
+        if (this.#fatal !== null) throw this.#fatal;
+        return;
+      }
     }
   }
 
@@ -500,6 +535,7 @@ export class BrowserVideoPlaybackSession
   public async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#terminalListener = null;
     try {
       this.#unlinkActivationAbort();
     } catch {
@@ -637,7 +673,11 @@ export class BrowserVideoPlaybackSession
   }
 
   #scheduleBackground(rebuild = false): void {
-    if (this.#disposed || this.#ready !== null) return;
+    if (
+      this.#disposed ||
+      this.#fatal !== null ||
+      this.#ready !== null
+    ) return;
     this.#pendingBackgroundRebuild ||= rebuild;
     if (this.#background !== null) return;
     const operationRebuild = this.#pendingBackgroundRebuild;
@@ -646,6 +686,7 @@ export class BrowserVideoPlaybackSession
     const operation = this.#lane.enqueue(async (signal) => {
       if (
         this.#disposed ||
+        this.#fatal !== null ||
         this.#prepared !== null ||
         this.#ready !== null
       ) return;
@@ -674,6 +715,7 @@ export class BrowserVideoPlaybackSession
         this.#ready === null &&
         (this.#pendingBackgroundRebuild ||
           this.#pendingResidentCheckpoint !== null) &&
+        this.#fatal === null &&
         !this.#disposed
       ) {
         this.#scheduleBackground();
@@ -917,6 +959,23 @@ export class BrowserVideoPlaybackSession
           { operation: "browser-playback" }
         ));
     this.#hub.diagnose(this.#fatal.failure);
+    this.#notifyTerminal(this.#fatal);
+  }
+
+  #notifyTerminal(error: RuntimePlaybackError): void {
+    const listener = this.#terminalListener;
+    if (listener === null || this.#terminalNotified) return;
+    this.#terminalNotified = true;
+    this.#terminalListener = null;
+    try {
+      listener(error);
+    } catch (listenerError) {
+      this.#hub.diagnose(normalizeRuntimeFailure(
+        "readiness-failure",
+        listenerError,
+        { operation: "browser-playback-terminal-listener" }
+      ));
+    }
   }
 
   #assertUsable(): void {

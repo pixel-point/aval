@@ -14,6 +14,12 @@ import type {
   VideoCandidateTimerHost
 } from "./video-candidate-model.js";
 import type { PathSchedulerClock } from "./path-scheduler.js";
+import {
+  BROWSER_PLAYBACK_TERMINAL_LISTENER,
+  listenForBrowserPlaybackTerminal,
+  type BrowserPlaybackTerminalListener,
+  type BrowserPlaybackTerminalSource
+} from "./browser-playback-terminal-listener.js";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -35,8 +41,10 @@ export const DEFAULT_VIDEO_CANDIDATE_TIMERS: VideoCandidateTimerHost =
 
 /** Stable public playback identity that binds only after activation precommit. */
 export class DeferredVideoPlaybackSession
-  implements IntegratedPlaybackSession {
+  implements IntegratedPlaybackSession, BrowserPlaybackTerminalSource {
   #session: IntegratedPlaybackSession | null = null;
+  #terminalListener: BrowserPlaybackTerminalListener | null = null;
+  #unlinkTerminalListener: (() => void) | null = null;
   #disposed = false;
 
   public bind(session: IntegratedPlaybackSession): void {
@@ -48,6 +56,7 @@ export class DeferredVideoPlaybackSession
     }
     validatePlaybackSession(session);
     this.#session = session;
+    this.#linkTerminalListener();
   }
 
   public prepareContentTick(
@@ -71,9 +80,49 @@ export class DeferredVideoPlaybackSession
     return this.#requireSession().traceState();
   }
 
+  public [BROWSER_PLAYBACK_TERMINAL_LISTENER](
+    listener: BrowserPlaybackTerminalListener
+  ): () => void {
+    if (typeof listener !== "function") {
+      throw new TypeError("browser playback terminal listener must be callable");
+    }
+    if (this.#disposed) {
+      throw new Error("candidate playback delegate is disposed");
+    }
+    if (this.#terminalListener !== null) {
+      throw new Error("candidate playback terminal listener is already installed");
+    }
+    this.#terminalListener = listener;
+    this.#linkTerminalListener();
+    let linked = true;
+    return () => {
+      if (!linked) return;
+      linked = false;
+      if (this.#terminalListener !== listener) return;
+      this.#terminalListener = null;
+      this.#unlinkTerminalListener?.();
+      this.#unlinkTerminalListener = null;
+    };
+  }
+
   public dispose(): void {
     this.#disposed = true;
+    this.#terminalListener = null;
+    this.#unlinkTerminalListener?.();
+    this.#unlinkTerminalListener = null;
     this.#session = null;
+  }
+
+  #linkTerminalListener(): void {
+    if (
+      this.#session === null ||
+      this.#terminalListener === null ||
+      this.#unlinkTerminalListener !== null
+    ) return;
+    this.#unlinkTerminalListener = listenForBrowserPlaybackTerminal(
+      this.#session,
+      this.#terminalListener
+    );
   }
 
   #requireSession(): IntegratedPlaybackSession {

@@ -1,4 +1,9 @@
 import { SHA256_PATTERN, type DigestReference } from "./model.js";
+import {
+  browserBuildMatchesProductVersion,
+  isExactBrowserBuild,
+  isExactProductVersion
+} from "./exact-version.js";
 import { evaluateNamedProfileMatrix, type NamedProfileMatrixPolicy } from "./report-index-criteria.js";
 import type { CertificationReviewSummary } from "./review-record.js";
 import { assertCertificationStatus, type CertificationStatus } from "./status.js";
@@ -8,10 +13,16 @@ export interface CertificationIndexProfile {
   readonly platformClass: string;
   readonly browserProduct: string;
   readonly browserVersion: string;
+  readonly browserBuild: string;
+  readonly browserChannel: string;
+  readonly osProduct: string;
+  readonly osVersion: string;
+  readonly deviceClass: string;
+  readonly virtualization: "none" | "virtualized" | "unknown";
   readonly refreshMilliHz: number;
   readonly refresh120Available: boolean;
   readonly animated: boolean;
-  readonly staticFallback: CertificationStatus;
+  readonly fatalErrorBoundary: CertificationStatus;
   readonly runtimeScheduling: CertificationStatus;
   readonly coverageFailures: readonly string[];
   readonly observedDisplay: CertificationStatus;
@@ -37,7 +48,7 @@ export interface CertificationReportIndex {
 }
 
 const ROOT_KEYS = ["schemaVersion", "releaseVersion", "candidateManifestDigest", "releaseStatus", "runtimeScheduling", "observedDisplay", "matrixFailures", "missingMatrixSlots", "profiles", "reports", "reviewRecord", "reviews"] as const;
-const PROFILE_KEYS = ["profileId", "platformClass", "browserProduct", "browserVersion", "refreshMilliHz", "refresh120Available", "animated", "staticFallback", "runtimeScheduling", "coverageFailures", "observedDisplay", "runtimeReportId", "runtimeReportDigest", "observedDisplayReportId", "observedDisplayReportDigest"] as const;
+const PROFILE_KEYS = ["profileId", "platformClass", "browserProduct", "browserVersion", "browserBuild", "browserChannel", "osProduct", "osVersion", "deviceClass", "virtualization", "refreshMilliHz", "refresh120Available", "animated", "fatalErrorBoundary", "runtimeScheduling", "coverageFailures", "observedDisplay", "runtimeReportId", "runtimeReportDigest", "observedDisplayReportId", "observedDisplayReportDigest"] as const;
 const REFERENCE_KEYS = ["id", "path", "sha256", "byteLength", "mediaType"] as const;
 
 /** Validates the canonical index model and independently recomputes its matrix/release summaries. */
@@ -83,11 +94,18 @@ export function validateReportIndex(input: unknown, policy: NamedProfileMatrixPo
     profileId: profile.profileId,
     platformClass: profile.platformClass,
     browserProduct: profile.browserProduct,
+    browserVersion: profile.browserVersion,
+    browserBuild: profile.browserBuild,
+    browserChannel: profile.browserChannel,
+    osProduct: profile.osProduct,
+    osVersion: profile.osVersion,
+    deviceClass: profile.deviceClass,
+    virtualization: profile.virtualization,
     refreshMilliHz: profile.refreshMilliHz,
     refresh120Available: profile.refresh120Available,
     animationSupported: profile.animated,
     runtimeScheduling: profile.runtimeScheduling,
-    staticFallback: profile.staticFallback
+    fatalErrorBoundary: profile.fatalErrorBoundary
   })), policy);
   if (root.runtimeScheduling !== matrix.status || !sameStrings(matrixFailures, matrix.failures) || !sameStrings(missingMatrixSlots, matrix.missingSlots)) throw new TypeError("$index matrix summary was not derived from profiles");
   const observedDisplay = aggregateObservedDisplayStatus(profiles.map((profile) => profile.observedDisplay));
@@ -113,14 +131,21 @@ export function aggregateObservedDisplayStatus(values: readonly CertificationSta
 function parseProfile(value: unknown, index: number): CertificationIndexProfile {
   const path = `$index.profiles[${String(index)}]`;
   const profile = exactRecord(value, PROFILE_KEYS, path);
-  assertCertificationStatus(profile.staticFallback, `${path}.staticFallback`);
+  assertCertificationStatus(profile.fatalErrorBoundary, `${path}.fatalErrorBoundary`);
   assertCertificationStatus(profile.runtimeScheduling, `${path}.runtimeScheduling`);
   assertCertificationStatus(profile.observedDisplay, `${path}.observedDisplay`);
+  const browserProduct = boundedText(profile.browserProduct, `${path}.browserProduct`, 128);
+  const browserVersion = exactProductVersion(profile.browserVersion, `${path}.browserVersion`, "browser");
+  const browserBuild = exactBrowserBuild(profile.browserBuild, `${path}.browserBuild`);
+  if (!browserBuildMatchesProductVersion(browserProduct, browserVersion, browserBuild)) throw new TypeError(`${path}.browserBuild does not match browser version`);
   return Object.freeze({
     profileId: identifier(profile.profileId, `${path}.profileId`), platformClass: identifier(profile.platformClass, `${path}.platformClass`),
-    browserProduct: boundedText(profile.browserProduct, `${path}.browserProduct`, 128), browserVersion: boundedText(profile.browserVersion, `${path}.browserVersion`, 128),
+    browserProduct, browserVersion,
+    browserBuild, browserChannel: boundedText(profile.browserChannel, `${path}.browserChannel`, 64),
+    osProduct: boundedText(profile.osProduct, `${path}.osProduct`, 128), osVersion: exactProductVersion(profile.osVersion, `${path}.osVersion`, "OS"),
+    deviceClass: boundedText(profile.deviceClass, `${path}.deviceClass`, 128), virtualization: virtualization(profile.virtualization, `${path}.virtualization`),
     refreshMilliHz: positiveInteger(profile.refreshMilliHz, `${path}.refreshMilliHz`), refresh120Available: boolean(profile.refresh120Available, `${path}.refresh120Available`), animated: boolean(profile.animated, `${path}.animated`),
-    staticFallback: profile.staticFallback, runtimeScheduling: profile.runtimeScheduling, coverageFailures: Object.freeze(stringArray(profile.coverageFailures, `${path}.coverageFailures`, 256)),
+    fatalErrorBoundary: profile.fatalErrorBoundary, runtimeScheduling: profile.runtimeScheduling, coverageFailures: Object.freeze(stringArray(profile.coverageFailures, `${path}.coverageFailures`, 256)),
     observedDisplay: profile.observedDisplay, runtimeReportId: identifier(profile.runtimeReportId, `${path}.runtimeReportId`), runtimeReportDigest: digest(profile.runtimeReportDigest, `${path}.runtimeReportDigest`),
     observedDisplayReportId: profile.observedDisplayReportId === null ? null : identifier(profile.observedDisplayReportId, `${path}.observedDisplayReportId`),
     observedDisplayReportDigest: profile.observedDisplayReportDigest === null ? null : digest(profile.observedDisplayReportDigest, `${path}.observedDisplayReportDigest`)
@@ -144,6 +169,9 @@ function exactRecord(value: unknown, keys: readonly string[], path: string): Rec
 function boundedArray(value: unknown, path: string, maximum: number): readonly unknown[] { if (!Array.isArray(value) || value.length > maximum) throw new TypeError(`${path} must be an array of at most ${String(maximum)} items`); return value; }
 function stringArray(value: unknown, path: string, maximum: number): string[] { return boundedArray(value, path, maximum).map((item, index) => boundedText(item, `${path}[${String(index)}]`, 1_024)); }
 function boundedText(value: unknown, path: string, maximum: number): string { if (typeof value !== "string" || value.length < 1 || value.length > maximum || /[\u0000-\u001f\u007f]/u.test(value)) throw new TypeError(`${path} is invalid`); return value; }
+function exactProductVersion(value: unknown, path: string, product: "browser" | "OS"): string { const version = boundedText(value, path, 128); if (!isExactProductVersion(version)) throw new TypeError(`${path} must be an exact ${product} version`); return version; }
+function exactBrowserBuild(value: unknown, path: string): string { const build = boundedText(value, path, 128); if (!isExactBrowserBuild(build)) throw new TypeError(`${path} must be an exact browser build`); return build; }
+function virtualization(value: unknown, path: string): "none" | "virtualized" | "unknown" { if (value !== "none" && value !== "virtualized" && value !== "unknown") throw new TypeError(`${path} is invalid`); return value; }
 function identifier(value: unknown, path: string): string { if (typeof value !== "string" || !/^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/u.test(value)) throw new TypeError(`${path} is invalid`); return value; }
 function digest(value: unknown, path: string): string { if (typeof value !== "string" || !SHA256_PATTERN.test(value)) throw new TypeError(`${path} is invalid`); return value; }
 function positiveInteger(value: unknown, path: string): number { if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new TypeError(`${path} must be a positive safe integer`); return value as number; }

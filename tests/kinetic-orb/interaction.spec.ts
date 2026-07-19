@@ -20,6 +20,44 @@ const ROUTE_CYCLE = Object.freeze([
   "exiting.idle"
 ]);
 
+test("does not label reduced-motion policy as rendered playback", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  const motion = page.locator("#kinetic-orb");
+  await expect.poll(() => motion.evaluate((node) => ({
+    readiness: (node as import("@pixel-point/aval-element").AvalElement).readiness,
+    staticReason: (node as import("@pixel-point/aval-element").AvalElement).staticReason
+  }))).toEqual({
+    readiness: "staticReady",
+    staticReason: "reduced-motion"
+  });
+  await expect(motion).not.toHaveAttribute("data-rendered", "");
+});
+
+test("reflects live interactive and static policy transitions", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+
+  const motion = page.locator("#kinetic-orb");
+  await expect.poll(() => motion.evaluate((node) => (
+    node as import("@pixel-point/aval-element").AvalElement
+  ).readiness)).toBe("interactiveReady");
+  await expect(motion).toHaveAttribute("data-rendered", "");
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => motion.evaluate((node) => (
+    node as import("@pixel-point/aval-element").AvalElement
+  ).readiness)).toBe("staticReady");
+  await expect(motion).not.toHaveAttribute("data-rendered", "");
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(() => motion.evaluate((node) => (
+    node as import("@pixel-point/aval-element").AvalElement
+  ).readiness)).toBe("interactiveReady");
+  await expect(motion).toHaveAttribute("data-rendered", "");
+});
+
 test("routes pointer and keyboard engagement", async ({ page }) => {
   const failures = captureBrowserFailures(page);
   const { motion, stateLabel } = await openIdleOrb(page);
@@ -155,7 +193,6 @@ function healthyIdle() {
     visualState: "idle",
     isTransitioning: false,
     lastFailure: null,
-    underflows: 0,
-    fallbacks: 0
+    underflows: 0
   };
 }

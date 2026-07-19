@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useState } from "react";
 import {
   defineAvalElement,
   type AvalElement,
@@ -24,32 +24,43 @@ export function StatusMotion({
   onError,
   onVisualState
 }: StatusMotionProps) {
-  const motion = useRef<AvalElement>(null);
+  const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    defineAvalElement();
-    const element = motion.current;
+  const attachMotion = useCallback((element: AvalElement | null) => {
     if (element === null) return;
-
     const handleError = (event: CustomEvent<Readonly<AvalErrorDetail>>) => {
+      if (!event.detail.fatal) return;
+      setFailed(true);
       onError?.(event.detail);
+    };
+    const handleReadiness = () => {
+      if (element.readiness === "interactiveReady") setFailed(false);
     };
     const handleVisualState = (
       event: CustomEvent<Readonly<AvalVisualStateChangeDetail>>
     ) => {
       onVisualState?.(event.detail.to);
     };
-    element.addEventListener("error", handleError);
-    element.addEventListener("visualstatechange", handleVisualState);
-    return () => {
+    const detach = () => {
       element.removeEventListener("error", handleError);
+      element.removeEventListener("readinesschange", handleReadiness);
       element.removeEventListener("visualstatechange", handleVisualState);
     };
+    element.addEventListener("error", handleError);
+    element.addEventListener("readinesschange", handleReadiness);
+    element.addEventListener("visualstatechange", handleVisualState);
+    try {
+      defineAvalElement();
+    } catch (error) {
+      detach();
+      throw error;
+    }
+    return detach;
   }, [onError, onVisualState]);
 
-  return (
+  return <>
     <aval-player
-      ref={motion}
+      ref={attachMotion}
       state={state}
       width={160}
       height={160}
@@ -58,9 +69,9 @@ export function StatusMotion({
       {sources.map((source) => (
         <source key={`${source.src}:${source.type}`} {...source} />
       ))}
-      <span slot="fallback" className="motion-fallback" aria-hidden="true">
-        {state}
-      </span>
     </aval-player>
-  );
+    {failed && (
+      <span className="motion-fallback" aria-hidden="true">{state}</span>
+    )}
+  </>;
 }

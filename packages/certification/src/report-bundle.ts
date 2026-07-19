@@ -8,6 +8,8 @@ import {
 } from "./display-capture-bundle.js";
 import { evaluateDisplayEvidence } from "./display-evidence.js";
 import { validateDisplayCaptureLedger } from "./display-evidence-model.js";
+import { evaluateFatalErrorBoundaryLedger } from "./fatal-error-boundary-ledger.js";
+import { createPublicProfileId, runtimeEnvironmentDigest } from "./environment-validation.js";
 import type { DisplayCertificationReport, RuntimeCertificationReport } from "./model.js";
 import {
   parseCanonicalBundleJson,
@@ -20,6 +22,7 @@ import { deriveRuntimeDisplaySchedule, evaluateRuntimeScenarioLedger } from "./r
 import {
   DISPLAY_OBSERVATION_LEDGER_ATTACHMENT_ID,
   DISPLAY_RAW_CAPTURE_ATTACHMENT_ID,
+  FATAL_ERROR_BOUNDARY_ATTACHMENT_ID,
   REQUIRED_DISPLAY_CRITERION_IDS,
   REQUIRED_RUNTIME_SCENARIOS,
   scenarioAttachmentId
@@ -103,6 +106,54 @@ async function validateRuntimeReportBundleVerified(
   const identityCriterion = report.criteria.find(({ id }) => id === "runtime-content-identity");
   if (report.status === "passed" && (identityCriterion === undefined || genericEvidenceIds.some((id) => !identityCriterion.evidence.includes(id)))) {
     throw new CertificationValidationError("$runtime.criteria.runtime-content-identity", "content identity criterion is not bound to every raw scenario ledger");
+  }
+  const fatalErrorBoundaryCriterion = report.criteria.find(({ id }) => id === "runtime-fatal-error-boundary");
+  if (fatalErrorBoundaryCriterion?.status === "passed") {
+    const attachment = attachmentById.get(FATAL_ERROR_BOUNDARY_ATTACHMENT_ID);
+    if (attachment === undefined) {
+      throw new CertificationValidationError("$runtime.attachments", "fatal error-boundary attachment is missing");
+    }
+    if (attachment.mediaType !== "application/json") {
+      throw new CertificationValidationError(`$runtime.attachments.${FATAL_ERROR_BOUNDARY_ATTACHMENT_ID}.mediaType`, "fatal error-boundary ledger must use application/json");
+    }
+    if (!fatalErrorBoundaryCriterion.evidence.includes(FATAL_ERROR_BOUNDARY_ATTACHMENT_ID)) {
+      throw new CertificationValidationError("$runtime.criteria.runtime-fatal-error-boundary", "fatal error-boundary criterion is not bound to its raw ledger");
+    }
+    const parsed = parseCanonicalBundleJson(
+      requiredVerifiedBytes(verifiedAttachments, FATAL_ERROR_BOUNDARY_ATTACHMENT_ID),
+      `$runtime.attachments.${FATAL_ERROR_BOUNDARY_ATTACHMENT_ID}`,
+      policy.maximumAttachmentBytes
+    );
+    const evaluated = evaluateFatalErrorBoundaryLedger(parsed, {
+      candidateManifestDigest: report.candidateManifestDigest,
+      runId: report.reportId,
+      profileId: createPublicProfileId(report.environment),
+      environmentDigest: runtimeEnvironmentDigest(report.environment)
+    });
+    if (
+      policy.allowedFatalBoundaryFixtureDigests === undefined ||
+      !policy.allowedFatalBoundaryFixtureDigests.has(evaluated.ledger.fixtureDigest)
+    ) {
+      throw new CertificationValidationError(
+        `$runtime.attachments.${FATAL_ERROR_BOUNDARY_ATTACHMENT_ID}`,
+        "fatal error-boundary fixture is not the exact candidate fault source"
+      );
+    }
+    if (
+      policy.allowedCertificationHarnessDigests === undefined ||
+      !policy.allowedCertificationHarnessDigests.has(evaluated.ledger.harnessDigest)
+    ) {
+      throw new CertificationValidationError(
+        `$runtime.attachments.${FATAL_ERROR_BOUNDARY_ATTACHMENT_ID}`,
+        "fatal error-boundary harness is not present in the exact candidate manifest"
+      );
+    }
+    if (!evaluated.evaluation.passed) {
+      throw new CertificationValidationError(
+        `$runtime.attachments.${FATAL_ERROR_BOUNDARY_ATTACHMENT_ID}`,
+        `fatal error-boundary ledger failed recomputation: ${evaluated.evaluation.failures[0] ?? "unknown"}`
+      );
+    }
   }
   return Object.freeze({ report, attachments: verifiedAttachments });
 }

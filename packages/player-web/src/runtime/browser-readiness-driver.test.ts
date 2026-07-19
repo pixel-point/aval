@@ -90,13 +90,13 @@ describe("browser production readiness boundary", () => {
     }
   });
 
-  it("assesses reduced, restored, superseded, sticky, and disposed phases", () => {
+  it("assesses reduced, restored, superseded, suspended, and disposed phases", () => {
     const evidence = assessProductionMotionPolicy();
 
     expect(evidence).toMatchObject({
       passed: true,
       staleTransitionRejected: true,
-      stickyFailureRejectedReentry: true
+      transientSuspensionReentered: true
     });
     expect(evidence.phases.map(({ phase }) => phase)).toEqual([
       "animated-installed",
@@ -105,13 +105,12 @@ describe("browser production readiness boundary", () => {
       "restoring",
       "restored",
       "superseded-reduction",
-      "sticky-failure",
+      "visibility-suspended",
       "disposed"
     ]);
     expect(evidence.phases.at(-2)).toMatchObject({
       actualMode: "static",
-      staticOrigin: "animation-failure",
-      stickyFailure: true
+      staticOrigin: "visibility-suspended"
     });
   });
 });

@@ -12,6 +12,7 @@ import type { EffectHostEvent } from "./effect-host.js";
 import {
   IntegratedPlayer,
   IntegratedPlaybackInvariantError,
+  integratedStateStoreOption,
   type IntegratedCandidateAttempt,
   type IntegratedCandidateAttemptContext,
   type IntegratedCandidateFactory,
@@ -19,7 +20,7 @@ import {
   type IntegratedPlaybackSession,
   type IntegratedPlaybackTraceState,
   type IntegratedPreparedContentTick,
-  type IntegratedFallbackStore
+  type IntegratedStateStore
 } from "./integrated-player.js";
 import { createIntegratedTestVideoSource } from "./integrated-player-video-test-support.js";
 import type {
@@ -250,7 +251,8 @@ describe("IntegratedPlayer content-path coordination", () => {
       readiness: "interactiveReady",
       visualState: "hover"
     });
-    expect(harness.events.some(({ type }) => type === "fallback")).toBe(false);
+    expect(harness.events.some(({ type }) => String(type) === "fallback"))
+      .toBe(false);
     expectTraceAgreement(harness);
   });
 
@@ -280,7 +282,8 @@ describe("IntegratedPlayer content-path coordination", () => {
       visualState: "idle",
       isTransitioning: false
     });
-    expect(harness.events.some(({ type }) => type === "fallback")).toBe(false);
+    expect(harness.events.some(({ type }) => String(type) === "fallback"))
+      .toBe(false);
     expectTraceAgreement(harness);
   });
 
@@ -309,7 +312,8 @@ describe("IntegratedPlayer content-path coordination", () => {
       visualState: "idle",
       isTransitioning: false
     });
-    expect(harness.events.some(({ type }) => type === "fallback")).toBe(false);
+    expect(harness.events.some(({ type }) => String(type) === "fallback"))
+      .toBe(false);
     expectTraceAgreement(harness);
   });
 
@@ -341,7 +345,8 @@ describe("IntegratedPlayer content-path coordination", () => {
       visualState: "hover",
       isTransitioning: false
     });
-    expect(harness.events.some(({ type }) => type === "fallback")).toBe(false);
+    expect(harness.events.some(({ type }) => String(type) === "fallback"))
+      .toBe(false);
     expectTraceAgreement(harness);
   });
 });
@@ -364,7 +369,7 @@ async function createHarness(
   let player!: IntegratedPlayer;
   player = new IntegratedPlayer({
     ...createIntegratedTestVideoSource(createIntegratedPathTestAsset()),
-    createFallbackStore: () => new ImmediateStaticStore(),
+    ...integratedStateStoreOption(() => new ImmediateStaticStore()),
     candidateFactory: factory,
     eventSink(event) {
       events.push(event);
@@ -701,7 +706,7 @@ function schedulerSnapshot(
   });
 }
 
-class ImmediateStaticStore implements IntegratedFallbackStore {
+class ImmediateStaticStore implements IntegratedStateStore {
   #state = "idle";
   public async installInitial(options: {
     readonly state: string;
@@ -710,8 +715,6 @@ class ImmediateStaticStore implements IntegratedFallbackStore {
   public async validateAll(): Promise<void> {}
   public async presentState(state: string): Promise<void> { this.#state = state; }
   public currentState(): string | null { return this.#state; }
-  public coverCurrent(): void {}
-  public revealAnimated(): void {}
   public async settled(): Promise<void> {}
   public dispose(): void {}
 }

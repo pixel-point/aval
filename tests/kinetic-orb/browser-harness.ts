@@ -82,7 +82,7 @@ export async function installInteractionLedger(motion: Locator): Promise<void> {
     element.addEventListener("transitionstart", (event) => {
       ledger.transitionStarts.push(event.detail.edge);
     });
-    for (const type of ["error", "fallback", "underflow"] as const) {
+    for (const type of ["error", "underflow"] as const) {
       element.addEventListener(type, () => ledger.runtimeEvents.push(type));
     }
   });
@@ -144,8 +144,7 @@ export async function readOrbHealth(motion: Locator) {
       visualState: diagnostics.visualState,
       isTransitioning: diagnostics.isTransitioning,
       lastFailure: diagnostics.lastFailure,
-      underflows: diagnostics.counters.underflow,
-      fallbacks: diagnostics.counters.fallback
+      underflows: diagnostics.counters.underflow
     };
   });
 }

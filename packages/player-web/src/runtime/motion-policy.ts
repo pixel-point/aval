@@ -19,10 +19,6 @@ export type ActualMotionMode =
   | "disposed";
 export type MotionPolicyTransitionKind = "enter-reduced" | "enter-full";
 export type MotionStaticOrigin = StaticReason | "context-loss";
-export type MotionFailureStaticOrigin = Exclude<
-  MotionStaticOrigin,
-  "reduced-motion"
->;
 
 export interface MotionPolicyTransition {
   readonly kind: MotionPolicyTransitionKind;
@@ -41,7 +37,6 @@ export interface MotionPolicySnapshot {
     readonly generation: number;
   } | null;
   readonly staticOrigin: MotionStaticOrigin | null;
-  readonly stickyFailure: boolean;
   readonly disposed: boolean;
 }
 
@@ -92,7 +87,6 @@ export class MotionPolicyCoordinator {
       generation: this.#generation,
       transition,
       staticOrigin: this.#staticOrigin,
-      stickyFailure: this.#isStickyFailure(),
       disposed: this.#actualMode === "disposed"
     });
   }
@@ -138,7 +132,7 @@ export class MotionPolicyCoordinator {
 
   /**
    * Returns the one idempotent transition token required by current policy.
-   * A sticky failure-origin static mode intentionally returns null.
+   * Nonfatal static policy origins may re-enter when full motion is desired.
    */
   public nextTransition(): Readonly<MotionPolicyTransition> | null {
     this.#assertUsable();
@@ -167,7 +161,7 @@ export class MotionPolicyCoordinator {
     return transition;
   }
 
-  /** Commit after the host fallback has covered the animated canvas. */
+  /** Commit after the reduced-motion logical state is staged. */
   public commitStatic(
     transition: Readonly<MotionPolicyTransition>
   ): boolean {
@@ -187,7 +181,7 @@ export class MotionPolicyCoordinator {
     return true;
   }
 
-  /** Commit only after body frame zero is drawn behind the host fallback. */
+  /** Commit only after body frame zero has crossed the draw barrier. */
   public commitAnimated(
     transition: Readonly<MotionPolicyTransition>
   ): boolean {
@@ -208,18 +202,20 @@ export class MotionPolicyCoordinator {
     return true;
   }
 
-  /** Runtime failure has already installed and covered the host fallback. */
-  public failToStatic(origin: MotionFailureStaticOrigin): void {
+  /** Commit a non-motion suspension whose re-entry is still policy-controlled. */
+  public suspendStatic(
+    origin: Exclude<MotionStaticOrigin, "reduced-motion">
+  ): void {
     this.#assertUsable();
     const checked = validateStaticOrigin(origin);
     if (checked === "reduced-motion") {
       throw new RangeError(
-        "motion failure origin must not be reduced-motion"
+        "motion suspension origin must not be reduced-motion"
       );
     }
     if (this.#actualMode === "unprepared") {
       throw new RangeError(
-        "motion failure cannot replace an unprepared mode"
+        "motion suspension cannot replace an unprepared mode"
       );
     }
     this.#abortTransition();
@@ -274,12 +270,6 @@ export class MotionPolicyCoordinator {
       throw new RangeError("motion policy generation exceeds safe range");
     }
     this.#generation += 1;
-  }
-
-  #isStickyFailure(): boolean {
-    return this.#actualMode === "static" &&
-      this.#staticOrigin !== null &&
-      !isReenterableStaticOrigin(this.#staticOrigin);
   }
 
   #assertUnprepared(operation: string): void {

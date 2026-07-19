@@ -212,17 +212,29 @@ relative `src` with the bundle URL.
   <source src="/motion/vp9.avl" type='application/vnd.aval; codecs="vp09..."'>
   <source src="/motion/h265.avl" type='application/vnd.aval; codecs="hvc1..."'>
   <source src="/motion/h264.avl" type='application/vnd.aval; codecs="avc1..."'>
-  <img slot="fallback" src="/motion.png" alt="">
 </aval-player>
+<img id="motion-unavailable" src="/motion.png" alt="" hidden>
 ```
 
 ```js
-import { defineAvalElement } from "@pixel-point/aval-element";
+import { AvalPlaybackError, defineAvalElement } from "@pixel-point/aval-element";
 
-defineAvalElement();
 const motion = document.querySelector("aval-player");
-await motion?.setState("engaged");
+const unavailable = document.querySelector("#motion-unavailable");
+motion.addEventListener("error", (event) => {
+  if (event.detail.fatal) unavailable.hidden = false;
+});
+motion.addEventListener("readinesschange", () => {
+  if (motion.readiness === "interactiveReady") unavailable.hidden = true;
+});
+defineAvalElement();
+try {
+  await motion.prepare();
+  await motion.setState("engaged");
+} catch (error) {
+  if (!(error instanceof AvalPlaybackError)) throw error;
+}
 ```
 
-The fallback image belongs to the application HTML and is never copied into an
-`.avl`.
+The optional sibling image belongs entirely to the application. AVAL never
+copies it into an `.avl` or controls its visibility.

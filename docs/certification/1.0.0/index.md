@@ -4,6 +4,7 @@ No named-profile run has been published yet.
 
 | Evidence layer | Status |
 | --- | --- |
+| Fatal error boundary | not run |
 | Runtime scheduling | not run |
 | Observed display | not measured |
 

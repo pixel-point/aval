@@ -18,7 +18,8 @@ describe("packed dev proof", () => {
     expect(source).toContain("await vitePreview({");
     expect(source).not.toContain("createServer as createViteServer");
     expect(source).toContain('waitForElementReady(starterPage, "interactiveReady")');
-    expect(source).toContain('waitForElementReady(fallbackPage, "staticReady")');
+    expect(source).toContain('waitForElementReady(failurePage, "error")');
+    expect(source).toContain("failureSnapshot.fallbackSlotCount === 0");
     expect(source).toContain("await starterFailures.assertWorkerExecuted()");
     expect(source).toContain("await browserFailures.assertWorkerExecuted()");
     expect(source).toContain("__avalWorkerEvidence");

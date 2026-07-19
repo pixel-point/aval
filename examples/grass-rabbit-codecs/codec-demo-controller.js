@@ -1,21 +1,23 @@
 import { createSourceSupportProbe } from "@pixel-point/aval-player-web";
+import { AvalPlaybackError } from "@pixel-point/aval-element";
 
 import {
   BT709_LIMITED,
   CODECS,
+  INACTIVE_PLAYBACK_MESSAGE,
   PLAYBACK_FAILURE_MESSAGE,
+  RENDERED_READINESS,
   UNAVAILABLE_MESSAGE,
   UNSUPPORTED_MESSAGE,
   assertCodec,
   codecLabel,
-  isRecord,
   parseGrassRabbitReport,
   requireMapValue
 } from "./codec-demo-model.js";
 import {
   bindPlayerPresentation,
   failureCode,
-  revealPlayerWhenRendered
+  reflectPlayerRenderedState
 } from "./codec-player-presentation.js";
 
 export function createCodecDemoController({
@@ -23,7 +25,8 @@ export function createCodecDemoController({
   reportUrl,
   publicBaseUrl,
   prefersReducedMotion,
-  simulatedUnsupported
+  simulatedUnsupported,
+  diagnostics = null
 }) {
   const support = new Map(CODECS.map((codec) => [codec, "unavailable"]));
   let report = null;
@@ -79,6 +82,10 @@ export function createCodecDemoController({
 
   function requestActivation(codec, explicit) {
     assertCodec(codec);
+    diagnostics?.checkpoint(
+      `before:codec-activation:${codec}`,
+      activePlayerValue ?? undefined
+    );
     if (explicit) explicitActivationRequested = true;
     const serial = ++activationSerial;
     view.selectTab(codec);
@@ -117,6 +124,29 @@ export function createCodecDemoController({
     const player = createPlayer(codec, asset);
     const hotspot = view.createHotspot();
     const isCurrent = () => serial === activationSerial && activePlayerValue === player;
+    const finishPreparedActivation = () => {
+      if (
+        !isCurrent() ||
+        player.readiness !== "interactiveReady"
+      ) return;
+      parts.stage.dataset.state = "ready";
+      parts.stage.removeAttribute("aria-busy");
+      parts.message.textContent = "";
+      reflectPlayerRenderedState(player, hotspot, isCurrent);
+    };
+    const settlePendingActivation = (message) => {
+      if (!isCurrent()) return;
+      parts.stage.removeAttribute("aria-busy");
+      parts.stage.dataset.state = "pending";
+      parts.message.textContent = message;
+    };
+    player.addEventListener("readinesschange", () => {
+      if (player.readiness === "interactiveReady") {
+        finishPreparedActivation();
+      } else if (player.readiness === "staticReady") {
+        settlePendingActivation(INACTIVE_PLAYBACK_MESSAGE);
+      }
+    });
     bindPlayerPresentation({
       player,
       hotspot,
@@ -132,19 +162,27 @@ export function createCodecDemoController({
     activePlayerValue = player;
 
     try {
+      diagnostics?.checkpoint(`before:codec-prepare:${codec}`, player);
       const preparation = await player.prepare({ timeoutMs: 30_000 });
+      diagnostics?.checkpoint(`after:codec-prepare:${codec}`, player);
       if (!isCurrent()) return;
-      const failureKind = preparationFailureKind(player, preparation);
-      if (failureKind !== null) {
-        await finishFailedActivation(codec, player, parts, serial, failureKind);
+      if (preparation?.mode === "static" || player.readiness === "staticReady") {
+        settlePendingActivation(INACTIVE_PLAYBACK_MESSAGE);
         return;
       }
-      parts.stage.dataset.state = "ready";
-      parts.stage.removeAttribute("aria-busy");
-      parts.message.textContent = "";
-      revealPlayerWhenRendered(player, hotspot, isCurrent);
+      finishPreparedActivation();
     } catch (error) {
+      diagnostics?.checkpoint(`error:codec-prepare:${codec}`, player);
       if (!isCurrent()) return;
+      if (!(error instanceof AvalPlaybackError)) {
+        if (!isPreparationInterruption(error)) throw error;
+        if (player.readiness === "interactiveReady") {
+          finishPreparedActivation();
+          return;
+        }
+        settlePendingActivation("Preparation is continuing in the background…");
+        return;
+      }
       const failureKind = failureCode(error) === "unsupported-profile"
         ? "unsupported"
         : "playback";
@@ -168,6 +206,11 @@ export function createCodecDemoController({
     source.type = asset.type;
     source.setAttribute("integrity", asset.integrity);
     player.append(source);
+    diagnostics?.attach(player, {
+      example: "grass-rabbit-codecs",
+      codec,
+      sourceType: asset.type
+    });
     return player;
   }
 
@@ -199,7 +242,9 @@ export function createCodecDemoController({
       await priorRetirement.catch(() => undefined);
       if (previous === null) return;
       try {
+        diagnostics?.checkpoint("before:codec-player-dispose", previous);
         await previous.dispose();
+        diagnostics?.checkpoint("after:codec-player-dispose", previous);
       } finally {
         previous.remove();
       }
@@ -269,24 +314,7 @@ function exactProbeConfig(codec) {
   });
 }
 
-function preparationFailureKind(player, result) {
-  if (!isRecord(result) || result.mode !== "static") return null;
-  if (result.reason === "codec-unsupported") return "unsupported";
-  if (playerFailureCode(player) !== null) return "playback";
-  return [
-    "reduced-motion",
-    "visibility-suspended",
-    "resource-budget",
-    "decoder-queued"
-  ].includes(result.reason)
-    ? null
-    : "playback";
-}
-
-function playerFailureCode(player) {
-  try {
-    return failureCode(player.getDiagnostics().lastFailure);
-  } catch {
-    return "readiness-failure";
-  }
+function isPreparationInterruption(error) {
+  return error instanceof DOMException &&
+    (error.name === "TimeoutError" || error.name === "AbortError");
 }

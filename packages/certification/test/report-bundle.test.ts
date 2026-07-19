@@ -11,12 +11,20 @@ import { REQUIRED_DISPLAY_CRITERION_IDS } from "../src/scenario-contract.js";
 import { validRuntimeReport } from "./test-report.js";
 import { createRawScenarioLedger, TEST_FIXTURE_DIGEST, TEST_RUNTIME_FIXTURE } from "./runtime-scenario-support.js";
 import { createDisplayCaptureLedger, TEST_DISPLAY_PATTERN, TEST_DISPLAY_PATTERN_DIGEST } from "./display-evidence-support.js";
+import {
+  TEST_FATAL_ERROR_BOUNDARY_ATTACHMENT_ID,
+  TEST_FATAL_ERROR_BOUNDARY_FIXTURE_DIGEST,
+  TEST_FATAL_ERROR_BOUNDARY_HARNESS_DIGEST,
+  validFatalErrorBoundaryLedger
+} from "./fatal-error-boundary-support.js";
 
 const policy = {
   maximumAttachmentBytes: 16 * 1024 * 1024,
   allowedMediaTypes: new Set(["application/json", "text/csv", "video/mp4"]),
   allowedFixtureDigests: new Set([TEST_FIXTURE_DIGEST]),
   allowedFixtureModels: new Map([[TEST_FIXTURE_DIGEST, TEST_RUNTIME_FIXTURE]]),
+  allowedFatalBoundaryFixtureDigests: new Set([TEST_FATAL_ERROR_BOUNDARY_FIXTURE_DIGEST]),
+  allowedCertificationHarnessDigests: new Set([TEST_FATAL_ERROR_BOUNDARY_HARNESS_DIGEST]),
   allowedDisplayPatterns: new Map([[TEST_DISPLAY_PATTERN_DIGEST, TEST_DISPLAY_PATTERN]]),
   allowedDisplayCaptureExtractors: new Map([["aval-display-extractor", "1.0.0"]]),
   allowedDisplayCaptureOperatorRoles: new Set(["qualified-display-capture-operator"]),
@@ -54,6 +62,48 @@ describe("report bundle validation", () => {
         readAttachment: async () => { oversizedRead = true; return new Uint8Array(0); }
       })).rejects.toThrow(/structured attachment exceeds/u);
       expect(oversizedRead).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("requires exact recomputable fatal error-boundary evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aval-error-boundary-"));
+    try {
+      const evidence = new Map<string, Uint8Array>();
+      const report = await materializeRuntimeBundle(evidence);
+      const unrelatedEvidence = report.attachments.find(({ id }: { id: string }) => id.startsWith("scenario-"))!.id;
+
+      const missing = structuredClone(report) as any;
+      missing.attachments = missing.attachments.filter(({ id }: { id: string }) => id !== TEST_FATAL_ERROR_BOUNDARY_ATTACHMENT_ID);
+      missing.criteria.find(({ id }: { id: string }) => id === "runtime-fatal-error-boundary").evidence = [unrelatedEvidence];
+      await expect(validateRuntimeReportBundle(root, missing, memoryPolicy(evidence))).rejects.toThrow(/fatal error-boundary attachment is missing/u);
+
+      const unbound = structuredClone(report) as any;
+      unbound.criteria.find(({ id }: { id: string }) => id === "runtime-fatal-error-boundary").evidence = [unrelatedEvidence];
+      await expect(validateRuntimeReportBundle(root, unbound, memoryPolicy(evidence))).rejects.toThrow(/fatal error-boundary criterion is not bound/u);
+
+      const forgedEvidence = new Map(evidence);
+      const forged = rebindFatalErrorBoundaryLedger(report, forgedEvidence, (ledger) => {
+        ledger.errorEventCount = 2;
+      });
+      await expect(validateRuntimeReportBundle(root, forged, memoryPolicy(forgedEvidence))).rejects.toThrow(/error-event-count-not-one/u);
+
+      const replayedAcrossEnvironment = structuredClone(report) as any;
+      replayedAcrossEnvironment.environment.browser.build = "20600.1.3";
+      await expect(validateRuntimeReportBundle(root, replayedAcrossEnvironment, memoryPolicy(evidence))).rejects.toThrow(/environment-digest-mismatch|profile-id-mismatch/u);
+
+      const replayedAcrossRun = { ...report, reportId: "runtime-macos-safari-replay" };
+      await expect(validateRuntimeReportBundle(root, replayedAcrossRun, memoryPolicy(evidence))).rejects.toThrow(/run-id-mismatch/u);
+
+      await expect(validateRuntimeReportBundle(root, report, {
+        ...memoryPolicy(evidence),
+        allowedFatalBoundaryFixtureDigests: new Set(["d".repeat(64)])
+      })).rejects.toThrow(/exact candidate fault source/u);
+      await expect(validateRuntimeReportBundle(root, report, {
+        ...memoryPolicy(evidence),
+        allowedCertificationHarnessDigests: new Set(["d".repeat(64)])
+      })).rejects.toThrow(/harness is not present/u);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -288,13 +338,21 @@ describe("report bundle validation", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 });
 
 async function materializeRuntimeBundle(evidence: Map<string, Uint8Array>) {
   const report = structuredClone(validRuntimeReport()) as any;
   const digestById = new Map<string, string>();
   for (const attachment of report.attachments) {
+    if (attachment.id === TEST_FATAL_ERROR_BOUNDARY_ATTACHMENT_ID) {
+      const bytes = attachmentBytes(validFatalErrorBoundaryLedger());
+      evidence.set(attachment.path, bytes);
+      attachment.sha256 = createHash("sha256").update(bytes).digest("hex");
+      attachment.byteLength = bytes.byteLength;
+      attachment.mediaType = "application/json";
+      continue;
+    }
     const match = /^scenario-decoder-throughput-300-([1-3])$/u.exec(attachment.id);
     const scenario = report.scenarios.find((candidate: any) => attachment.id === `scenario-${candidate.id}-${String(candidate.repetition)}`)!;
     const value = match === null ? createRawScenarioLedger(scenario) : throughputLedger(Number(match[1]));
@@ -322,6 +380,22 @@ async function materializeRuntimeBundle(evidence: Map<string, Uint8Array>) {
     }
   }
   return report;
+}
+
+function rebindFatalErrorBoundaryLedger(
+  report: any,
+  evidence: Map<string, Uint8Array>,
+  mutate: (ledger: any) => void
+): any {
+  const rebound = structuredClone(report) as any;
+  const attachment = rebound.attachments.find(({ id }: { id: string }) => id === TEST_FATAL_ERROR_BOUNDARY_ATTACHMENT_ID)!;
+  const ledger = validFatalErrorBoundaryLedger() as any;
+  mutate(ledger);
+  const bytes = attachmentBytes(ledger);
+  evidence.set(attachment.path, bytes);
+  attachment.sha256 = createHash("sha256").update(bytes).digest("hex");
+  attachment.byteLength = bytes.byteLength;
+  return rebound;
 }
 
 function attachmentBytes(value: unknown): Uint8Array {

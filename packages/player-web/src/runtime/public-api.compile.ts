@@ -27,7 +27,6 @@ import {
   RendererUploadTimeoutError,
   RuntimeAssetCatalog,
   RuntimePlaybackError,
-  StateFallbackStore,
   createBrowserVideoCandidateComposition,
   createSourceSupportProbe,
   createPlayerRuntimeAssetSessionResources,
@@ -39,13 +38,11 @@ import {
   openRuntimeAssetBytes,
   parseExternalIntegrity,
   selectVideoSource,
-  summarizeStaticReason,
   translateGraphReadiness,
   type DecoderWorkerMetrics,
   type DecoderWorkerSample,
   type ManagedDecoderWorkerFrame,
   type IntegratedContentTickResult,
-  type IntegratedFallbackStore,
   type IntegratedPlayerOptions,
   type IntegratedPlayerContextSnapshot,
   type IntegratedRealtimeDriverOptions,
@@ -113,7 +110,6 @@ import {
   type RuntimeTraceRecord,
   type RuntimeVisibilitySnapshot,
   type RuntimeVisibilityState,
-  type StateFallbackStoreOptions,
   type StaticReason,
   type AcceptedVideoSource,
   type CertifiedVideoRendition,
@@ -167,15 +163,22 @@ const presentation = null as unknown as RuntimeMediaPresentation;
 const scheduler = null as unknown as RuntimeSchedulerSnapshot;
 const trace = null as unknown as RuntimeTraceRecord;
 const reason = null as unknown as StaticReason;
+const staticReasons: readonly StaticReason[] = [
+  "reduced-motion",
+  "visibility-suspended",
+  "decoder-queued"
+];
+// @ts-expect-error terminal playback failures are not static policy reasons.
+const terminalFailureReason: StaticReason = "animation-failure";
 const failure: RuntimeFailure = normalizeRuntimeFailure("readiness-failure");
 const error: Error = new RuntimePlaybackError(failure);
-const staticReasonSummarizer: typeof summarizeStaticReason =
-  summarizeStaticReason;
 const traceCapacity: 512 = RUNTIME_TRACE_CAPACITY;
 const motionPolicies: readonly MotionPolicy[] = MOTION_POLICIES;
 const motionCoordinatorConstructor: typeof MotionPolicyCoordinator =
   MotionPolicyCoordinator;
 const motionSnapshot = null as unknown as MotionPolicySnapshot;
+// @ts-expect-error terminal playback failure is not a motion-policy mode.
+void motionSnapshot.stickyFailure;
 const motionTransition = null as unknown as MotionPolicyTransition;
 const motionStaticOrigin = null as unknown as MotionStaticOrigin;
 const visibilityCoordinatorConstructor: typeof VisibilityPolicyCoordinator =
@@ -195,9 +198,6 @@ const integratedContextSnapshot =
 const videoFactoryConstructor: typeof VideoCandidateFactory =
   VideoCandidateFactory;
 const integratedOptions = null as unknown as IntegratedPlayerOptions;
-const fallbackStore = null as unknown as IntegratedFallbackStore;
-const fallbackStoreConstructor: typeof StateFallbackStore = StateFallbackStore;
-const fallbackStoreOptions = null as unknown as StateFallbackStoreOptions;
 const integratedRealtimeOptions = null as unknown as IntegratedRealtimeDriverOptions;
 const tickResult = null as unknown as IntegratedContentTickResult;
 const browserCompositionFactory:
@@ -430,8 +430,9 @@ void presentationGeometry;
 void scheduler;
 void trace;
 void reason;
+void staticReasons;
+void terminalFailureReason;
 void error;
-void staticReasonSummarizer;
 void traceCapacity;
 void motionPolicies;
 void motionCoordinatorConstructor;
@@ -443,9 +444,6 @@ void presentation;
 void integratedPlayerConstructor;
 void videoFactoryConstructor;
 void integratedOptions;
-void fallbackStore;
-void fallbackStoreConstructor;
-void fallbackStoreOptions;
 void integratedRealtimeOptions;
 void tickResult;
 void browserCompositionFactory;

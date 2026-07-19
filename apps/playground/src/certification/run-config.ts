@@ -2,6 +2,7 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const IDENTIFIER = /^[a-z0-9][a-z0-9._-]{0,127}$/u;
 const MAX_CONFIG_BYTES = 256 * 1024;
 const FETCH_WATCHDOG_MS = 20_000;
+const CANDIDATE_RUN_CONFIG_PATH = "/__aval_certification__/run-config.json";
 
 export type CertificationRunMode = "functional" | "named";
 export type CertificationRunProfile = "pull-request" | "release" | "named";
@@ -24,9 +25,9 @@ export interface CertificationRunConfig {
 }
 
 export const FUNCTIONAL_FIXTURE_DIGEST =
-  "8e0110e8d22268f47dcd98d65d31e10df0e23221f38b3661f3d54d198f7f47a8";
+  "a77d616640162f6f1ac504dc39bc5d55cce83e0927286cc97bc5632bb10f3898";
 export const FUNCTIONAL_SOURCE_URL =
-  "/__m8__/asset?session=m9-functional&fixture=user-states";
+  "/__aval_v1__/h264.avl?session=m9-functional";
 
 export function createFunctionalRunConfig(): CertificationRunConfig {
   return Object.freeze({
@@ -53,7 +54,9 @@ export function createFunctionalRunConfig(): CertificationRunConfig {
 
 export async function loadRunConfig(): Promise<CertificationRunConfig> {
   const query = new URL(location.href).searchParams.get("run-config");
-  if (query === null) return createFunctionalRunConfig();
+  if (query === null) {
+    return await loadCandidateRunConfig() ?? createFunctionalRunConfig();
+  }
   const url = new URL(query, location.href);
   if (url.origin !== location.origin || url.username !== "" || url.password !== "") {
     throw new Error("run config must be a same-origin public path");
@@ -70,6 +73,32 @@ export async function loadRunConfig(): Promise<CertificationRunConfig> {
     if (!response.ok) throw new Error(`run config fetch failed with ${String(response.status)}`);
     const bytes = await readBoundedResponseBytes(response, MAX_CONFIG_BYTES, "run config");
     return validateRunConfig(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown);
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function loadCandidateRunConfig(): Promise<CertificationRunConfig | null> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(new DOMException("candidate run config watchdog expired", "TimeoutError")), FETCH_WATCHDOG_MS);
+  try {
+    const response = await fetch(CANDIDATE_RUN_CONFIG_PATH, {
+      cache: "no-store",
+      credentials: "same-origin",
+      redirect: "error",
+      signal: controller.signal
+    });
+    if (response.headers.get("x-aval-candidate-run-config") !== "1") {
+      await response.body?.cancel();
+      return null;
+    }
+    if (!response.ok) throw new Error(`candidate run config fetch failed with ${String(response.status)}`);
+    const expectedDigest = response.headers.get("x-aval-candidate-manifest-sha256");
+    if (expectedDigest === null || !SHA256.test(expectedDigest)) throw new Error("candidate run config response has no valid candidate identity");
+    const bytes = await readBoundedResponseBytes(response, MAX_CONFIG_BYTES, "candidate run config");
+    const config = validateRunConfig(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown);
+    if (config.candidateManifestDigest !== expectedDigest) throw new Error("candidate run config identity does not match its serving candidate");
+    return config;
   } finally {
     window.clearTimeout(timeout);
   }

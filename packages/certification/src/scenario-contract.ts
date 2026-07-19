@@ -23,7 +23,7 @@ export const REQUIRED_RUNTIME_CRITERION_IDS = Object.freeze([
   "runtime-throughput",
   "runtime-forbidden-operations",
   "runtime-resource-settlement",
-  "static-fallback"
+  "runtime-fatal-error-boundary"
 ] as const);
 
 export const REQUIRED_DISPLAY_CRITERION_IDS = Object.freeze([
@@ -35,6 +35,7 @@ export const REQUIRED_DISPLAY_CRITERION_IDS = Object.freeze([
 
 export const DISPLAY_OBSERVATION_LEDGER_ATTACHMENT_ID = "display-observation-ledger";
 export const DISPLAY_RAW_CAPTURE_ATTACHMENT_ID = "display-raw-capture";
+export const FATAL_ERROR_BOUNDARY_ATTACHMENT_ID = "runtime-fatal-error-boundary-ledger";
 
 export interface ScenarioCoverageInput {
   readonly id: string;

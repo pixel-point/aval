@@ -12,6 +12,7 @@ import {
   expectNoBrowserFailures,
   expectSelectedPanel,
   gateBuildReport,
+  installRetainedNonfatalDiagnostic,
   installStaticPreparationOutcome,
   openExample,
   requireId,
@@ -231,7 +232,7 @@ test("owns the unsupported-codec state without creating a runtime player", async
   expectNoBrowserFailures(failures);
 });
 
-test("reclassifies a positive probe when runtime preparation proves the codec unsupported", async ({
+test("keeps nonfatal static policy pending without claiming rendered playback", async ({
   page
 }) => {
   const failures = captureBrowserFailures(page);
@@ -241,37 +242,162 @@ test("reclassifies a positive probe when runtime preparation proves the codec un
     { waitUntil: "domcontentloaded" }
   );
   await installStaticPreparationOutcome(page, {
-    reason: "codec-unsupported",
+    reason: "reduced-motion",
     failure: null
   });
   releaseReport();
   await page.evaluate(() => window.grassRabbitCodecs.ready);
 
-  expect(await supportSnapshot(page)).toMatchObject({ h264: "unsupported" });
+  expect(await supportSnapshot(page)).toMatchObject({ h264: "supported" });
   await expectSelectedPanel(page, "h264");
   const panel = codecPanel(page, "h264");
   await expect(codecTab(page, "h264")).toHaveAttribute(
     "data-support",
-    "unsupported"
+    "supported"
   );
-  await expect(panel.locator("[data-support-badge]")).toHaveText("Unsupported");
+  await expect(panel.locator("[data-support-badge]")).toHaveText("Supported");
   await expect(panel.locator("[data-player-stage]")).toHaveAttribute(
     "data-state",
-    "unsupported"
+    "pending"
   );
+  await expect(panel.locator("[data-player-message]"))
+    .toHaveText("Motion is waiting for interactive playback…");
   await expect(panel.getByText(SUPPORT_MESSAGES.unsupported, { exact: true }))
-    .toHaveCount(1);
-  await expect(panel.locator("aval-player")).toHaveCount(0);
-  expect(await page.evaluate(() =>
-    window.grassRabbitCodecs.activePlayer === null
-  )).toBe(true);
+    .toHaveCount(0);
+  await expectActiveCodecPlayer(page, "h264");
+  await expect(panel.locator("aval-player")).not.toHaveAttribute("data-rendered", "");
+  await expect(panel.locator(".interaction-hotspot")).not.toHaveClass(/is-rendered/u);
   await expect(page.locator("#probe-status")).toContainText(
-    "0 of 4 codecs are available"
+    "1 of 4 codecs is available"
   );
   expectNoBrowserFailures(failures);
 });
 
-test("shows an example-owned error when a positive probe still cannot play", async ({
+test("reflects live interactive and static policy transitions", async ({ page }) => {
+  const failures = captureBrowserFailures(page);
+  await page.goto(
+    "/?simulateUnsupported=av1&simulateUnsupported=vp9&simulateUnsupported=h265"
+  );
+  await page.evaluate(() => window.grassRabbitCodecs.ready);
+
+  const panel = codecPanel(page, "h264");
+  const player = panel.locator("aval-player");
+  const hotspot = panel.locator(".interaction-hotspot");
+  await expect.poll(() => activePlayerSnapshot(page), { timeout: 45_000 })
+    .toMatchObject({ readiness: "interactiveReady", lastFailure: null });
+  await expect(panel.locator("[data-player-stage]"))
+    .toHaveAttribute("data-state", "ready");
+  await expect(player).toHaveAttribute("data-rendered", "");
+  await expect(hotspot).toHaveClass(/is-rendered/u);
+
+  await player.evaluate((node) => {
+    Object.defineProperty(node, "readiness", {
+      configurable: true,
+      get: () => "staticReady"
+    });
+    node.dispatchEvent(new CustomEvent("readinesschange"));
+  });
+  await expect(panel.locator("[data-player-stage]"))
+    .toHaveAttribute("data-state", "pending");
+  await expect(panel.locator("[data-player-message]"))
+    .toHaveText("Motion is waiting for interactive playback…");
+  await expect(player).not.toHaveAttribute("data-rendered", "");
+  await expect(hotspot).not.toHaveClass(/is-rendered/u);
+
+  await player.evaluate((node) => {
+    delete (node as HTMLElement & { readiness?: string }).readiness;
+    node.dispatchEvent(new CustomEvent("readinesschange"));
+  });
+  await expect.poll(() => activePlayerSnapshot(page), { timeout: 45_000 })
+    .toMatchObject({ readiness: "interactiveReady", lastFailure: null });
+  await expect(panel.locator("[data-player-stage]"))
+    .toHaveAttribute("data-state", "ready");
+  await expect(panel.locator("[data-player-message]")).toHaveText("");
+  await expect(player).toHaveAttribute("data-rendered", "");
+  await expect(hotspot).toHaveClass(/is-rendered/u);
+  expectNoBrowserFailures(failures);
+});
+
+test("settles the active panel when playback becomes ready after a caller timeout", async ({
+  page
+}) => {
+  const failures = captureBrowserFailures(page);
+  let releaseAsset!: () => void;
+  let assetRequested = false;
+  const assetGate = new Promise<void>((resolve) => {
+    releaseAsset = resolve;
+  });
+  await page.route("**/grass-rabbit/h264.avl", async (route) => {
+    assetRequested = true;
+    await assetGate;
+    await route.continue();
+  });
+  const releaseReport = await gateBuildReport(page);
+  await page.goto(
+    "/?simulateUnsupported=av1&simulateUnsupported=vp9&simulateUnsupported=h265",
+    { waitUntil: "domcontentloaded" }
+  );
+  const releasePreparation = await page.evaluateHandle(async () => {
+    await customElements.whenDefined("aval-player");
+    const constructor = customElements.get("aval-player");
+    if (constructor === undefined) throw new Error("aval-player is undefined");
+    const prototype = constructor.prototype;
+    const originalPrepare = prototype.prepare as (
+      this: HTMLElement,
+      options?: Readonly<{ timeoutMs?: number }>
+    ) => Promise<unknown>;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    Object.defineProperty(prototype, "prepare", {
+      configurable: true,
+      value(this: HTMLElement, options?: Readonly<{ timeoutMs?: number }>) {
+        void gate.then(() => originalPrepare.call(this, options))
+          .catch(() => undefined);
+        return Promise.reject(new DOMException(
+          "synthetic caller-local preparation timeout",
+          "TimeoutError"
+        ));
+      }
+    });
+    return release;
+  });
+  releaseReport();
+
+  const readyOutcome = await page.evaluate(async () => {
+    try {
+      await window.grassRabbitCodecs.ready;
+      return "fulfilled";
+    } catch (error) {
+      return error instanceof DOMException ? error.name : "unknown";
+    }
+  });
+  const panel = codecPanel(page, "h264");
+  await expectActiveCodecPlayer(page, "h264");
+  expect(readyOutcome).toBe("fulfilled");
+  await expect(panel.locator("[data-player-stage]"))
+    .not.toHaveAttribute("aria-busy", "true");
+  try {
+    await expect(panel.locator("[data-player-stage]"))
+      .toHaveAttribute("data-state", "pending");
+    await expect(panel.locator("[data-player-message]"))
+      .toHaveText("Preparation is continuing in the background…");
+    await expect.poll(() => assetRequested).toBe(true);
+  } finally {
+    await page.evaluate((release) => release(), releasePreparation);
+    releaseAsset();
+    await releasePreparation.dispose();
+  }
+  await expect.poll(() => activePlayerSnapshot(page), { timeout: 45_000 })
+    .toMatchObject({ readiness: "interactiveReady", lastFailure: null });
+  await expect(panel.locator("[data-player-stage]"))
+    .toHaveAttribute("data-state", "ready");
+  await expect(panel.locator("[data-player-message]")).toHaveText("");
+  expectNoBrowserFailures(failures);
+});
+
+test("ignores retained nonfatal diagnostics after successful preparation", async ({
   page
 }) => {
   const failures = captureBrowserFailures(page);
@@ -280,14 +406,11 @@ test("shows an example-owned error when a positive probe still cannot play", asy
     "/?simulateUnsupported=av1&simulateUnsupported=vp9&simulateUnsupported=h265",
     { waitUntil: "domcontentloaded" }
   );
-  await installStaticPreparationOutcome(page, {
-    reason: "visibility-suspended",
-    failure: Object.freeze({
-      code: "readiness-failure",
-      message: "AVAL operation failed (readiness-failure)",
-      operation: "motion-policy-enter-full"
-    })
-  });
+  await installRetainedNonfatalDiagnostic(page, Object.freeze({
+    code: "readiness-failure",
+    message: "AVAL operation failed (readiness-failure)",
+    operation: "motion-policy-enter-full"
+  }));
   releaseReport();
   await page.evaluate(() => window.grassRabbitCodecs.ready);
 
@@ -300,18 +423,15 @@ test("shows an example-owned error when a positive probe still cannot play", asy
   );
   await expect(panel.locator("[data-player-stage]")).toHaveAttribute(
     "data-state",
-    "error"
+    "ready"
   );
   await expect(panel.getByText(
     "This codec could not be played in your browser.",
     { exact: true }
-  )).toHaveCount(1);
+  )).toHaveCount(0);
   await expect(panel.getByText(SUPPORT_MESSAGES.unsupported, { exact: true }))
     .toHaveCount(0);
-  await expect(panel.locator("aval-player")).toHaveCount(0);
-  expect(await page.evaluate(() =>
-    window.grassRabbitCodecs.activePlayer === null
-  )).toBe(true);
+  await expectActiveCodecPlayer(page, "h264");
   expectNoBrowserFailures(failures);
 });
 

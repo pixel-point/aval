@@ -11,7 +11,6 @@ import type {
 } from "./asset-catalog.js";
 import {
   IntegratedPlaybackInvariantError,
-  PlaybackFallbackError,
   type IntegratedCandidateAttempt,
   type IntegratedCandidateAvailability,
   type IntegratedCandidateFactory,
@@ -29,6 +28,7 @@ import {
   DEFAULT_INTEGRATED_PREPARATION_TIMEOUT_MS,
   integratedAbortError,
   integratedAbortReason,
+  integratedReadinessError,
   integratedDisposedError,
   isIntegratedAbortError,
   normalizeIntegratedCandidateFailure,
@@ -45,7 +45,6 @@ import {
 import {
   createRuntimeCandidateReport,
   createRuntimeReadinessReport,
-  summarizeStaticReason,
   type RuntimeCandidateReport,
   type RuntimeReadinessResult
 } from "./model.js";
@@ -416,37 +415,14 @@ export class IntegratedAnimatedPreparation {
         throw integratedAbortReason(control.externalSignal);
       }
       if (control.timedOut) {
-        if (purpose === "reentry") {
-          return createReentryFailureResult("preparation-timeout", reports);
-        }
-        if (this.#staticPreparation.staticReady) {
-          return await this.#staticPreparation.finishBounded(
-            "preparation-timeout",
-            reports,
-            timeoutMs
-          );
-        }
-        this.#staticPreparation.fail(
-          "static readiness did not complete before timeout"
+        const terminal = integratedReadinessError(
+          "animation preparation did not complete before timeout",
+          "animation-preparation-timeout"
         );
-        throw new PlaybackFallbackError(
-          "static readiness did not complete before preparation timeout"
-        );
+        this.#reportFailure(terminal.failure);
+        throw this.#staticPreparation.fail(terminal);
       }
       if (isIntegratedAbortError(error)) throw error;
-      if (purpose === "reentry") {
-        const failure = normalizeIntegratedCandidateFailure(
-          error,
-          "unknown",
-          reports.length
-        );
-        this.#reportFailure(failure);
-        return createReentryFailureResult("readiness-failed", reports);
-      }
-      if (!this.#staticPreparation.staticReady) {
-        this.#staticPreparation.fail("static readiness failed");
-        throw new PlaybackFallbackError("static readiness failed");
-      }
       const failure = normalizeIntegratedCandidateFailure(
         error,
         "unknown",
@@ -454,11 +430,8 @@ export class IntegratedAnimatedPreparation {
       );
       failures.push(failure);
       this.#reportFailure(failure);
-      return await this.#staticPreparation.finishBounded(
-        "readiness-failed",
-        reports,
-        timeoutMs
-      );
+      const terminal = new RuntimePlaybackError(failure);
+      throw this.#staticPreparation.fail(terminal);
     } finally {
       this.#staticPreparation.releaseControl(control);
       if (this.#control === control) this.#control = null;
@@ -471,18 +444,19 @@ export class IntegratedAnimatedPreparation {
     failures: readonly Readonly<RuntimeFailure>[],
     signal: AbortSignal
   ): Promise<Readonly<RuntimeReadinessResult>> {
-    const reason = summarizeStaticReason({
-      phase: "preparation",
-      staticReady: this.#staticPreparation.staticReady,
-      deadlineExpired: false,
-      hasVideoRendition: true,
-      workerAvailable: this.#availability.workerAvailable,
-      rendererAvailable: this.#availability.rendererAvailable,
-      candidateFailures: failures
-    }) ?? "readiness-failed";
-    return purpose === "reentry"
-      ? createReentryFailureResult(reason, reports)
-      : this.#staticPreparation.finish(reason, reports, signal);
+    throwIfIntegratedAborted(signal);
+    const failure = failures.at(-1) ?? normalizeRuntimeFailure(
+      !this.#availability.workerAvailable
+        ? "unsupported-profile"
+        : !this.#availability.rendererAvailable
+        ? "renderer-failure"
+        : "readiness-failure",
+      "animated preparation exhausted its selected candidate",
+      { operation: purpose === "initial" ? "prepare" : "animated-reentry" }
+    );
+    if (failures.length === 0) this.#reportFailure(failure);
+    const terminal = new RuntimePlaybackError(failure);
+    throw this.#staticPreparation.fail(terminal);
   }
 
   #releaseFailedResidency(rendition: string): void {
@@ -499,7 +473,7 @@ export class IntegratedAnimatedPreparation {
 }
 
 function createReentryFailureResult(
-  reason: Exclude<RuntimeReadinessResult, { readonly mode: "animated" }>["reason"],
+  reason: "decoder-queued",
   reports: readonly Readonly<RuntimeCandidateReport>[]
 ): Readonly<RuntimeReadinessResult> {
   return Object.freeze({

@@ -5,12 +5,13 @@ import { createIntegratedTestAsset } from "./asset-test-support.js";
 import { createIntegratedTestVideoSource } from "./integrated-player-video-test-support.js";
 import {
   IntegratedPlayer,
+  integratedStateStoreOption,
   type IntegratedCandidateAttempt,
   type IntegratedCandidateFactory,
   type IntegratedPlaybackSession,
   type IntegratedPlaybackTickContext,
   type IntegratedPreparedContentTick,
-  type IntegratedFallbackStore
+  type IntegratedStateStore
 } from "./integrated-player.js";
 import {
   integratedActivationPresentationOrdinal
@@ -22,7 +23,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     const factory = new RealtimeCandidateFactory();
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new ImmediateStaticStore(),
+      ...integratedStateStoreOption(() => new ImmediateStaticStore()),
       candidateFactory: factory,
       realtime: {
         requestFrame: frames.request,
@@ -91,7 +92,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
       };
       player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-        createFallbackStore: () => new ImmediateStaticStore(),
+        ...integratedStateStoreOption(() => new ImmediateStaticStore()),
         candidateFactory: factory,
         diagnosticsSink: (failure) => diagnostics.push(failure.code),
         realtime: {
@@ -126,7 +127,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     factory.session.available = false;
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new ImmediateStaticStore(),
+      ...integratedStateStoreOption(() => new ImmediateStaticStore()),
       candidateFactory: factory,
       realtime: {
         requestFrame: frames.request,
@@ -163,7 +164,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     const factory = new RealtimeCandidateFactory();
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new ImmediateStaticStore(),
+      ...integratedStateStoreOption(() => new ImmediateStaticStore()),
       candidateFactory: factory,
       realtime: {
         requestFrame: frames.request,
@@ -178,8 +179,8 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     factory.session.failSynchronize = true;
 
     const request = player.requestState("hover");
-    await player.settled();
-    await request;
+    const terminal = await request.catch((error: unknown) => error);
+    await expect(player.settled()).rejects.toBe(terminal);
 
     expect(frames.cancelled).toEqual([pending]);
     expect(player.realtimeSnapshot()).toMatchObject({
@@ -187,9 +188,9 @@ describe("IntegratedPlayer realtime clock ownership", () => {
       smoothSession: false
     });
     expect(player.snapshot()).toMatchObject({
-      readiness: "staticReady",
+      readiness: "error",
       requestedState: "hover",
-      visualState: "hover"
+      visualState: "idle"
     });
     await player.dispose();
   });
@@ -199,7 +200,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     const factory = new RealtimeCandidateFactory();
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new ImmediateStaticStore(),
+      ...integratedStateStoreOption(() => new ImmediateStaticStore()),
       candidateFactory: factory,
       realtime: {
         requestFrame: frames.request,
@@ -225,7 +226,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
   it("rejects realtime start when no presentation source was configured", async () => {
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new ImmediateStaticStore(),
+      ...integratedStateStoreOption(() => new ImmediateStaticStore()),
       candidateFactory: new RealtimeCandidateFactory(),
       timers: new IdleTimers()
     });
@@ -241,7 +242,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     const factory = new RealtimeCandidateFactory();
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new ImmediateStaticStore(),
+      ...integratedStateStoreOption(() => new ImmediateStaticStore()),
       candidateFactory: factory,
       realtime: {
         requestFrame: frames.request,
@@ -284,11 +285,11 @@ describe("IntegratedPlayer realtime clock ownership", () => {
   it("restarts realtime without replaying visibility after cancelled reduction", async () => {
     const frames = new ManualFrames();
     const factory = new RealtimeCandidateFactory();
-    const store = new HostileCancellationStaticStore();
+    const store = new GatedCancellationStateStore();
     const diagnostics: string[] = [];
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => store,
+      ...integratedStateStoreOption(() => store),
       candidateFactory: factory,
       diagnosticsSink: (failure) => diagnostics.push(failure.code),
       realtime: {
@@ -299,7 +300,6 @@ describe("IntegratedPlayer realtime clock ownership", () => {
       timers: new IdleTimers()
     });
     await player.prepare();
-    store.armRevealFailure();
     player.startRealtime();
 
     const reducing = player.setMotionPolicy("reduce");
@@ -307,7 +307,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     const restoring = player.setMotionPolicy("full");
     await Promise.all([reducing, restoring]);
 
-    expect(store.revealCalls).toBe(0);
+    expect(store.currentState()).toBe("idle");
     expect(diagnostics).not.toContain("renderer-failure");
     expect(frames.hasPending).toBe(true);
     expect(player.realtimeSnapshot()).toMatchObject({
@@ -332,7 +332,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     const diagnostics: string[] = [];
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new ImmediateStaticStore(),
+      ...integratedStateStoreOption(() => new ImmediateStaticStore()),
       candidateFactory: factory,
       diagnosticsSink: (failure) => diagnostics.push(failure.code),
       realtime: {
@@ -390,7 +390,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     let rejectRequest = false;
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => new ImmediateStaticStore(),
+      ...integratedStateStoreOption(() => new ImmediateStaticStore()),
       candidateFactory: factory,
       diagnosticsSink: (failure) => diagnostics.push({
         code: failure.code,
@@ -423,8 +423,7 @@ describe("IntegratedPlayer realtime clock ownership", () => {
     });
     expect(player.motionSnapshot()).toMatchObject({
       actualMode: "animated",
-      staticOrigin: null,
-      stickyFailure: false
+      staticOrigin: null
     });
     expect(player.realtimeSnapshot()).toMatchObject({ running: false });
     expect(frames.hasPending).toBe(false);
@@ -663,7 +662,7 @@ function scheduler(cursor: Readonly<{
   });
 }
 
-class ImmediateStaticStore implements IntegratedFallbackStore {
+class ImmediateStaticStore implements IntegratedStateStore {
   #state = "idle";
   public async installInitial(options: {
     readonly state: string;
@@ -672,19 +671,15 @@ class ImmediateStaticStore implements IntegratedFallbackStore {
   public async validateAll(): Promise<void> {}
   public async presentState(
     state: string,
-    _options: { readonly signal: AbortSignal; readonly cover?: boolean }
+    _options: { readonly signal: AbortSignal }
   ): Promise<void> { this.#state = state; }
   public currentState(): string | null { return this.#state; }
-  public coverCurrent(): void {}
-  public revealAnimated(): void {}
   public async settled(): Promise<void> {}
   public dispose(): void {}
 }
 
-class HostileCancellationStaticStore extends ImmediateStaticStore {
+class GatedCancellationStateStore extends ImmediateStaticStore {
   public readonly stageStarted: Promise<void>;
-  public revealCalls = 0;
-  #failReveal = false;
   readonly #resolveStageStarted: () => void;
 
   public constructor() {
@@ -698,9 +693,8 @@ class HostileCancellationStaticStore extends ImmediateStaticStore {
 
   public override async presentState(
     _state: string,
-    options: { readonly signal: AbortSignal; readonly cover?: boolean }
+    options: { readonly signal: AbortSignal }
   ): Promise<void> {
-    if (options.cover !== false) return;
     this.#resolveStageStarted();
     await new Promise<never>((_resolve, reject) => {
       const fail = (): void => reject(new DOMException(
@@ -712,17 +706,6 @@ class HostileCancellationStaticStore extends ImmediateStaticStore {
     });
   }
 
-  public override revealAnimated(): void {
-    this.revealCalls += 1;
-    if (this.#failReveal) {
-      throw new Error("injected cancelled-reduction reveal failure");
-    }
-  }
-
-  public armRevealFailure(): void {
-    this.revealCalls = 0;
-    this.#failReveal = true;
-  }
 }
 
 class IdleTimers {

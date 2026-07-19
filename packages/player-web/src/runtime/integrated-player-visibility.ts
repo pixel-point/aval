@@ -1,11 +1,10 @@
-import {
-  PlaybackFallbackError,
-  type IntegratedPrepareOptions
-} from "./integrated-player-contracts.js";
+import type { IntegratedPrepareOptions } from "./integrated-player-contracts.js";
+import type { RuntimePlaybackError } from "./errors.js";
 import type { IntegratedPlayerMotion } from "./integrated-player-motion.js";
 import {
   DEFAULT_INTEGRATED_PREPARATION_TIMEOUT_MS,
   integratedAbortReason,
+  integratedReadinessError,
   integratedDisposedError,
   isIntegratedAbortError,
   validatePreparationTimeout
@@ -35,9 +34,12 @@ interface IntegratedPlayerVisibilityOptions {
   readonly abortAnimatedPreparation: () => void;
   readonly pauseForVisibility: () => boolean;
   readonly resumeCancelledVisibility: (wasRunning: boolean) => void;
-  readonly coverVisibilitySurface: (state: string) => void;
+  readonly assertVisibilityState: (state: string) => void;
   readonly commitVisibilitySuspended: (state: string) => Promise<void>;
-  readonly reportFailure: (error: unknown, operation: string) => void;
+  readonly reportFailure: (
+    error: unknown,
+    operation: string
+  ) => RuntimePlaybackError;
   readonly canResumeAnimated: () => boolean;
 }
 
@@ -53,9 +55,9 @@ export class IntegratedPlayerVisibility {
   readonly #abortAnimatedPreparation: () => void;
   readonly #pauseForVisibility: () => boolean;
   readonly #resumeCancelledVisibility: (wasRunning: boolean) => void;
-  readonly #coverVisibilitySurface: (state: string) => void;
+  readonly #assertVisibilityState: (state: string) => void;
   readonly #commitVisibilitySuspended: (state: string) => Promise<void>;
-  readonly #reportFailure: (error: unknown, operation: string) => void;
+  readonly #reportFailure: IntegratedPlayerVisibilityOptions["reportFailure"];
   readonly #canResumeAnimated: () => boolean;
 
   #control: IntegratedPreparationControl | null = null;
@@ -75,7 +77,7 @@ export class IntegratedPlayerVisibility {
     this.#abortAnimatedPreparation = options.abortAnimatedPreparation;
     this.#pauseForVisibility = options.pauseForVisibility;
     this.#resumeCancelledVisibility = options.resumeCancelledVisibility;
-    this.#coverVisibilitySurface = options.coverVisibilitySurface;
+    this.#assertVisibilityState = options.assertVisibilityState;
     this.#commitVisibilitySuspended = options.commitVisibilitySuspended;
     this.#reportFailure = options.reportFailure;
     this.#canResumeAnimated = options.canResumeAnimated;
@@ -186,34 +188,18 @@ export class IntegratedPlayerVisibility {
         throw integratedAbortReason(control.externalSignal);
       }
       if (control.timedOut) {
-        if (!this.#staticPreparation.staticReady) {
-          this.#staticPreparation.fail(
-            "hidden static readiness did not complete before timeout"
-          );
-          throw new PlaybackFallbackError(
-            "hidden static readiness did not complete before timeout"
-          );
-        }
-        const result = await this.#staticPreparation.finishBounded(
-          "visibility-suspended",
-          [],
-          timeoutMs,
-          commitBeforeReady
+        const terminal = integratedReadinessError(
+          "hidden static readiness did not complete before timeout",
+          "hidden-static-readiness-timeout"
         );
-        return result;
+        throw this.#staticPreparation.fail(terminal);
       }
       if (isIntegratedAbortError(error)) throw error;
-      if (!this.#staticPreparation.staticReady) {
-        this.#staticPreparation.fail("hidden static readiness failed");
-        throw new PlaybackFallbackError("hidden static readiness failed");
-      }
-      const result = await this.#staticPreparation.finishBounded(
-        "visibility-suspended",
-        [],
-        timeoutMs,
-        commitBeforeReady
+      const terminal = integratedReadinessError(
+        error,
+        "hidden-static-readiness"
       );
-      return result;
+      throw this.#staticPreparation.fail(terminal);
     } finally {
       this.#staticPreparation.releaseControl(control);
       if (this.#control === control) this.#control = null;
@@ -289,7 +275,7 @@ export class IntegratedPlayerVisibility {
         transition.signal
       );
       if (transition.signal.aborted) return;
-      this.#coverVisibilitySurface(state);
+      this.#assertVisibilityState(state);
       if (transition.signal.aborted) return;
       const cleanup = this.#commitVisibilitySuspended(state);
       if (!this.#policy.commitSuspended(
@@ -302,8 +288,7 @@ export class IntegratedPlayerVisibility {
       await cleanup;
     } catch (error) {
       if (transition.signal.aborted || isIntegratedAbortError(error)) return;
-      this.#reportFailure(error, "visibility-suspension");
-      throw error;
+      throw this.#reportFailure(error, "visibility-suspension");
     }
   }
 
@@ -331,7 +316,7 @@ export class IntegratedPlayerVisibility {
     } catch (error) {
       if (transition.signal.aborted || isIntegratedAbortError(error)) return;
       this.#policy.failResume(transition);
-      this.#reportFailure(error, "visibility-rebuild");
+      throw this.#reportFailure(error, "visibility-rebuild");
     }
   }
 

@@ -132,7 +132,8 @@ test("uses the first exact supported source and never probes a later file", asyn
     const selectedIndex = CODEC_ORDER.indexOf(selectedFamily);
     expect(authoredIndices.every((index) => index <= selectedIndex)).toBe(true);
   } else {
-    expect(["staticReady", "error"]).toContain(outcome.readiness);
+    expect(outcome.readiness).toBe("error");
+    expect(outcome.error).not.toBeNull();
     expect(outcome.selectedCodec).toBeNull();
     await expect(page.locator(".fallback")).toBeVisible();
   }
@@ -163,6 +164,31 @@ test("lets the user move a codec to the front of the source list", async ({
     return api.player.getDiagnostics?.().sourceGeneration ?? 0;
   });
 
+  const fatalReadiness = await page.evaluate(async () => {
+    const player = (window as unknown as {
+      avalSourcePlayground: {
+        readonly player: HTMLElement & {
+          readonly readiness?: string;
+          prepare?(options?: Readonly<{ timeoutMs?: number }>): Promise<unknown>;
+        };
+      };
+    }).avalSourcePlayground.player;
+    const source = player.querySelector<HTMLSourceElement>(
+      ':scope > source[data-aval-codec="av1"]'
+    );
+    if (source === null) throw new Error("AV1 source is unavailable");
+    source.src = `/__aval_v1__/missing.avl?failure=${String(Date.now())}`;
+    try {
+      await player.prepare?.({ timeoutMs: 10_000 });
+    } catch {
+      // The retained public state and consumer alternate are asserted below.
+    }
+    return player.readiness ?? "unavailable";
+  });
+  expect(fatalReadiness).toBe("error");
+  await expect(page.locator("aval-player")).toBeVisible();
+  await expect(page.locator(".fallback")).toBeVisible();
+
   const vp9 = page.getByRole("button", { name: "VP9", exact: true });
   await expect(vp9).toHaveAttribute("aria-pressed", "false");
   await vp9.click();
@@ -174,6 +200,8 @@ test("lets the user move a codec to the front of the source list", async ({
           readonly readiness?: string;
           getDiagnostics?(): Readonly<{
             sourceGeneration: number;
+            staticReason: string | null;
+            effectivelyVisible: boolean;
             runtime: Readonly<{ selectedCodec: string | null }>;
           }>;
         };
@@ -185,17 +213,21 @@ test("lets the user move a codec to the front of the source list", async ({
       firstSource: api.sourceSnapshot()[0]?.codec ?? null,
       readiness: api.player.readiness ?? "unavailable",
       selectedCodec: diagnostics?.runtime.selectedCodec ?? null,
-      sourceGeneration: diagnostics?.sourceGeneration ?? 0
+      sourceGeneration: diagnostics?.sourceGeneration ?? 0,
+      staticReason: diagnostics?.staticReason ?? null,
+      effectivelyVisible: diagnostics?.effectivelyVisible ?? false
     };
   }), { timeout: 30_000 }).toMatchObject({
     firstSource: "vp9",
     ...(browserName === "chromium"
       ? {
           readiness: "interactiveReady",
-          selectedCodec: expect.stringMatching(/^vp09\./u)
+          selectedCodec: expect.stringMatching(/^vp09\./u),
+          staticReason: null,
+          effectivelyVisible: true
         }
       : {
-          readiness: expect.stringMatching(/^(?:interactiveReady|staticReady|error)$/u)
+          readiness: expect.stringMatching(/^(?:interactiveReady|error)$/u)
         }),
     sourceGeneration: expect.any(Number)
   });
@@ -214,6 +246,8 @@ test("lets the user move a codec to the front of the source list", async ({
   if (browserName === "chromium") {
     await expect(vp9).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator("#status")).toContainText("selected VP9");
+    await expect(page.locator("aval-player")).toBeVisible();
+    await expect(page.locator(".fallback")).toBeHidden();
   }
 });
 

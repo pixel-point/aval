@@ -1,4 +1,5 @@
 import { MotionGraphError } from "./errors.js";
+import { MOTION_GRAPH_STATIC_REASONS } from "./model.js";
 import type {
   GraphEdgeDefinition,
   GraphPresentation,
@@ -6,11 +7,12 @@ import type {
   MotionGraphDefinition,
   MotionGraphDisposeOptions,
   MotionGraphEffect,
+  MotionGraphPlaybackFailureOptions,
   MotionGraphReadiness,
   MotionGraphRecoveryOptions,
   MotionGraphResult,
   MotionGraphSnapshot,
-  MotionGraphStaticFailureOptions,
+  MotionGraphStaticReason,
   MotionGraphTickOptions,
   MotionGraphTraceRecord,
   ValidatedMotionGraph
@@ -32,6 +34,17 @@ import {
   nextBodyFrame
 } from "./portal-search.js";
 import type { RequestAdmission } from "./request-ledger.js";
+
+function assertStaticReason(
+  reason: unknown
+): asserts reason is MotionGraphStaticReason {
+  if (!MOTION_GRAPH_STATIC_REASONS.some((candidate) => candidate === reason)) {
+    throw new MotionGraphError(
+      "GRAPH_VALIDATION",
+      `motion graph static reason must be one of: ${MOTION_GRAPH_STATIC_REASONS.join(", ")}`
+    );
+  }
+}
 
 /**
  * Pure version-0 graph reducer. It owns authored cursors and emits abstract
@@ -131,11 +144,13 @@ export class MotionGraphEngine {
     return this.#runtime.record("resume-animated", effects);
   }
 
-  public beginStatic(reason: string): Readonly<MotionGraphResult> {
+  public beginStatic(
+    reason: MotionGraphStaticReason
+  ): Readonly<MotionGraphResult> {
     this.#runtime.assertPhase("preparing", "beginStatic");
+    assertStaticReason(reason);
     const effects: MotionGraphEffect[] = [];
     this.#changeReadiness("static", effects, reason);
-    effects.push(freezeEffect({ type: "fallback", reason }));
     this.#runtime.phase = "static";
 
     const visual = this.#runtime.requireVisualState();
@@ -162,13 +177,14 @@ export class MotionGraphEngine {
   }
 
   public recoverStatic(
-    reason: string,
+    reason: MotionGraphStaticReason,
     options: Readonly<MotionGraphRecoveryOptions> = {}
   ): Readonly<MotionGraphResult> {
     this.#runtime.assertInstalled("recoverStatic");
     if (this.#runtime.readiness === "disposed" || this.#runtime.readiness === "error") {
       throw new MotionGraphError("DISPOSED", "graph cannot recover after termination");
     }
+    assertStaticReason(reason);
     if (options === null || typeof options !== "object") {
       throw new MotionGraphError(
         "GRAPH_VALIDATION",
@@ -186,7 +202,6 @@ export class MotionGraphEngine {
     }
     const effects: MotionGraphEffect[] = [];
     this.#changeReadiness("static", effects, reason);
-    effects.push(freezeEffect({ type: "fallback", reason }));
     const graphVisual = this.#runtime.requireVisualState();
     const retainedVisual = options.retainedVisualState;
     if (retainedVisual !== undefined) this.#runtime.visualState = retainedVisual;
@@ -234,19 +249,19 @@ export class MotionGraphEngine {
     return this.#runtime.record("recover-static", effects);
   }
 
-  public failStatic(
-    message = "static fallback could not be installed",
-    options: Readonly<MotionGraphStaticFailureOptions> = {}
+  public failPlayback(
+    message = "playback could not continue",
+    options: Readonly<MotionGraphPlaybackFailureOptions> = {}
   ):
     Readonly<MotionGraphResult> {
-    this.#runtime.assertInstalled("failStatic");
+    this.#runtime.assertInstalled("failPlayback");
     if (this.#runtime.readiness === "disposed") {
-      throw new MotionGraphError("DISPOSED", "disposed graph cannot fail static");
+      throw new MotionGraphError("DISPOSED", "disposed graph cannot fail playback");
     }
     if (options === null || typeof options !== "object") {
       throw new MotionGraphError(
         "GRAPH_VALIDATION",
-        "static failure options must be an object"
+        "playback failure options must be an object"
       );
     }
     if (
@@ -267,14 +282,14 @@ export class MotionGraphEngine {
     const settlement = this.#runtime.ledger.settlePending({
       type: "reject",
       timing: "microtask",
-      error: "PlaybackFallbackError"
+      error: "PlaybackError"
     });
     if (settlement !== null) {
       effects.push(settlement);
     }
     this.#runtime.routes.clear();
     this.#runtime.phase = "error";
-    return this.#runtime.record("fail-static", effects);
+    return this.#runtime.record("fail-playback", effects);
   }
 
   public request(target: GraphStateId): Readonly<MotionGraphResult> {

@@ -30,29 +30,6 @@ import type {
   IntegratedPlayerParticipantBinding
 } from "./integrated-player-participant.js";
 
-export interface IntegratedFallbackStore {
-  installInitial(options: {
-    readonly state: string;
-    readonly signal: AbortSignal;
-  }): Promise<unknown>;
-  validateAll(options: { readonly signal: AbortSignal }): Promise<unknown>;
-  presentState(
-    state: string,
-    options: {
-      readonly signal: AbortSignal;
-      /** False updates logical state without covering animated output. */
-      readonly cover?: boolean;
-    }
-  ): Promise<unknown>;
-  /** Exact logical state identity currently represented by host fallback. */
-  currentState(): string | null;
-  coverCurrent(): void;
-  revealAnimated(): void;
-  /** Resolves after every aborted fallback callback has retired. */
-  settled(): Promise<void>;
-  dispose(): void;
-}
-
 export interface IntegratedCandidateAttemptContext {
   readonly catalog: RuntimeAssetCatalog;
   /** Exact authored rung selected before candidate construction. */
@@ -173,9 +150,6 @@ export interface IntegratedRealtimeDriverOptions {
 }
 
 interface IntegratedPlayerCommonOptions {
-  readonly createFallbackStore: (
-    catalog: RuntimeAssetCatalog
-  ) => IntegratedFallbackStore;
   readonly candidateFactory: IntegratedCandidateFactory;
   readonly eventSink?: (event: Readonly<EffectHostEvent>) => void;
   readonly diagnosticsSink?: (failure: Readonly<RuntimeFailure>) => void;
@@ -228,13 +202,6 @@ export interface IntegratedPlayerSnapshot {
 }
 
 export type IntegratedPlayerTrace = readonly Readonly<RuntimeTraceRecord>[];
-
-export class PlaybackFallbackError extends Error {
-  public constructor(message = "animation static fallback failed") {
-    super(message);
-    this.name = "PlaybackFallbackError";
-  }
-}
 
 export class IntegratedPlaybackInvariantError extends Error {
   public constructor(message: string) {

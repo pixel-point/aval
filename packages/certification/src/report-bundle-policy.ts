@@ -5,6 +5,10 @@ export interface ReportBundlePolicy {
   readonly maximumAttachmentBytes: number;
   readonly allowedMediaTypes: ReadonlySet<string>;
   readonly allowedFixtureDigests?: ReadonlySet<string>;
+  /** Exact candidate artifact allowed as the fatal-boundary fault source. */
+  readonly allowedFatalBoundaryFixtureDigests?: ReadonlySet<string>;
+  /** Exact candidate certification harness digests allowed to produce the boundary witness. */
+  readonly allowedCertificationHarnessDigests?: ReadonlySet<string>;
   /** Trusted models extracted from the exact candidate `.avl` bytes, keyed by their SHA-256. */
   readonly allowedFixtureModels?: ReadonlyMap<string, RuntimeFixtureModel>;
   /** Trusted display marker contracts extracted from exact candidate artifact bytes, keyed by SHA-256. */

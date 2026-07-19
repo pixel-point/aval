@@ -3,9 +3,10 @@
 The page manager accounts for decoders and tracked bytes across players. A host
 may configure an explicit lower resource policy; there is no implicit
 small-asset byte ceiling. A player reserves before allocation, publishes exact
-category ownership, and can enter fallback state when an actual or configured
-resource boundary is reached. Hidden or reduced-motion players
-release animation resources and leave host-owned fallback markup visible.
+category ownership, and rejects when an actual or configured resource boundary
+is reached. Resource rejection is terminal and reported to the consumer; hidden
+or reduced-motion players release animation resources as a
+nonfatal policy condition. None of these paths manipulates application DOM.
 
 Authors own the cost of unit length, canvas/rendition dimensions, and bitrate.
 Use authored restart runways and measure the real target devices.

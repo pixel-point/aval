@@ -245,6 +245,14 @@ export async function installStaticPreparationOutcome(
         })
       })
     });
+    Object.defineProperty(prototype, "readiness", {
+      configurable: true,
+      get: () => "staticReady"
+    });
+    Object.defineProperty(prototype, "staticReason", {
+      configurable: true,
+      get: () => reason
+    });
     if (failure === null) return;
     Object.defineProperty(prototype, "getDiagnostics", {
       configurable: true,
@@ -256,6 +264,34 @@ export async function installStaticPreparationOutcome(
       }
     });
   }, input);
+}
+
+export async function installRetainedNonfatalDiagnostic(
+  page: Page,
+  failure: Readonly<{
+    code: string;
+    message: string;
+    operation: string;
+  }>
+): Promise<void> {
+  await page.evaluate(async (retainedFailure) => {
+    await customElements.whenDefined("aval-player");
+    const constructor = customElements.get("aval-player");
+    if (constructor === undefined) throw new Error("aval-player is undefined");
+    const prototype = constructor.prototype;
+    const originalDiagnostics = prototype.getDiagnostics as (
+      options?: Readonly<{ trace?: boolean }>
+    ) => Readonly<Record<string, unknown>>;
+    Object.defineProperty(prototype, "getDiagnostics", {
+      configurable: true,
+      value(this: HTMLElement, options?: Readonly<{ trace?: boolean }>) {
+        return Object.freeze({
+          ...originalDiagnostics.call(this, options),
+          lastFailure: retainedFailure
+        });
+      }
+    });
+  }, failure);
 }
 
 export function expectNoBrowserFailures(failures: BrowserFailures): void {

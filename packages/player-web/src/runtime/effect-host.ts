@@ -5,6 +5,7 @@ import type {
   MotionGraphSnapshot
 } from "@pixel-point/aval-graph";
 
+import type { RuntimePlaybackError } from "./errors.js";
 import {
   RUNTIME_TRACE_CAPACITY,
   translateGraphReadiness,
@@ -327,14 +328,16 @@ export class EffectHost {
     }
   }
 
-  /** Terminalize a draw transaction whose replacement fallback failed. */
+  /** Terminalize a draw transaction whose replacement state failed. */
   public applyFailure(
-    result: Readonly<MotionGraphResult>
+    result: Readonly<MotionGraphResult>,
+    error: RuntimePlaybackError
   ): Readonly<MotionGraphResult> {
+    this.#requestPromises.bindTerminalPlaybackError(error);
     return this.#applyInterruptedTermination(
       result,
-      "fail-static",
-      "PlaybackFallbackError"
+      "fail-playback",
+      "PlaybackError"
     );
   }
 
@@ -347,8 +350,8 @@ export class EffectHost {
 
   #applyInterruptedTermination(
     result: Readonly<MotionGraphResult>,
-    operation: "fail-static" | "dispose",
-    error: "PlaybackFallbackError" | "AbortError"
+    operation: "fail-playback" | "dispose",
+    error: "PlaybackError" | "AbortError"
   ): Readonly<MotionGraphResult> {
     const interrupted = this.#interruptedBarrier;
     if (interrupted === null) {
@@ -433,9 +436,6 @@ export class EffectHost {
         return;
       case "transitionend":
         this.#isTransitioning = resultSnapshot.isTransitioning;
-        this.#dispatch(cloneGraphEvent(effect), phase);
-        return;
-      case "fallback":
         this.#dispatch(cloneGraphEvent(effect), phase);
         return;
       case "settle":

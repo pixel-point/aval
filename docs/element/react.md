@@ -20,10 +20,11 @@ tarball for that install. This document does not claim that version 1.0.0 is
 already available from a public registry.
 
 ```tsx
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   defineAvalElement,
-  type AvalElement
+  type AvalElement,
+  type AvalErrorDetail
 } from "@pixel-point/aval-element";
 
 export function StatusMotion({
@@ -33,31 +34,61 @@ export function StatusMotion({
   state: string;
   onVisualState?: (state: string | null) => void;
 }) {
-  const ref = useRef<AvalElement>(null);
-  useEffect(() => {
-    defineAvalElement();
-    const node = ref.current;
-    if (!node) return;
+  const current = useRef<AvalElement | null>(null);
+  const [failed, setFailed] = useState(false);
+  const attach = useCallback((node: AvalElement | null) => {
+    if (node === null) return;
+    current.current = node;
     const listener = () => onVisualState?.(node.visualState);
+    const readiness = () => {
+      if (node.readiness === "interactiveReady") setFailed(false);
+    };
+    const failure = (event: CustomEvent<AvalErrorDetail>) => {
+      if (event.detail.fatal) setFailed(true);
+    };
+    const detach = () => {
+      node.removeEventListener("visualstatechange", listener);
+      node.removeEventListener("readinesschange", readiness);
+      node.removeEventListener("error", failure);
+      if (current.current === node) current.current = null;
+    };
     node.addEventListener("visualstatechange", listener);
-    return () => node.removeEventListener("visualstatechange", listener);
+    node.addEventListener("readinesschange", readiness);
+    node.addEventListener("error", failure);
+    try {
+      defineAvalElement();
+    } catch (error) {
+      detach();
+      throw error;
+    }
+    return detach;
   }, [onVisualState]);
   return (
-    <aval-player ref={ref} src="/status.avl" state={state}>
-      <span slot="fallback" aria-hidden="true">{state}</span>
-    </aval-player>
+    <>
+      <aval-player ref={attach} state={state}>
+        <source
+          src="/status.h264.avl"
+          type='application/vnd.aval; codecs="avc1.42E01E"'
+        />
+      </aval-player>
+      {failed && <span aria-hidden="true">{state}</span>}
+    </>
   );
 }
 ```
 
-Putting definition inside the client effect keeps server rendering free of DOM
-global access. Assign an object-only target in a separate effect when needed:
+The React 19 callback ref runs during the commit that connects the node. It
+installs listeners before registration and before a pre-defined element's
+queued connection work, including on remount, while server rendering remains
+free of DOM global access. Its returned cleanup removes the listeners. Assign
+an object-only target in a separate effect when needed:
 
 ```tsx
 useEffect(() => {
-  if (ref.current) ref.current.interactionTarget = buttonRef.current;
+  const node = current.current;
+  if (node) node.interactionTarget = buttonRef.current;
   return () => {
-    if (ref.current) ref.current.interactionTarget = null;
+    if (node) node.interactionTarget = null;
   };
 }, []);
 ```
@@ -90,5 +121,5 @@ declare module "react" {
 Keep custom DOM events on `addEventListener`; React custom-event prop naming is
 not the element contract. Do not mirror every visual-state event back into a
 controlled `state` prop; application semantics should own that prop. Keep the
-author-owned slotted fallback in the JSX so the page remains useful before
-registration, without JavaScript, and after a fatal asset failure.
+consumer-owned alternate content outside `<aval-player>` and decide from the
+fatal `error` event or `AvalPlaybackError` whether to render it.

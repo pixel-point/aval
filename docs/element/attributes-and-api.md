@@ -32,9 +32,10 @@ and size hints are positive safe integers. They are not silently clamped;
 actual canvas, browser, and device limits can instead produce an explicit
 capability/resource failure. The element has no external
 image URL API. On the supported path, the first visible internal pixels are a
-decoded motion frame. The optional author-owned fallback slot is separate from
-the `.avl` and remains visible during preparation, reduced motion, and
-unsupported/error paths.
+decoded motion frame. AVAL has no fallback slot and never reveals, hides, or
+selects alternate application DOM. A consumer that wants an image or other
+fallback keeps it beside the element and responds to `AvalPlaybackError` or the
+fatal `error` event.
 
 Core methods are `prepare`, `setState`, `send`, `readyFor`, `pause`, `resume`,
 `getDiagnostics`, and `dispose`. Caller abort signals and `timeoutMs` bound only
@@ -43,7 +44,7 @@ that caller's `prepare()` wait; they do not cancel connected shared preparation.
 synchronous. `state` remains declarative intent and is not rewritten by
 imperative requests.
 
-Read-only staged properties include readiness, mode, fallback reason,
+Read-only staged properties include readiness, mode, static policy reason,
 requested/visual state, transition state, pause intent, effective visibility,
 and immutable discovered state/event/binding lists.
 

@@ -336,6 +336,51 @@ test("keeps the interaction hotspot hidden until the video is rendered", async (
   await expect(hotspot).toHaveCSS("opacity", "1");
 });
 
+test("does not label nonfatal static policy as rendered motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  const motion = page.locator("#grass-rabbit");
+  const hotspot = page.locator(".interaction-hotspot");
+  await expect.poll(() => motion.evaluate((node) => ({
+    readiness: (node as AvalElement).readiness,
+    staticReason: (node as AvalElement).staticReason
+  }))).toEqual({
+    readiness: "staticReady",
+    staticReason: "reduced-motion"
+  });
+  await expect(motion).not.toHaveAttribute("data-rendered", "");
+  await expect(hotspot).not.toHaveClass(/is-rendered/u);
+  await expect(hotspot).toHaveCSS("opacity", "0");
+});
+
+test("reflects live interactive and static policy transitions", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+
+  const motion = page.locator("#grass-rabbit");
+  const hotspot = page.locator(".interaction-hotspot");
+  await expect.poll(() => motion.evaluate((node) => (
+    node as AvalElement
+  ).readiness)).toBe("interactiveReady");
+  await expect(motion).toHaveAttribute("data-rendered", "");
+  await expect(hotspot).toHaveClass(/is-rendered/u);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => motion.evaluate((node) => (
+    node as AvalElement
+  ).readiness)).toBe("staticReady");
+  await expect(motion).not.toHaveAttribute("data-rendered", "");
+  await expect(hotspot).not.toHaveClass(/is-rendered/u);
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(() => motion.evaluate((node) => (
+    node as AvalElement
+  ).readiness)).toBe("interactiveReady");
+  await expect(motion).toHaveAttribute("data-rendered", "");
+  await expect(hotspot).toHaveClass(/is-rendered/u);
+});
+
 test("plays the intro once in the responsive product page", async ({
   page
 }) => {
@@ -398,21 +443,19 @@ test("plays the intro once in the responsive product page", async ({
       hasStaticLayer: node.shadowRoot?.querySelector(
         '[data-aval-layer="static"]'
       ) !== null,
-      fallbackCount: node.querySelectorAll("[slot=fallback]").length
+      fallbackSlotCount: node.shadowRoot?.querySelectorAll('slot[name="fallback"]')
+        .length ?? 0
     };
   });
   expect(initialLayers).toEqual({
     canvasCount: 1,
     hasStaticLayer: false,
-    fallbackCount: 0
+    fallbackSlotCount: 0
   });
 
   const interactiveSurface = await motion.evaluate((node) => {
     const animated = node.shadowRoot!.querySelector<HTMLCanvasElement>(
       'canvas[data-aval-layer="animated"]'
-    );
-    const fallbackSlot = node.shadowRoot!.querySelector<HTMLSlotElement>(
-      'slot[data-aval-layer="fallback"]'
     );
     const diagnostics = (node as HTMLElement & {
       getDiagnostics(): {
@@ -431,7 +474,8 @@ test("plays the intro once in the responsive product page", async ({
       height: animated.height,
       display: getComputedStyle(animated).display,
       canvasCount: node.shadowRoot!.querySelectorAll("canvas").length,
-      fallbackHidden: fallbackSlot?.hidden ?? false,
+      fallbackSlotCount: node.shadowRoot!.querySelectorAll('slot[name="fallback"]')
+        .length,
       presentation: diagnostics.presentation
     };
   });
@@ -440,7 +484,7 @@ test("plays the intro once in the responsive product page", async ({
     height: 720,
     display: "block",
     canvasCount: 1,
-    fallbackHidden: true,
+    fallbackSlotCount: 0,
     presentation: expect.objectContaining({
       cssWidth: 640,
       cssHeight: 360,
@@ -649,8 +693,7 @@ test("plays the intro once in the responsive product page", async ({
   }, firstIdleTraceIndex);
   expect(finalDiagnostics).toMatchObject({
     counters: {
-      underflow: 0,
-      fallback: introLedger.counters.fallback
+      underflow: 0
     },
     lastFailure: null,
     replayedIntro: false

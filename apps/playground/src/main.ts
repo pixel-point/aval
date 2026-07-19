@@ -39,6 +39,7 @@ declare global {
 
 const CODEC_ORDER = Object.freeze([...VIDEO_CODECS].reverse());
 const player = requireElement<HTMLElement>("#motion");
+const alternate = requireElement<HTMLElement>(".fallback");
 const status = requireElement<HTMLElement>("#status");
 const codecList = requireElement<HTMLOListElement>("#codec-list");
 const codecButtons = new Map<Codec, HTMLButtonElement>(CODEC_ORDER.map((codec) => [
@@ -97,19 +98,30 @@ async function initialize(): Promise<void> {
       source.type = asset.type;
       if (includeIntegrity) source.setAttribute("integrity", asset.integrity);
     }
-    await import("@pixel-point/aval-element/auto");
     const motion = player as PlaygroundPlayer;
     bindCodecControls(motion);
     player.addEventListener("readinesschange", () => {
+      if (motion.readiness === "interactiveReady") {
+        alternate.hidden = true;
+      }
       publishRuntimeStatus(motion);
     });
-    player.addEventListener("error", () => {
+    player.addEventListener("error", (event) => {
+      const detail = (event as unknown as CustomEvent<{
+        readonly fatal?: unknown;
+      }>).detail;
+      if (detail?.fatal === true) {
+        alternate.hidden = false;
+      }
       if (!switching) publishRuntimeStatus(motion);
     });
+    await import("@pixel-point/aval-element/auto");
     await motion.prepare?.({ timeoutMs: 30_000 });
     publishRuntimeStatus(motion);
     setControlsDisabled(false);
   } catch (error) {
+    player.hidden = true;
+    alternate.hidden = false;
     status.textContent = error instanceof Error ? error.message : "playground initialization failed";
     status.dataset.state = "error";
     throw error;
@@ -138,6 +150,10 @@ async function switchPreferredCodec(
   status.dataset.state = "switching";
   let prepared = false;
   try {
+    // The alternate overlays the still-laid-out player. Keeping the host
+    // effectively visible avoids turning consumer presentation into a runtime
+    // visibility suspension that can block a replacement generation.
+    alternate.hidden = false;
     reorderSources(codec);
     await motion.prepare?.({ timeoutMs: 30_000 });
     prepared = true;
@@ -167,8 +183,7 @@ function reorderSources(codec: Codec): void {
   for (const family of [codec, ...CODEC_ORDER.filter((entry) => entry !== codec)]) {
     fragment.append(requireMapValue(sources, family));
   }
-  const fallback = player.querySelector(":scope > [slot=\"fallback\"]");
-  player.insertBefore(fragment, fallback);
+  player.append(fragment);
 }
 
 function publishRuntimeStatus(motion: PlaygroundPlayer): void {

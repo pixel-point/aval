@@ -12,6 +12,7 @@ import {
   type EffectHostEvent,
   type EffectHostSnapshot
 } from "./effect-host.js";
+import { RuntimePlaybackError, normalizeRuntimeFailure } from "./errors.js";
 import { RequestPromises } from "./request-promises.js";
 
 describe("staged graph effect host", () => {
@@ -127,21 +128,20 @@ describe("staged graph effect host", () => {
     await expect(promise).resolves.toBeUndefined();
   });
 
-  it("stages static recovery before and after the drawn fallback", async () => {
+  it("stages decoder waiting around the logical draw barrier", async () => {
     const fixture = preparedFixture({ start: portalStart() });
     const request = fixture.engine.request("hover");
     const promise = fixture.requests.register(request.requestId!);
     fixture.host.apply(request);
     fixture.order.length = 0;
 
-    const recovery = fixture.engine.recoverStatic("decode-failure");
+    const recovery = fixture.engine.recoverStatic("decoder-queued");
     fixture.host.apply(recovery, (presentation) => {
       fixture.order.push(`draw:${show(presentation)}`);
     });
 
     expect(fixture.order).toEqual([
       "event:readinesschange",
-      "event:fallback",
       "event:transitionstart",
       "draw:static:hover",
       "event:visualstatechange",
@@ -159,7 +159,7 @@ describe("staged graph effect host", () => {
     await expect(promise).resolves.toBeUndefined();
   });
 
-  it("keeps the newest exposed state and rejects fallback failure after a microtask", async () => {
+  it("keeps the newest exposed state and rejects state failure after a microtask", async () => {
     const fixture = preparedFixture({ start: portalStart() });
     const request = fixture.engine.request("hover");
     const outcome = fixture.requests.register(request.requestId!)
@@ -167,8 +167,12 @@ describe("staged graph effect host", () => {
     fixture.host.apply(request);
     fixture.order.length = 0;
 
-    const failure = fixture.engine.failStatic("png-invalid");
-    fixture.host.apply(failure);
+    const terminal = new RuntimePlaybackError(normalizeRuntimeFailure(
+      "renderer-failure",
+      "png-invalid"
+    ));
+    const failure = fixture.engine.failPlayback("png-invalid");
+    fixture.host.applyFailure(failure, terminal);
 
     expect(fixture.order).toEqual(["event:readinesschange"]);
     expect(fixture.host.snapshot()).toMatchObject({
@@ -179,9 +183,7 @@ describe("staged graph effect host", () => {
     });
     expect(fixture.microtasks).toHaveLength(1);
     fixture.microtasks.shift()!();
-    await expect(outcome).resolves.toMatchObject({
-      name: "PlaybackFallbackError"
-    });
+    await expect(outcome).resolves.toBe(terminal);
   });
 
   it("rejects an invalid route without changing staged requested state", async () => {
@@ -248,14 +250,23 @@ describe("staged graph effect host", () => {
       requestPromises: new RequestPromises()
     });
     const snapshot = graphSnapshot();
+    const boundedSnapshot = Object.freeze({
+      ...snapshot,
+      requestedState: "idle"
+    });
     for (let index = 0; index < 520; index += 1) {
       host.apply({
         operation: "send",
         accepted: true,
         sequence: index + 1,
         presentation: null,
-        effects: [{ type: "fallback", reason: "bounded" }],
-        snapshot
+        effects: [{
+          type: "requestedstatechange",
+          from: "idle",
+          to: "idle",
+          sequence: index + 1
+        }],
+        snapshot: boundedSnapshot
       });
     }
 

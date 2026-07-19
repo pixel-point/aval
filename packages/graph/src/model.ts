@@ -109,6 +109,16 @@ export type MotionGraphPhase =
   | "disposed"
   | "error";
 
+/** Exhaustive host policy reasons that may intentionally suspend animation. */
+export const MOTION_GRAPH_STATIC_REASONS = Object.freeze([
+  "reduced-motion",
+  "visibility-suspended",
+  "decoder-queued"
+] as const);
+
+export type MotionGraphStaticReason =
+  (typeof MOTION_GRAPH_STATIC_REASONS)[number];
+
 export type GraphPresentation =
   | {
       readonly kind: "static";
@@ -145,7 +155,7 @@ export type GraphSettlementError =
   | "RouteError"
   | "InputOverflowError"
   | "AbortError"
-  | "PlaybackFallbackError";
+  | "PlaybackError";
 
 export type GraphSettlement =
   | {
@@ -191,10 +201,6 @@ export type MotionGraphEffect =
       readonly to: GraphStateId;
     }
   | {
-      readonly type: "fallback";
-      readonly reason: string;
-    }
-  | {
       readonly type: "settle";
       readonly requestIds: readonly number[];
       readonly outcome: GraphSettlement;
@@ -227,7 +233,7 @@ export type MotionGraphOperation =
   | "resume-animated"
   | "begin-static"
   | "recover-static"
-  | "fail-static"
+  | "fail-playback"
   | "request"
   | "send"
   | "tick"
@@ -249,12 +255,12 @@ export interface MotionGraphTickOptions {
   readonly routeReady?: boolean;
 }
 
-/** Host-supplied last successful draw identity for a failed presentation. */
-export interface MotionGraphStaticFailureOptions {
+/** Host-supplied last successful draw identity for terminal playback failure. */
+export interface MotionGraphPlaybackFailureOptions {
   readonly retainedVisualState?: GraphStateId;
 }
 
-/** Last pixels actually drawn when an animated graph tick failed mid-barrier. */
+/** Last pixels actually drawn when policy suspension interrupts animation. */
 export interface MotionGraphRecoveryOptions {
   readonly retainedVisualState?: GraphStateId;
 }

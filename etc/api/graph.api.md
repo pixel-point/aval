@@ -144,7 +144,7 @@ export type GraphSettlement = {
 };
 
 // @public (undocumented)
-export type GraphSettlementError = "NotReadyError" | "RouteError" | "InputOverflowError" | "AbortError" | "PlaybackFallbackError";
+export type GraphSettlementError = "NotReadyError" | "RouteError" | "InputOverflowError" | "AbortError" | "PlaybackError";
 
 // @public (undocumented)
 export type GraphStartPolicy = {
@@ -197,6 +197,9 @@ export function greatestFinishWaitFrames(body: GraphBodyDefinition): number;
 // @public
 export function greatestPortalWaitFrames(body: GraphBodyDefinition, portId: string): number;
 
+// @public
+export const MOTION_GRAPH_STATIC_REASONS: readonly ["reduced-motion", "visibility-suspended", "decoder-queued"];
+
 // @public (undocumented)
 export interface MotionGraphDefinition {
     // (undocumented)
@@ -240,9 +243,6 @@ export type MotionGraphEffect = {
     readonly from: GraphStateId;
     readonly to: GraphStateId;
 } | {
-    readonly type: "fallback";
-    readonly reason: string;
-} | {
     readonly type: "settle";
     readonly requestIds: readonly number[];
     readonly outcome: GraphSettlement;
@@ -253,19 +253,19 @@ export class MotionGraphEngine {
     // (undocumented)
     beginAnimated(): Readonly<MotionGraphResult>;
     // (undocumented)
-    beginStatic(reason: string): Readonly<MotionGraphResult>;
+    beginStatic(reason: MotionGraphStaticReason): Readonly<MotionGraphResult>;
     canSend(event: string): boolean;
     // (undocumented)
     dispose(options?: Readonly<MotionGraphDisposeOptions>): Readonly<MotionGraphResult>;
     // (undocumented)
-    failStatic(message?: string, options?: Readonly<MotionGraphStaticFailureOptions>): Readonly<MotionGraphResult>;
+    failPlayback(message?: string, options?: Readonly<MotionGraphPlaybackFailureOptions>): Readonly<MotionGraphResult>;
     // (undocumented)
     getTrace(): readonly Readonly<MotionGraphTraceRecord>[];
     // (undocumented)
     install(definition: MotionGraphDefinition | ValidatedMotionGraph): Readonly<MotionGraphResult>;
     previewTick(options: MotionGraphTickOptions): Readonly<MotionGraphResult>;
     // (undocumented)
-    recoverStatic(reason: string, options?: Readonly<MotionGraphRecoveryOptions>): Readonly<MotionGraphResult>;
+    recoverStatic(reason: MotionGraphStaticReason, options?: Readonly<MotionGraphRecoveryOptions>): Readonly<MotionGraphResult>;
     // (undocumented)
     request(target: GraphStateId): Readonly<MotionGraphResult>;
     // (undocumented)
@@ -286,13 +286,19 @@ export class MotionGraphError extends Error {
 }
 
 // @public (undocumented)
-export type MotionGraphErrorCode = "GRAPH_VALIDATION" | "NOT_READY" | "ROUTE_NOT_FOUND" | "INPUT_OVERFLOW" | "NON_CONSECUTIVE_TICK" | "PLAYBACK_FALLBACK" | "DISPOSED";
+export type MotionGraphErrorCode = "GRAPH_VALIDATION" | "NOT_READY" | "ROUTE_NOT_FOUND" | "INPUT_OVERFLOW" | "NON_CONSECUTIVE_TICK" | "PLAYBACK_ERROR" | "DISPOSED";
 
 // @public (undocumented)
-export type MotionGraphOperation = "install" | "begin-animated" | "resume-animated" | "begin-static" | "recover-static" | "fail-static" | "request" | "send" | "tick" | "dispose";
+export type MotionGraphOperation = "install" | "begin-animated" | "resume-animated" | "begin-static" | "recover-static" | "fail-playback" | "request" | "send" | "tick" | "dispose";
 
 // @public (undocumented)
 export type MotionGraphPhase = "unready" | "preparing" | "intro" | "stable" | "waiting" | "locked" | "reversible" | "static" | "disposed" | "error";
+
+// @public
+export interface MotionGraphPlaybackFailureOptions {
+    // (undocumented)
+    readonly retainedVisualState?: GraphStateId;
+}
 
 // @public (undocumented)
 export type MotionGraphReadiness = "unready" | "preparing" | "animated" | "static" | "disposed" | "error";
@@ -360,11 +366,8 @@ export interface MotionGraphSnapshot {
     readonly visualState: GraphStateId | null;
 }
 
-// @public
-export interface MotionGraphStaticFailureOptions {
-    // (undocumented)
-    readonly retainedVisualState?: GraphStateId;
-}
+// @public (undocumented)
+export type MotionGraphStaticReason = (typeof MOTION_GRAPH_STATIC_REASONS)[number];
 
 // @public (undocumented)
 export interface MotionGraphTickOptions {

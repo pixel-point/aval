@@ -8,14 +8,16 @@ export function bindPlayerPresentation({
   onFailure,
   prefersReducedMotion
 }) {
-  const reveal = () => revealPlayerWhenRendered(player, hotspot, isCurrent);
-  player.addEventListener("readinesschange", reveal);
+  const reflectRendered = () => reflectPlayerRenderedState(
+    player,
+    hotspot,
+    isCurrent
+  );
+  player.addEventListener("readinesschange", reflectRendered);
   player.addEventListener("readinesschange", () => {
     if (!isCurrent()) return;
     if (player.readiness === "interactiveReady") {
       requestAnimationFrame(() => trackInitialPresentation(player, parts, isCurrent));
-    } else if (player.readiness === "staticReady") {
-      setStateLabel(parts.stateBadge, player.visualState);
     }
   });
   player.addEventListener("visualstatechange", (event) => {
@@ -39,10 +41,15 @@ export function bindPlayerPresentation({
   }
 }
 
-export function revealPlayerWhenRendered(player, hotspot, isCurrent) {
-  if (!isCurrent() || !RENDERED_READINESS.has(player.readiness)) return;
+export function reflectPlayerRenderedState(player, hotspot, isCurrent) {
+  if (!isCurrent()) return;
+  if (!RENDERED_READINESS.has(player.readiness)) {
+    delete player.dataset.rendered;
+    hotspot.classList.remove("is-rendered");
+    return;
+  }
   requestAnimationFrame(() => {
-    if (!isCurrent()) return;
+    if (!isCurrent() || !RENDERED_READINESS.has(player.readiness)) return;
     player.dataset.rendered = "";
     hotspot.classList.add("is-rendered");
   });
@@ -61,7 +68,7 @@ export function failureCode(value) {
 }
 
 function trackInitialPresentation(player, parts, isCurrent) {
-  if (!isCurrent()) return;
+  if (!isCurrent() || player.readiness !== "interactiveReady") return;
   const trace = player.getDiagnostics({ trace: true }).runtimeTrace ?? [];
   const presentation = trace.at(-1)?.graph?.presentation ?? null;
   if (presentation?.kind === "intro") {

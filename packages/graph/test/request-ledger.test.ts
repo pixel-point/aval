@@ -91,7 +91,7 @@ describe("RequestLedger", () => {
       ledger.settlePending({
         type: "reject",
         timing: "microtask",
-        error: "PlaybackFallbackError"
+        error: "PlaybackError"
       })
     ).toMatchObject({ requestIds: [3, 4] });
     expect(

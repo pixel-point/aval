@@ -1,31 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { createRuntimeTestAsset } from "./asset-test-support.js";
 import { RuntimeAssetCatalog } from "./asset-catalog.js";
-import { StateFallbackStore } from "./state-fallback-store.js";
+import { StateStore } from "./state-store.js";
 
-describe("state fallback store", () => {
-  it("tracks state and delegates fallback visibility without media bytes", async () => {
+describe("state store", () => {
+  it("tracks logical state without owning presentation UI", async () => {
     const catalog = new RuntimeAssetCatalog(createRuntimeTestAsset());
-    const coverFallback = vi.fn();
-    const revealAnimated = vi.fn();
-    const store = new StateFallbackStore(catalog, {
-      coverFallback,
-      revealAnimated
-    });
+    const store = new StateStore(catalog);
     const signal = new AbortController().signal;
 
     await store.installInitial({ state: "idle", signal });
     expect(store.currentState()).toBe("idle");
-    expect(coverFallback).toHaveBeenCalledOnce();
 
-    await store.presentState("idle", { signal, cover: false });
-    expect(coverFallback).toHaveBeenCalledOnce();
-    store.revealAnimated();
-    expect(revealAnimated).toHaveBeenCalledOnce();
+    await store.presentState("idle", { signal });
+    expect(store.currentState()).toBe("idle");
 
-    store.coverCurrent();
-    expect(coverFallback).toHaveBeenCalledTimes(2);
     store.dispose();
     expect(store.currentState()).toBeNull();
     catalog.dispose();
@@ -33,10 +23,7 @@ describe("state fallback store", () => {
 
   it("rejects unknown states and aborted operations", async () => {
     const catalog = new RuntimeAssetCatalog(createRuntimeTestAsset());
-    const store = new StateFallbackStore(catalog, {
-      coverFallback() {},
-      revealAnimated() {}
-    });
+    const store = new StateStore(catalog);
     const active = new AbortController().signal;
     await expect(store.presentState("missing", { signal: active }))
       .rejects.toThrow();

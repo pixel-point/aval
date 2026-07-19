@@ -14,9 +14,13 @@ const media = vi.hoisted(() => ({
   releaseBlocked: [] as Array<{ runId: number; release: () => void }>,
   operations: [] as string[],
   decoderCount: 0,
+  assetDisposeCalls: 0,
   assetDisposeFailures: 0,
   assetDisposeHold: null as Promise<void> | null,
   assetDisposeReached: null as (() => void) | null,
+  rendererDisposeCalls: 0,
+  rendererSettlementHold: null as Promise<void> | null,
+  rendererSettlementReached: null as (() => void) | null,
   decoderFailures: [] as Array<{
     promise: Promise<never>;
     reject: (reason: unknown) => void;
@@ -153,6 +157,7 @@ vi.mock("../src/asset.js", () => {
       return new Uint8Array([index]).buffer;
     }
     public async dispose(): Promise<void> {
+      media.assetDisposeCalls += 1;
       media.assetDisposeReached?.();
       if (media.assetDisposeHold !== null) await media.assetDisposeHold;
       if (media.assetDisposeFailures > 0) {
@@ -336,8 +341,11 @@ vi.mock("../src/renderer.js", () => ({
     public async store(): Promise<void> {}
     public async drawStored(): Promise<void> {}
     public resize(): void {}
-    public settled(): Promise<void> { return Promise.resolve(); }
-    public dispose(): void {}
+    public settled(): Promise<void> {
+      media.rendererSettlementReached?.();
+      return media.rendererSettlementHold ?? Promise.resolve();
+    }
+    public dispose(): void { media.rendererDisposeCalls += 1; }
   }
 }));
 
@@ -349,9 +357,13 @@ afterEach(() => {
   media.releaseBlocked.length = 0;
   media.operations.length = 0;
   media.decoderCount = 0;
+  media.assetDisposeCalls = 0;
   media.assetDisposeFailures = 0;
   media.assetDisposeHold = null;
   media.assetDisposeReached = null;
+  media.rendererDisposeCalls = 0;
+  media.rendererSettlementHold = null;
+  media.rendererSettlementReached = null;
   media.decoderFailures.length = 0;
   media.decoderDiagnostics.length = 0;
   vi.unstubAllGlobals();
@@ -587,6 +599,138 @@ describe("player multi-route prefetch", () => {
     expect(playbackFailures).toEqual(["worker-decode-failure:playback"]);
     await expect(player.prepare()).rejects.toBe(terminal);
     expect(player.snapshot(false)).toMatchObject({ workerCount: 0, openFrames: 0 });
+    await player.dispose();
+  });
+
+  it.each(["setState", "resume"] as const)(
+    "rejects a %s continuation when terminal work starts after prepare resolves",
+    async (operation) => {
+      const { player, terminal, observations } = await createReadyTerminalPlayer(
+        "context-loss",
+        "render"
+      );
+      if (operation === "resume") player.pause();
+      const pending = operation === "setState"
+        ? player.setState("hover")
+        : player.resume();
+      void pending.catch(() => undefined);
+
+      (player as unknown as {
+        contextChanged(state: "error"): void;
+      }).contextChanged("error");
+
+      await expect(pending).rejects.toBe(terminal);
+      await expect(player.prepare()).rejects.toBe(terminal);
+      await player.settled();
+      expect(observations.playbackFailures).toEqual([
+        "context-loss:render"
+      ]);
+      expect(observations.retirements).toBe(1);
+      expect(media.assetDisposeCalls).toBe(1);
+      expect(media.rendererDisposeCalls).toBe(1);
+      expect(player.snapshot(false)).toMatchObject({
+        workerCount: 0,
+        openFrames: 0
+      });
+      await player.dispose();
+    }
+  );
+
+  it("terminalizes a queued decoder failure during static-policy retirement", async () => {
+    const { player, terminal, observations } = await createReadyTerminalPlayer(
+      "worker-decode-failure",
+      "playback"
+    );
+    let releaseRenderer!: () => void;
+    let markRendererReached!: () => void;
+    const rendererReached = new Promise<void>((resolve) => {
+      markRendererReached = resolve;
+    });
+    media.rendererSettlementReached = markRendererReached;
+    media.rendererSettlementHold = new Promise<void>((resolve) => {
+      releaseRenderer = resolve;
+    });
+
+    const suspension = player.suspend("visibility-suspended");
+    void suspension.catch(() => undefined);
+    await rendererReached;
+    media.decoderFailures[0]!.reject(new Error("queued decoder failure"));
+    await settleMicrotasks();
+    releaseRenderer();
+
+    await expect(suspension).rejects.toBe(terminal);
+    await expect(player.prepare()).rejects.toBe(terminal);
+    await player.settled();
+    expect(observations.playbackFailures).toEqual([
+      "worker-decode-failure:playback"
+    ]);
+    expect(observations.retirements).toBe(1);
+    expect(media.assetDisposeCalls).toBe(1);
+    expect(media.rendererDisposeCalls).toBe(1);
+    expect(player.snapshot(false)).toMatchObject({
+      workerCount: 0,
+      openFrames: 0
+    });
+    await player.dispose();
+  });
+
+  it("ignores an expected decoder abort during static-policy retirement", async () => {
+    const { player, observations } = await createReadyTerminalPlayer(
+      "worker-decode-failure",
+      "playback"
+    );
+    let releaseRenderer!: () => void;
+    let markRendererReached!: () => void;
+    const rendererReached = new Promise<void>((resolve) => {
+      markRendererReached = resolve;
+    });
+    media.rendererSettlementReached = markRendererReached;
+    media.rendererSettlementHold = new Promise<void>((resolve) => {
+      releaseRenderer = resolve;
+    });
+
+    const suspension = player.suspend("visibility-suspended");
+    await rendererReached;
+    media.decoderFailures[0]!.reject(
+      new DOMException("decoder retired", "AbortError")
+    );
+    await settleMicrotasks();
+    releaseRenderer();
+
+    await expect(suspension).resolves.toMatchObject({
+      mode: "static",
+      reason: "visibility-suspended"
+    });
+    expect(observations.playbackFailures).toEqual([]);
+    expect(observations.retirements).toBe(1);
+    expect(media.assetDisposeCalls).toBe(1);
+    expect(media.rendererDisposeCalls).toBe(1);
+    await player.dispose();
+  });
+
+  it("terminalizes an unexpected decoder AbortError during active playback", async () => {
+    const { player, terminal, observations } = await createReadyTerminalPlayer(
+      "worker-decode-failure",
+      "playback"
+    );
+
+    media.decoderFailures[0]!.reject(
+      new DOMException("active decoder failed", "AbortError")
+    );
+    await settleMicrotasks();
+
+    await expect(player.prepare()).rejects.toBe(terminal);
+    await player.settled();
+    expect(observations.playbackFailures).toEqual([
+      "worker-decode-failure:playback"
+    ]);
+    expect(observations.retirements).toBe(1);
+    expect(media.assetDisposeCalls).toBe(1);
+    expect(media.rendererDisposeCalls).toBe(1);
+    expect(player.snapshot(false)).toMatchObject({
+      workerCount: 0,
+      openFrames: 0
+    });
     await player.dispose();
   });
 
@@ -1154,4 +1298,58 @@ function defaultPlaybackFailure(
     message: "Playback could not continue.",
     operation
   }), 1);
+}
+
+async function createReadyTerminalPlayer(
+  code: ConstructorParameters<typeof AvalPlaybackError>[0]["code"],
+  operation: string
+) {
+  vi.stubGlobal("Worker", class {});
+  vi.stubGlobal("VideoDecoder", class {});
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  vi.stubGlobal("cancelAnimationFrame", () => undefined);
+  const terminal = new AvalPlaybackError(Object.freeze({
+    code,
+    message: "Playback could not continue.",
+    operation
+  }), 1);
+  const observations = {
+    playbackFailures: [] as string[],
+    retirements: 0
+  };
+  const player = await createPlayer({
+    canvas: new EventTarget() as HTMLCanvasElement,
+    platform: testPlatform(),
+    initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
+    baseUrl: "https://example.test/",
+    sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+    credentials: "same-origin",
+    signal: new AbortController().signal,
+    preparationTimeoutMs: 5_000,
+    motion: "full",
+    reduced: false,
+    initialState: null,
+    initialBody: false,
+    visible: true,
+    decoderReady: () => true,
+    onResourceBytes: () => undefined,
+    onMetadata: () => undefined,
+    onReadiness: () => undefined,
+    onAnimationResourcesRetired: () => { observations.retirements += 1; },
+    onDraw: () => undefined,
+    onRestart: () => undefined,
+    onEvent: () => undefined,
+    onFailure: () => undefined,
+    onPlaybackFailure: (actualCode, actualOperation) => {
+      observations.playbackFailures.push(`${actualCode}:${actualOperation}`);
+      return terminal;
+    }
+  });
+  player.activate();
+  await player.prepare();
+  return { player, terminal, observations };
+}
+
+async function settleMicrotasks(): Promise<void> {
+  for (let index = 0; index < 8; index += 1) await Promise.resolve();
 }

@@ -28,8 +28,7 @@ describe("IntegratedPlayer visibility lifecycle", () => {
     });
     expect(harness.player.motionSnapshot()).toMatchObject({
       actualMode: "static",
-      staticOrigin: "visibility-suspended",
-      stickyFailure: false
+      staticOrigin: "visibility-suspended"
     });
 
     await harness.player.setVisibility("visible");
@@ -58,7 +57,7 @@ describe("IntegratedPlayer visibility lifecycle", () => {
     expect(harness.player.snapshot().readiness).toBe("interactiveReady");
   });
 
-  it("restarts an unfinished intro behind the cover on show", async () => {
+  it("restarts an unfinished intro from logical state on show", async () => {
     const harness = createHarness({
       behaviors: [{ kind: "success" }, { kind: "success" }]
     });
@@ -66,10 +65,7 @@ describe("IntegratedPlayer visibility lifecycle", () => {
 
     await harness.player.setVisibility("hidden");
 
-    expect(harness.fallbackStore.calls).toEqual(expect.arrayContaining([
-      "stage:idle",
-      "cover-current"
-    ]));
+    expect(harness.stateStore.calls).toContain("present:idle");
     expect(harness.factory.activeAttempts).toBe(0);
     expect(harness.player.snapshot()).toMatchObject({
       readiness: "staticReady",
@@ -119,7 +115,7 @@ describe("IntegratedPlayer visibility lifecycle", () => {
       behaviors: [{ kind: "success" }]
     });
     const preparing = harness.player.prepare();
-    await waitForCall(harness.fallbackStore.calls, "install:idle");
+    await waitForCall(harness.stateStore.calls, "install:idle");
 
     const showing = harness.player.setVisibility("visible");
     gate.resolve(undefined);
@@ -145,7 +141,7 @@ describe("IntegratedPlayer visibility lifecycle", () => {
     });
     const preparing = harness.player.prepare();
     await waitForCall(
-      harness.fallbackStore.calls,
+      harness.stateStore.calls,
       kind === "gate-initial-install" ? "install:idle" : "validate-all"
     );
 
@@ -187,7 +183,7 @@ describe("IntegratedPlayer visibility lifecycle", () => {
     });
     await harness.player.prepare();
     await harness.player.setVisibility("hidden");
-    const presentCallsBeforeRequests = harness.fallbackStore.calls.length;
+    const presentCallsBeforeRequests = harness.stateStore.calls.length;
 
     await Promise.all([
       harness.player.requestState("hover"),
@@ -196,7 +192,7 @@ describe("IntegratedPlayer visibility lifecycle", () => {
     ]);
     await harness.player.setVisibility("visible");
 
-    expect(harness.fallbackStore.calls.slice(presentCallsBeforeRequests).filter(
+    expect(harness.stateStore.calls.slice(presentCallsBeforeRequests).filter(
       (call) => call.startsWith("present:")
     )).toEqual(["present:hover"]);
     const draw = harness.factory.draws.at(-1);
@@ -219,10 +215,10 @@ describe("IntegratedPlayer visibility lifecycle", () => {
     });
     await harness.player.prepare();
     await harness.player.setVisibility("hidden");
-    harness.fallbackStore.gateNextPresent(gate);
+    harness.stateStore.gateNextPresent(gate);
 
     const request = harness.player.requestState("hover");
-    await waitForCall(harness.fallbackStore.calls, "present:hover");
+    await waitForCall(harness.stateStore.calls, "present:hover");
     const showing = harness.player.setVisibility("visible");
     await Promise.resolve();
     expect(harness.factory.activeAttempts).toBe(0);
@@ -359,7 +355,7 @@ describe("IntegratedPlayer visibility lifecycle", () => {
     });
   });
 
-  it("stays static on a failed visible rebuild without retrying", async () => {
+  it("terminalizes a failed visible rebuild without retrying", async () => {
     const harness = createHarness({
       behaviors: [
         { kind: "success" },
@@ -370,21 +366,22 @@ describe("IntegratedPlayer visibility lifecycle", () => {
     await harness.player.prepare();
     await harness.player.setVisibility("hidden");
 
-    await harness.player.setVisibility("visible");
+    const terminal = await harness.player.setVisibility("visible").catch(
+      (error: unknown) => error
+    );
+    await expect(harness.player.settled()).rejects.toBe(terminal);
 
     expect(harness.player.visibilitySnapshot()).toMatchObject({
       visibility: "visible",
       suspension: "suspended",
       rebuildPending: false
     });
-    expect(harness.player.motionSnapshot()).toMatchObject({
-      actualMode: "static",
-      stickyFailure: true
-    });
+    expect(harness.player.snapshot().readiness).toBe("error");
     const creates = harness.factory.calls.filter((call) =>
       call === "create:opaque-high"
     ).length;
-    await harness.player.setVisibility("visible");
+    await expect(harness.player.setVisibility("visible")).rejects
+      .toBe(terminal);
     expect(harness.factory.calls.filter((call) =>
       call === "create:opaque-high"
     )).toHaveLength(creates);

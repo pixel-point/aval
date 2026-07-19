@@ -19,7 +19,7 @@ describe("AVAL 1.0 multi-codec idle-hover starter", () => {
       directory: "starter",
       json: false
     }, root);
-    expect(result.files).toHaveLength(29);
+    expect(result.files).toHaveLength(30);
     await expectExactTree(
       result.directory,
       resolve(process.cwd(), "fixtures/starter/v1-idle-hover")
@@ -59,13 +59,29 @@ describe("AVAL 1.0 multi-codec idle-hover starter", () => {
     expect(html).toContain('<source data-aval-codec="vp9">');
     expect(html).toContain('<source data-aval-codec="h265">');
     expect(html).toContain('<source data-aval-codec="h264">');
+    expect(html).toContain('href="./style.css"');
     expect(html).toContain('src="./main.js"');
     expect(html).not.toMatch(/<aval-player[^>]+\s(?:src|integrity)=/u);
     const main = await readFile(join(result.directory, "main.js"), "utf8");
     expect(main).toContain('fetch("./motion/build.json")');
     expect(main).toContain('source.setAttribute("type", asset.type)');
     expect(main).toContain('source.setAttribute("integrity", asset.integrity)');
+    expect(main).toContain(`player.addEventListener("error", (event) => {
+  const diagnostics = player.getDiagnostics();
+  if (
+    event.detail.fatal === true &&
+    player.readiness === "error" &&
+    diagnostics.lastFailure !== null &&
+    event.detail.failure === diagnostics.lastFailure
+  ) {
+    unavailable.hidden = false;
+  }
+});`);
+    expect(main).not.toContain("if (event.detail.fatal) unavailable.hidden = false;");
     expect(main).toContain('await import("@pixel-point/aval-element/auto")');
+    const style = await readFile(join(result.directory, "style.css"), "utf8");
+    expect(style).toContain("#motion-unavailable");
+    expect(style).toContain("width: 48px");
     expect(html).not.toContain("tabindex");
     const packageJson = JSON.parse(await readFile(
       join(result.directory, "package.json"),

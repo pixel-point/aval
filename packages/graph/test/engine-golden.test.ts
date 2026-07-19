@@ -608,11 +608,10 @@ describe("MotionGraphEngine golden lifecycle traces", () => {
     engine.install(graph());
     engine.request("hover");
 
-    const result = engine.beginStatic("codec-unsupported");
+    const result = engine.beginStatic("decoder-queued");
     expect(result.presentation).toEqual(staticFrame("hover"));
     expect(result.effects).toEqual([
-      readiness("preparing", "static", "codec-unsupported"),
-      fallback("codec-unsupported"),
+      readiness("preparing", "static", "decoder-queued"),
       transitionStart("idle-to-hover", "idle", "hover", 1),
       visual("idle", "hover"),
       transitionEnd("idle-to-hover", "idle", "hover"),
@@ -643,8 +642,7 @@ describe("MotionGraphEngine golden lifecycle traces", () => {
     const begin = engine.beginStatic("reduced-motion");
     expect(begin.presentation).toEqual(staticFrame("idle"));
     expect(begin.effects).toEqual([
-      readiness("preparing", "static", "reduced-motion"),
-      fallback("reduced-motion")
+      readiness("preparing", "static", "reduced-motion")
     ]);
 
     const request = engine.request("hover");
@@ -673,11 +671,10 @@ describe("MotionGraphEngine golden lifecycle traces", () => {
     const engine = animatedEngine(graph());
     engine.request("hover");
 
-    const recovery = engine.recoverStatic("decode-failure");
+    const recovery = engine.recoverStatic("visibility-suspended");
     expect(recovery.presentation).toEqual(staticFrame("hover"));
     expect(recovery.effects).toEqual([
-      readiness("animated", "static", "decode-failure"),
-      fallback("decode-failure"),
+      readiness("animated", "static", "visibility-suspended"),
       transitionStart("idle-to-hover", "idle", "hover", 1),
       visual("idle", "hover"),
       transitionEnd("idle-to-hover", "idle", "hover"),
@@ -697,29 +694,57 @@ describe("MotionGraphEngine golden lifecycle traces", () => {
     });
   });
 
-  it("rejects the surviving request when the required static frame cannot be installed", () => {
-    const engine = animatedEngine(graph());
-    engine.request("hover");
+  it("rejects an invalid initial static reason without mutating the graph", () => {
+    const engine = new MotionGraphEngine();
+    engine.install(graph());
+    const snapshot = engine.snapshot();
+    const trace = engine.getTrace();
 
-    const failure = engine.failStatic("png-invalid");
-    expect(failure.presentation).toEqual(bodyFrame("idle", 0));
-    expect(failure.effects).toEqual([
-      readiness("animated", "error", "png-invalid"),
-      settle([1], {
-        type: "reject",
-        timing: "microtask",
-        error: "PlaybackFallbackError"
-      })
-    ]);
-    expect(failure.snapshot).toMatchObject({
-      readiness: "error",
-      phase: "error",
-      requestedState: "hover",
-      visualState: "idle",
-      isTransitioning: false,
-      pendingRequestCount: 0
-    });
+    expect(() => engine.beginStatic("codec-unsupported" as never)).toThrowError(
+      /motion graph static reason must be one of/
+    );
+    expect(engine.snapshot()).toEqual(snapshot);
+    expect(engine.getTrace()).toEqual(trace);
   });
+
+  it("rejects an invalid recovery reason without mutating the graph", () => {
+    const engine = animatedEngine(graph());
+    const snapshot = engine.snapshot();
+    const trace = engine.getTrace();
+
+    expect(() => engine.recoverStatic("visibility-hidden" as never)).toThrowError(
+      /motion graph static reason must be one of/
+    );
+    expect(engine.snapshot()).toEqual(snapshot);
+    expect(engine.getTrace()).toEqual(trace);
+  });
+
+  it.each(["codec-unsupported", "decode-failure"])(
+    "rejects the surviving request after terminal %s playback",
+    (message) => {
+      const engine = animatedEngine(graph());
+      engine.request("hover");
+
+      const failure = engine.failPlayback(message);
+      expect(failure.presentation).toEqual(bodyFrame("idle", 0));
+      expect(failure.effects).toEqual([
+        readiness("animated", "error", message),
+        settle([1], {
+          type: "reject",
+          timing: "microtask",
+          error: "PlaybackError"
+        })
+      ]);
+      expect(failure.snapshot).toMatchObject({
+        readiness: "error",
+        phase: "error",
+        requestedState: "hover",
+        visualState: "idle",
+        isTransitioning: false,
+        pendingRequestCount: 0
+      });
+    }
+  );
 
   it("disposes idempotently, aborts pending requests, and remains terminal", () => {
     const engine = animatedEngine(graph());
@@ -742,7 +767,7 @@ describe("MotionGraphEngine golden lifecycle traces", () => {
     });
 
     expect(engine.dispose().effects).toEqual([]);
-    expect(() => engine.failStatic()).toThrowError(/disposed graph cannot fail static/);
+    expect(() => engine.failPlayback()).toThrowError(/disposed graph cannot fail playback/);
     expect(engine.snapshot()).toMatchObject({
       readiness: "disposed",
       phase: "disposed"
@@ -877,10 +902,6 @@ function readiness(
     : { type: "readinesschange", from, to, reason };
 }
 
-function fallback(reason: string) {
-  return { type: "fallback", reason } as const;
-}
-
 function requested(from: string, to: string, sequence: number) {
   return { type: "requestedstatechange", from, to, sequence } as const;
 }
@@ -918,7 +939,7 @@ function settle(
         readonly timing: "microtask";
         readonly error:
           | "NotReadyError"
-          | "PlaybackFallbackError"
+          | "PlaybackError"
           | "AbortError";
       }
 ) {

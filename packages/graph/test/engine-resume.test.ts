@@ -33,7 +33,7 @@ describe("MotionGraphEngine animated reentry", () => {
     engine.beginAnimated();
     engine.tick({ contentOrdinal: 0n });
     engine.tick({ contentOrdinal: 1n });
-    engine.recoverStatic("visibility-hidden");
+    engine.recoverStatic("visibility-suspended");
 
     const resumed = engine.resumeAnimated();
 
@@ -60,7 +60,7 @@ describe("MotionGraphEngine animated reentry", () => {
       initialUnitPending: true,
       presentation: introFrame(1)
     });
-    engine.recoverStatic("visibility-hidden");
+    engine.recoverStatic("visibility-suspended");
 
     const resumed = engine.resumeAnimated();
 

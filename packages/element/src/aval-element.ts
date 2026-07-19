@@ -427,9 +427,17 @@ export function createAvalElementClass(
       if (deferred !== null) return deferred;
       this.#flushSourceMutations();
       await this.#ensure();
+      const preparedTerminal = this.#retainedTerminalError();
+      if (preparedTerminal !== null) throw preparedTerminal;
       const player = this.#player;
       if (player === null) throw new AvalNotReadyError();
-      await player.setState(name);
+      try {
+        await player.setState(name);
+      } catch (error) {
+        throw this.#retainedTerminalError() ?? error;
+      }
+      const settledTerminal = this.#retainedTerminalError();
+      if (settledTerminal !== null) throw settledTerminal;
     }
 
     #applyDeclarativeState(name: string): void {
@@ -514,6 +522,8 @@ export function createAvalElementClass(
       this.#counters.resume += 1;
       try {
         await this.#ensure();
+        const preparedTerminal = this.#retainedTerminalError();
+        if (preparedTerminal !== null) throw preparedTerminal;
         if (sequence !== this.#playSequence || !this.#manualPlaying) {
           throw abortError();
         }
@@ -525,6 +535,8 @@ export function createAvalElementClass(
         ) {
           attempted = player;
           await player.resume();
+          const resumedTerminal = this.#retainedTerminalError();
+          if (resumedTerminal !== null) throw resumedTerminal;
           if (!resumeCurrent(
             sequence,
             this.#playSequence,
@@ -547,7 +559,7 @@ export function createAvalElementClass(
           )
         ) attempted.pause();
         if (sequence === this.#playSequence) this.#manualPlaying = previous;
-        throw error;
+        throw this.#retainedTerminalError() ?? error;
       }
     }
 
@@ -1704,6 +1716,11 @@ export function createAvalElementClass(
     #current(generation: number, token: number): boolean {
       return this.#generationCurrent(generation, token) &&
         this.#controller?.signal.aborted === false;
+    }
+
+    #retainedTerminalError(): AvalPlaybackError | null {
+      const error = this.#terminalError;
+      return error?.generation === this.#sourceGeneration ? error : null;
     }
 
     #generationCurrent(generation: number, token: number): boolean {

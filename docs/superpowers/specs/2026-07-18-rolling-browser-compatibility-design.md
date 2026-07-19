@@ -36,10 +36,12 @@ Every release is certified on these reference configurations:
 
 - Windows 11 with the current, previous, and previous-two stable Chrome
   releases;
-- current and previous-generation Mobile Safari on real iPhones;
-- Android 14, 15, and 16 with the maintained Chrome installed by the device
-  provider, including at least one flagship and one Samsung or comparable
-  mid-range device; and
+- the three latest current-generation Mobile Safari point releases on real
+  iPhones, plus the previous iOS major closest to the 24-month boundary;
+- Android 15 with the exactly observed Chrome installed by the device provider,
+  including at least one Samsung or comparable mid-range device; Android 16 is
+  a diagnostic target until the provider exposes exact browser identity and
+  DevTools evidence; and
 - an explicit desktop Chrome build closest to 24 months old as the Chromium
   engine-age sentinel.
 
@@ -61,11 +63,12 @@ A certified configuration must:
 ### 2.2 Compatibility boundary
 
 The release also exercises the browser builds closest to the 24-month boundary,
-currently Chrome 127 and Safari/iOS 17. Full interaction is the goal on the
-reference device. A configuration that cannot provide the required decoder or
-renderer path is still compatibility-safe when AVAL terminates deterministically
-and raises the public failure contract. AVAL itself does not display alternate
-content.
+currently Chrome 127, Safari/iOS 18, and Android 15. Full interaction is the
+goal on the reference device. iOS 17 and Android 14 may be run as informational
+beyond-policy diagnostics, but do not gate a release. A configuration that
+cannot provide the required decoder or renderer path is still
+compatibility-safe when AVAL terminates deterministically and raises the public
+failure contract. AVAL itself does not display alternate content.
 
 The policy does not imply that every hardware model, driver, codec accelerator,
 or intervening monthly Chromium release is individually certified. It promises
@@ -258,7 +261,10 @@ evidence covers:
 
 - Windows 11 Chrome current/current-1/current-2 and the 24-month sentinel;
 - real iPhones for current, previous, and boundary Safari generations; and
-- Android 14, 15, and 16 across at least two GPU/device classes.
+- Android 15 on a real Samsung or comparable device; Android 16 joins the
+  required matrix when the provider can bind exact browser identity and
+  DevTools evidence, while Android 14 remains an optional beyond-policy
+  diagnostic.
 
 Each session verifies opaque H.264, packed-alpha H.264, interaction transitions,
 optional-codec truthfulness, failure settlement, and resource cleanup. A single

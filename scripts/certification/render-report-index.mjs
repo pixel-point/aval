@@ -17,7 +17,7 @@ const policy = parseJson(
 );
 let candidate = null;
 let candidateDigest = null;
-let fixtureAuthority = Object.freeze({ digests: new Set(), models: new Map(), displayPatterns: new Map() });
+let fixtureAuthority = Object.freeze({ digests: new Set(), models: new Map(), displayPatterns: new Map(), fatalBoundaryFixtureDigests: new Set(), harnessDigests: new Set() });
 if (args.candidate !== undefined) {
   const candidateBytes = await stableRead(resolve(args.candidate), policy.limits.maximumReportBytes, "candidate manifest");
   candidate = certification.validateCandidateManifest(parseJson(candidateBytes, "candidate manifest"));
@@ -43,7 +43,9 @@ for (const entry of await readdir(reportsRoot, { withFileTypes: true })) {
     maximumAttachmentBytes: policy.limits.maximumAttachmentBytes,
     allowedMediaTypes: new Set(policy.allowedAttachmentMediaTypes),
     allowedFixtureDigests: fixtureAuthority.digests,
-    allowedFixtureModels: fixtureAuthority.models
+    allowedFixtureModels: fixtureAuthority.models,
+    allowedFatalBoundaryFixtureDigests: fixtureAuthority.fatalBoundaryFixtureDigests,
+    allowedCertificationHarnessDigests: fixtureAuthority.harnessDigests
   });
   requireCanonical(runtimeBytes, runtime, `runtime report ${runtime.reportId}`);
   if (candidate === null || candidateDigest === null) throw new Error("--candidate is required when runtime reports are present");
@@ -60,7 +62,7 @@ for (const entry of await readdir(reportsRoot, { withFileTypes: true })) {
     operationCount: scenario.operationCount,
     headedOperationCount: scenario.headedOperationCount
   })));
-  const staticFallback = criterionStatus(runtime, "static-fallback");
+  const fatalErrorBoundary = criterionStatus(runtime, "runtime-fatal-error-boundary");
   let observedDisplay = "not-run";
   let observedDisplayReportId = null;
   let observedDisplayReportDigest = null;
@@ -76,6 +78,8 @@ for (const entry of await readdir(reportsRoot, { withFileTypes: true })) {
         allowedMediaTypes: new Set(policy.allowedAttachmentMediaTypes),
         allowedFixtureDigests: fixtureAuthority.digests,
         allowedFixtureModels: fixtureAuthority.models,
+        allowedFatalBoundaryFixtureDigests: fixtureAuthority.fatalBoundaryFixtureDigests,
+        allowedCertificationHarnessDigests: fixtureAuthority.harnessDigests,
         allowedDisplayPatterns: fixtureAuthority.displayPatterns,
         ...displayQualificationPolicy(policy)
       }
@@ -93,10 +97,16 @@ for (const entry of await readdir(reportsRoot, { withFileTypes: true })) {
     platformClass: runtime.environment.platformClass,
     browserProduct: runtime.environment.browser.product,
     browserVersion: runtime.environment.browser.version,
+    browserBuild: runtime.environment.browser.build,
+    browserChannel: runtime.environment.browser.channel,
+    osProduct: runtime.environment.os.product,
+    osVersion: runtime.environment.os.version,
+    deviceClass: runtime.environment.hardware.deviceClass,
+    virtualization: runtime.environment.hardware.virtualization,
     refreshMilliHz: runtime.environment.display.refreshMilliHz,
     refresh120Available: runtime.environment.capabilities.refresh120Available === true,
     animated: runtime.environment.capabilities.productionAnimationSupported === true,
-    staticFallback,
+    fatalErrorBoundary,
     runtimeScheduling: runtime.status === "passed" && coverageFailures.length === 0 ? "passed" : runtime.status === "passed" ? "failed" : runtime.status,
     coverageFailures,
     observedDisplay,
@@ -112,11 +122,18 @@ const matrix = certification.evaluateNamedProfileMatrix(profiles.map((profile) =
   profileId: profile.profileId,
   platformClass: profile.platformClass,
   browserProduct: profile.browserProduct,
+  browserVersion: profile.browserVersion,
+  browserBuild: profile.browserBuild,
+  browserChannel: profile.browserChannel,
+  osProduct: profile.osProduct,
+  osVersion: profile.osVersion,
+  deviceClass: profile.deviceClass,
+  virtualization: profile.virtualization,
   refreshMilliHz: profile.refreshMilliHz,
   refresh120Available: profile.refresh120Available,
   animationSupported: profile.animated,
   runtimeScheduling: profile.runtimeScheduling,
-  staticFallback: profile.staticFallback
+  fatalErrorBoundary: profile.fatalErrorBoundary
 })), policy.namedProfiles);
 let reviews = [];
 let reviewRecord = null;
@@ -171,8 +188,8 @@ function reference(path, bytes, id) {
   return { id, path: referencePath, sha256: createHash("sha256").update(bytes).digest("hex"), byteLength: bytes.byteLength, mediaType: "application/json" };
 }
 function render(index) {
-  const rows = index.profiles.length === 0 ? ["| No named profiles | not run | not run | not measured |"] : index.profiles.map((profile) => `| ${escapeCell(profile.profileId)} | ${profile.staticFallback} | ${profile.runtimeScheduling} | ${profile.observedDisplay === "not-run" ? "not measured" : profile.observedDisplay} |`);
-  return ["# AVAL 1.0.0 certification index", "", `Release status: **${index.releaseStatus}**`, "", "| Profile | Static fallback | Runtime scheduling | Observed display |", "| --- | --- | --- | --- |", ...rows, "", "Runtime scheduling and observed-display evidence are separate claim layers.", ""].join("\n");
+  const rows = index.profiles.length === 0 ? ["| No named profiles | not run | not run | not measured |"] : index.profiles.map((profile) => `| ${escapeCell(profile.profileId)} | ${profile.fatalErrorBoundary} | ${profile.runtimeScheduling} | ${profile.observedDisplay === "not-run" ? "not measured" : profile.observedDisplay} |`);
+  return ["# AVAL 1.0.0 certification index", "", `Release status: **${index.releaseStatus}**`, "", "| Profile | Fatal error boundary | Runtime scheduling | Observed display |", "| --- | --- | --- | --- |", ...rows, "", "The fatal error boundary, runtime scheduling, and observed-display evidence are separate claim layers.", ""].join("\n");
 }
 function requireCanonical(bytes, value, label) {
   if (Buffer.compare(bytes, certification.canonicalJsonBytes(value)) !== 0) throw new Error(`${label} is not canonical JSON`);

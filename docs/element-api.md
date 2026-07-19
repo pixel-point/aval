@@ -3,8 +3,8 @@
 `aval-player` supports these reflected host attributes: `crossorigin`,
 `motion`, `autoplay`, `fit`, `bindings`, `state`,
 `interaction-for`, `width`, and `height`. It has no image URL property; an
-optional fallback slot belongs to the host document and is not embedded in the
-asset.
+application may keep alternate content beside the element, but AVAL never
+selects or manipulates it.
 
 Assets are literal direct-child `<source>` elements. Each requires `src` and
 `type='application/vnd.aval; codecs="..."'`; optional integrity applies to that
@@ -18,7 +18,7 @@ and `inputBindings`.
 
 Events are non-cancelable `CustomEvent` instances with immutable bounded
 details: `readinesschange`, `requestedstatechange`, `visualstatechange`,
-`transitionstart`, `transitionend`, `underflow`, `fallback`, and `error`. Every
+`transitionstart`, `transitionend`, `underflow`, and `error`. Every
 event except `error` bubbles and is composed. Listen for `error` directly on
 the element; keeping that event local follows native media behavior and avoids
 colliding with page-wide error handlers. Every detail includes a positive
@@ -28,6 +28,13 @@ body, ETag, or credential.
 `prepare({ signal, timeoutMs })` joins generation preparation. Aborting one
 caller stops only that caller's wait. Child-source replacement rejects old
 public waits and prevents old frames or events from publishing.
+
+A terminal capability or playback failure rejects `prepare()` with the
+exported `AvalPlaybackError`, changes readiness to `error`, and dispatches one
+fatal `error` event. Its frozen `failure` value is shared with the event and
+diagnostics. Applications branch on `error.failure.code`; they do not parse the
+message. Reduced-motion and visibility suspension remain nonfatal policy
+conditions and do not mean AVAL supplied a static presentation.
 
 `getDiagnostics()` exposes an immutable cleanup receipt for the most recently
 retired source. A completed receipt proves participant-scoped ownership reached

@@ -1,9 +1,10 @@
 # Troubleshooting
 
-- `static` mode can be a successful usable result. Check `staticReason` and the
-  `fallback` event before treating it as a fatal error.
-- `unsupported` means an exact WebCodecs/WebGL/codec probe failed. The strict
-  static path must still work.
+- `static` mode is a nonfatal reduced-motion, visibility, or decoder-admission
+  policy result. It is not playback-failure fallback UI.
+- Terminal capability or playback failure rejects with `AvalPlaybackError` and
+  raises one fatal `error` event. Branch on `failure.code`, then inspect bounded
+  `runtime.decoderDiagnostics`; do not parse browser exception text.
 - Range errors usually indicate transformed encoding, missing/malformed
   `Content-Range`, or a changing/missing strong ETag.
 - External integrity mismatch means the complete fetched bytes are not the

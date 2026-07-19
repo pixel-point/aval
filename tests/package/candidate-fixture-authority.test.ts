@@ -10,6 +10,109 @@ import { loadCandidateFixtureAuthority } from "../../scripts/certification/candi
 const fixtureSource = resolve("fixtures/conformance/v1/h264.avl");
 
 describe("candidate fixture authority stable reads", () => {
+  it("separately binds the exact fatal-boundary source and certification harness", async () => {
+    const root = await temporaryRoot("fatal-boundary");
+    try {
+      const fixture = await readFile(fixtureSource);
+      const harness = new TextEncoder().encode("<!doctype html><title>certification</title>");
+      const fixturePath = "fixtures/conformance/v1/h264.avl";
+      await mkdir(join(root, "fixtures", "conformance", "v1"), { recursive: true });
+      await copyFile(fixtureSource, join(root, fixturePath));
+      await writeFile(join(root, "certification.html"), harness);
+      const fixtureEntry = { ...artifact(fixture), path: fixturePath };
+      const harnessEntry = harnessArtifact(harness);
+      const authority = await loadCandidateFixtureAuthority(
+        { artifacts: [fixtureEntry, harnessEntry] },
+        join(root, "candidate-manifest.json"),
+        certification,
+        { maximumArtifactBytes: 1024 * 1024 * 1024 }
+      );
+      expect(authority.fatalBoundaryFixtureDigests).toEqual(new Set([fixtureEntry.sha256]));
+      expect(authority.harnessDigests).toEqual(new Set([harnessEntry.sha256]));
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("rejects a manifest-listed certification harness that is missing", async () => {
+    const root = await temporaryRoot("missing-harness");
+    try {
+      const fixture = await readFile(fixtureSource);
+      const fixturePath = "fixtures/conformance/v1/h264.avl";
+      await mkdir(join(root, "fixtures", "conformance", "v1"), { recursive: true });
+      await copyFile(fixtureSource, join(root, fixturePath));
+      const harness = new TextEncoder().encode("<!doctype html><title>missing</title>");
+      await expect(loadCandidateFixtureAuthority(
+        { artifacts: [{ ...artifact(fixture), path: fixturePath }, harnessArtifact(harness)] },
+        join(root, "candidate-manifest.json"),
+        certification
+      )).rejects.toThrow();
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("rejects mutated certification harness bytes", async () => {
+    const root = await temporaryRoot("mutated-harness");
+    try {
+      const fixture = await readFile(fixtureSource);
+      const fixturePath = "fixtures/conformance/v1/h264.avl";
+      const before = new TextEncoder().encode("<!doctype html><title>before</title>");
+      await mkdir(join(root, "fixtures", "conformance", "v1"), { recursive: true });
+      await copyFile(fixtureSource, join(root, fixturePath));
+      await writeFile(join(root, "certification.html"), "<!doctype html><title>after!</title>");
+      await expect(loadCandidateFixtureAuthority(
+        { artifacts: [{ ...artifact(fixture), path: fixturePath }, harnessArtifact(before)] },
+        join(root, "candidate-manifest.json"),
+        certification
+      )).rejects.toThrow(/byteLength|digest|expected/u);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("rejects a certification harness path substitution after secure open", async () => {
+    const root = await temporaryRoot("harness-race");
+    try {
+      const fixture = await readFile(fixtureSource);
+      const fixturePath = "fixtures/conformance/v1/h264.avl";
+      const harness = new TextEncoder().encode("<!doctype html><title>certification</title>");
+      const harnessPath = join(root, "certification.html");
+      await mkdir(join(root, "fixtures", "conformance", "v1"), { recursive: true });
+      await copyFile(fixtureSource, join(root, fixturePath));
+      await writeFile(harnessPath, harness);
+      await expect(loadCandidateFixtureAuthority(
+        { artifacts: [{ ...artifact(fixture), path: fixturePath }, harnessArtifact(harness)] },
+        join(root, "candidate-manifest.json"),
+        certification,
+        {
+          verificationHook: async (phase, reference) => {
+            if (phase !== "after-open" || reference.path !== "certification.html") return;
+            await rename(harnessPath, join(root, "retired-certification.html"));
+            await writeFile(harnessPath, harness);
+          }
+        }
+      )).rejects.toThrow(/changed while being verified/u);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("requires the canonical harness role and media type", async () => {
+    const root = await temporaryRoot("harness-classification");
+    try {
+      const fixture = await readFile(fixtureSource);
+      const fixturePath = "fixtures/conformance/v1/h264.avl";
+      const harness = new TextEncoder().encode("<!doctype html><title>certification</title>");
+      await mkdir(join(root, "fixtures", "conformance", "v1"), { recursive: true });
+      await copyFile(fixtureSource, join(root, fixturePath));
+      await writeFile(join(root, "certification.html"), harness);
+      const fixtureEntry = { ...artifact(fixture), path: fixturePath };
+      await expect(loadCandidateFixtureAuthority(
+        { artifacts: [fixtureEntry, harnessArtifact(harness, { role: "documentation" })] },
+        join(root, "candidate-manifest.json"),
+        certification
+      )).rejects.toThrow(/browser-harness/u);
+      await expect(loadCandidateFixtureAuthority(
+        { artifacts: [fixtureEntry, harnessArtifact(harness, { mediaType: "text/plain" })] },
+        join(root, "candidate-manifest.json"),
+        certification
+      )).rejects.toThrow(/text\/html/u);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("rejects a symlink even when its target bytes match the manifest", async () => {
     const root = await temporaryRoot("symlink");
     try {
@@ -56,6 +159,20 @@ function artifact(bytes: Uint8Array) {
     byteLength: bytes.byteLength,
     mediaType: "application/octet-stream",
     role: "fixture"
+  };
+}
+
+function harnessArtifact(
+  bytes: Uint8Array,
+  overrides: Readonly<{ role?: string; mediaType?: string }> = {}
+) {
+  return {
+    id: "certification-harness",
+    path: "certification.html",
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    byteLength: bytes.byteLength,
+    mediaType: overrides.mediaType ?? "text/html",
+    role: overrides.role ?? "browser-harness"
   };
 }
 

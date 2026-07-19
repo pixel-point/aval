@@ -75,12 +75,13 @@ initially. If no result is supported, AV1 remains selected with its status
 message. Unsupported and unavailable selections never create `aval-player`.
 
 The probe is a preflight rather than proof that decoding will start. After a
-positive probe, the page also inspects the result of `aval-player.prepare()`.
-An exact `codec-unsupported` fallback reclassifies that codec as unsupported,
-disposes the player, and shows the same unsupported message. Other preparation
-or decoder failures remain distinct and show `This codec could not be played
-in your browser.`; network, integrity, or malformed-source failures are never
-mislabelled as codec support failures.
+positive probe, the page requires `aval-player.prepare()` to succeed. A rejected
+`AvalPlaybackError` with `unsupported-profile`, or the matching fatal `error`
+event, reclassifies that codec as unsupported. Other fatal playback failures
+remain distinct and show `This codec could not be played in your browser.`;
+nonfatal static policy readiness and retained candidate diagnostics do not
+activate the page's error UI. Network, integrity, and malformed-source failures
+are never mislabelled as codec support failures.
 
 To inspect that example-owned unsupported state even on a machine that exposes
 every decoder, append `?simulateUnsupported=h265` (or another codec id) to the

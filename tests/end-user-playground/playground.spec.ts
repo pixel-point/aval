@@ -9,10 +9,12 @@ test("runs the public end-user interaction", async ({ page }) => {
   await page.goto("/");
 
   const motion = page.locator("#favorite-motion");
-  await expect(motion.locator('img[slot="fallback"]')).toHaveAttribute(
+  const unavailable = page.locator("#favorite-unavailable");
+  await expect(unavailable).toHaveAttribute(
     "src",
     "/favorite.png"
   );
+  await expect(unavailable).toBeHidden();
   await expect
     .poll(
       () =>
@@ -40,4 +42,33 @@ test("runs the public end-user interaction", async ({ page }) => {
     "true"
   );
   expect(consoleErrors).toEqual([]);
+});
+
+test("keeps the product control usable without claiming reduced-motion pixels", async ({
+  page
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  const motion = page.locator("#favorite-motion");
+  await expect.poll(() => motion.evaluate((node) => ({
+    readiness: (node as HTMLElement & { readiness: string }).readiness,
+    staticReason: (node as HTMLElement & { staticReason: string | null }).staticReason
+  }))).toEqual({
+    readiness: "staticReady",
+    staticReason: "reduced-motion"
+  });
+
+  await expect(page.locator("#favorite-unavailable")).toBeHidden();
+  await expect(page.locator("#runtime-status")).toHaveText(
+    "Motion inactive · reduced motion"
+  );
+  const toggle = page.locator("#toggle-state");
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#runtime-status")).toHaveText(
+    "Motion inactive · reduced motion"
+  );
+  await expect(motion).not.toHaveAttribute("data-rendered", "");
 });

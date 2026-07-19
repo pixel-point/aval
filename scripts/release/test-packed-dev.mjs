@@ -214,25 +214,23 @@ try {
   starterFailures.assertClean();
   await starterContext.close();
 
-  const fallbackContext = await browser.newContext();
-  await fallbackContext.addInitScript(() => {
+  const failureContext = await browser.newContext();
+  await failureContext.addInitScript(() => {
     Object.defineProperty(globalThis, "Worker", { configurable: true, value: undefined });
   });
-  const fallbackPage = await fallbackContext.newPage();
-  const fallbackFailures = monitorBrowser(fallbackPage, starterUrl, [root, project]);
-  await fallbackPage.goto(starterUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await waitForElementReady(fallbackPage, "staticReady");
-  const fallbackSnapshot = await publicSnapshot(fallbackPage);
-  assert(
-    fallbackSnapshot.staticReason === "worker-unavailable" || fallbackSnapshot.staticReason === "visibility-suspended",
-    `forced-static starter used an unexpected reason: ${String(fallbackSnapshot.staticReason)}`
-  );
-  assert(fallbackSnapshot.fallbackVisible && !fallbackSnapshot.fallbackSlotHidden, "forced-static starter did not reveal its author-owned fallback");
-  assert(fallbackSnapshot.animatedCanvasHidden && fallbackSnapshot.canvasCount === 1, "forced-static starter exposed an unexpected presentation canvas");
-  assert(fallbackSnapshot.fallbackAuthorOwned && fallbackSnapshot.fallbackImageLoaded, "starter did not retain and load its author-owned fallback");
-  assert(fallbackSnapshot.videoCount === 0, "forced-static starter created a video element");
-  fallbackFailures.assertClean();
-  await fallbackContext.close();
+  const failurePage = await failureContext.newPage();
+  const failureMonitor = monitorBrowser(failurePage, starterUrl, [root, project]);
+  await failurePage.goto(starterUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await waitForElementReady(failurePage, "error");
+  const failureSnapshot = await publicSnapshot(failurePage);
+  assert(failureSnapshot.staticReason === null, "terminal starter failure claimed static readiness");
+  assert(failureSnapshot.alternateVisible, "consumer did not reveal its alternate image after failure");
+  assert(failureSnapshot.fallbackSlotCount === 0, "element retained a managed fallback slot");
+  assert(failureSnapshot.animatedCanvasHidden && failureSnapshot.canvasCount === 1, "failed starter exposed an unexpected presentation canvas");
+  assert(failureSnapshot.alternateConsumerOwned && failureSnapshot.alternateImageLoaded, "starter did not retain and load its consumer-owned alternate image");
+  assert(failureSnapshot.videoCount === 0, "failed starter created a video element");
+  failureMonitor.assertClean();
+  await failureContext.close();
 
   const devContext = await browser.newContext();
   await installWorkerEvidence(devContext);
@@ -577,11 +575,10 @@ async function waitForElementReady(page, expectedReadiness) {
 
 async function publicSnapshot(page) {
   return page.locator("aval-player").first().evaluate((motion) => {
-    const fallback = motion.querySelector("[slot=fallback]");
-    const fallbackStyle = fallback === null ? null : getComputedStyle(fallback);
-    const fallbackImage = fallback instanceof HTMLImageElement ? fallback : null;
+    const alternate = document.querySelector("#motion-unavailable");
+    const alternateStyle = alternate === null ? null : getComputedStyle(alternate);
+    const alternateImage = alternate instanceof HTMLImageElement ? alternate : null;
     const animatedCanvas = motion.shadowRoot?.querySelector('canvas[data-aval-layer="animated"]');
-    const fallbackSlot = motion.shadowRoot?.querySelector('slot[data-aval-layer="fallback"]');
     return ({
       readiness: motion.readiness,
       staticReason: motion.staticReason,
@@ -595,12 +592,12 @@ async function publicSnapshot(page) {
       })),
       sourceGeneration: motion.getDiagnostics().sourceGeneration,
       videoCount: document.querySelectorAll("video").length,
-      fallbackVisible: fallback !== null && fallbackStyle?.display !== "none" && fallbackStyle?.visibility !== "hidden" && fallback.getBoundingClientRect().width > 0 && fallback.getBoundingClientRect().height > 0,
-      fallbackImageLoaded: fallbackImage === null || (fallbackImage.complete && fallbackImage.naturalWidth > 0),
-      fallbackAuthorOwned: fallback !== null && fallback.parentElement === motion,
+      alternateVisible: alternate !== null && alternateStyle?.display !== "none" && alternateStyle?.visibility !== "hidden" && alternate.getBoundingClientRect().width > 0 && alternate.getBoundingClientRect().height > 0,
+      alternateImageLoaded: alternateImage !== null && alternateImage.complete && alternateImage.naturalWidth > 0,
+      alternateConsumerOwned: alternate !== null && alternate.parentElement !== motion,
       canvasCount: motion.shadowRoot?.querySelectorAll("canvas").length ?? 0,
       animatedCanvasHidden: animatedCanvas instanceof HTMLCanvasElement && animatedCanvas.hidden,
-      fallbackSlotHidden: fallbackSlot instanceof HTMLSlotElement && fallbackSlot.hidden
+      fallbackSlotCount: motion.shadowRoot?.querySelectorAll('slot[name="fallback"]').length ?? 0
     });
   });
 }

@@ -179,7 +179,7 @@ export class RealtimeDriver {
   }
 
   /**
-   * Suspends display ownership while a reduced-motion fallback is
+   * Suspends display ownership while reduced-motion state is
    * prepared. Unlike failure stop, this preserves the smoothness claim and
    * permits start() to resume the same candidate if policy flips precommit.
    */

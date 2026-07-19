@@ -15,5 +15,5 @@ focus the favorite icon to exercise authored input bindings, or use either
 button to toggle the `idle` and `engaged` states explicitly.
 
 The animation uses workspace packages and does not require FFmpeg at runtime.
-If the animated browser path is unavailable, the custom element retains the
-checked-in PNG fallback and reports the fallback state on the page.
+If the animated browser path is unavailable, the application handles the fatal
+error and reveals its checked-in PNG outside the custom element.

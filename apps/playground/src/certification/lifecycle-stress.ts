@@ -41,7 +41,7 @@ export async function runLifecycleStress(options: Readonly<{
   for (let cycle = 0; cycle < cycles; cycle += 1) {
     if (options.signal?.aborted === true) break;
     const element = createPublicMotionElement(
-      `${options.sourceUrl}${separator(options.sourceUrl)}cycle=${String(cycle)}`,
+      sourceGenerationUrl(options.sourceUrl, "cycle", cycle),
       options.parent,
       routes,
       options.sourceIntegrity
@@ -54,7 +54,7 @@ export async function runLifecycleStress(options: Readonly<{
         if (options.alternateSourceIntegrity === undefined) throw new Error("alternate lifecycle source requires exact integrity");
         replacePublicMotionSource(
           element,
-          `${options.alternateSourceUrl}${separator(options.alternateSourceUrl)}replace=${String(cycle)}`,
+          sourceGenerationUrl(options.alternateSourceUrl, "replace", cycle),
           options.alternateSourceIntegrity
         );
         resources.append(`cycle-${String(cycle)}-replaced`, await preparePublicMotion(element, 20_000, options.signal));
@@ -100,7 +100,11 @@ export async function runLifecycleStress(options: Readonly<{
   });
 }
 
-function separator(url: string): string { return url.includes("?") ? "&" : "?"; }
+function sourceGenerationUrl(sourceUrl: string, operation: "cycle" | "replace", cycle: number): string {
+  const url = new URL(sourceUrl, location.href);
+  url.hash = `aval-certification-${operation}-${String(cycle)}`;
+  return `${url.pathname}${url.search}${url.hash}`;
+}
 
 function boundedCount(value: number, minimum: number, maximum: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new RangeError(`${name} must be in ${String(minimum)}..${String(maximum)}`);

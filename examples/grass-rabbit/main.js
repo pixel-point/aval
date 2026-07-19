@@ -1,28 +1,41 @@
-import "@pixel-point/aval-element/auto";
+import { defineAvalElement } from "@pixel-point/aval-element";
+
+import { avalBrowserDiagnostics } from "../support/aval-browser-diagnostics.js";
 
 const motion = document.querySelector("#grass-rabbit");
 const stateLabel = document.querySelector("#rabbit-state");
 const interactionHotspot = document.querySelector(".interaction-hotspot");
 const prefersReducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+if (motion instanceof HTMLElement) {
+  avalBrowserDiagnostics?.attach(motion, {
+    example: "grass-rabbit",
+    role: "primary-motion"
+  });
+}
+
 const renderedReadiness = new Set([
   "visualReady",
-  "interactiveReady",
-  "staticReady"
+  "interactiveReady"
 ]);
 
-function revealMotionWhenRendered() {
-  if (!motion || !renderedReadiness.has(motion.readiness)) return;
+function reflectRenderedMotion() {
+  if (!motion) return;
+  if (!renderedReadiness.has(motion.readiness)) {
+    delete motion.dataset.rendered;
+    interactionHotspot?.classList.remove("is-rendered");
+    return;
+  }
 
-  motion.removeEventListener("readinesschange", revealMotionWhenRendered);
   requestAnimationFrame(() => {
+    if (!renderedReadiness.has(motion.readiness)) return;
     motion.dataset.rendered = "";
     interactionHotspot?.classList.add("is-rendered");
   });
 }
 
-motion?.addEventListener("readinesschange", revealMotionWhenRendered);
-revealMotionWhenRendered();
+motion?.addEventListener("readinesschange", reflectRenderedMotion);
+reflectRenderedMotion();
 
 function setStateLabel(state) {
   if (!stateLabel || typeof state !== "string") return;
@@ -51,6 +64,7 @@ function currentPresentation() {
 }
 
 function trackInitialPresentation() {
+  if (motion?.readiness !== "interactiveReady") return;
   const presentation = currentPresentation();
   if (presentation?.kind === "intro") {
     setStateLabel("intro");
@@ -64,8 +78,6 @@ function trackInitialPresentation() {
 motion?.addEventListener("readinesschange", () => {
   if (motion.readiness === "interactiveReady") {
     requestAnimationFrame(trackInitialPresentation);
-  } else if (motion.readiness === "staticReady") {
-    setStateLabel(motion.visualState);
   }
 });
 motion?.addEventListener("visualstatechange", (event) => {
@@ -73,6 +85,7 @@ motion?.addEventListener("visualstatechange", (event) => {
 });
 
 motion?.addEventListener("error", (event) => {
+  if (event.detail.fatal !== true) return;
   console.error("Grass rabbit runtime failure", event.detail.failure);
 });
 
@@ -113,3 +126,5 @@ if (motion?.matches(":hover")) {
 } else {
   armInteractionHotspot();
 }
+
+defineAvalElement();

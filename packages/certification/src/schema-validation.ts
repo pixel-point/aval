@@ -13,12 +13,18 @@ import {
   RELEASE_RUNTIME_REPETITIONS,
   DISPLAY_OBSERVATION_LEDGER_ATTACHMENT_ID,
   DISPLAY_RAW_CAPTURE_ATTACHMENT_ID,
+  FATAL_ERROR_BOUNDARY_ATTACHMENT_ID,
   REQUIRED_DISPLAY_CRITERION_IDS,
   REQUIRED_RUNTIME_CRITERION_IDS,
   scenarioAttachmentId,
   validateScenarioCoverage
 } from "./scenario-contract.js";
 import { parseCaptureProvenance } from "./display-evidence-model.js";
+import {
+  browserBuildMatchesProductVersion,
+  isExactBrowserBuild,
+  isExactProductVersion
+} from "./exact-version.js";
 
 const MAX_ATTACHMENTS = 256;
 const MAX_CRITERIA = 256;
@@ -93,6 +99,13 @@ export function validateRuntimeReport(input: unknown): RuntimeCertificationRepor
     if (criteria.some((criterion) => criterion.status !== "passed")) fail("$runtime.criteria", "passed report contains a non-passing criterion");
     if (attachments.length === 0) fail("$runtime.attachments", "passed runtime report requires evidence attachments");
     bindCriterionEvidence(criteria, attachments, "$runtime.criteria");
+    const fatalErrorBoundaryAttachment = attachments.find(({ id }) => id === FATAL_ERROR_BOUNDARY_ATTACHMENT_ID);
+    if (fatalErrorBoundaryAttachment === undefined) fail("$runtime.attachments", `fatal error-boundary attachment is missing: ${FATAL_ERROR_BOUNDARY_ATTACHMENT_ID}`);
+    if (fatalErrorBoundaryAttachment.mediaType !== "application/json") fail("$runtime.attachments", "fatal error-boundary attachment must use application/json");
+    const fatalErrorBoundaryCriterion = criteria.find(({ id }) => id === "runtime-fatal-error-boundary");
+    if (fatalErrorBoundaryCriterion === undefined || !fatalErrorBoundaryCriterion.evidence.includes(FATAL_ERROR_BOUNDARY_ATTACHMENT_ID)) {
+      fail("$runtime.criteria", "fatal error-boundary criterion is not bound to its raw ledger");
+    }
     for (const scenario of scenarios) {
       const id = scenarioAttachmentId(scenario.id, scenario.repetition);
       const attachment = attachments.find((candidate) => candidate.id === id);
@@ -247,12 +260,18 @@ function validateEnvironment(input: unknown, path: string): RuntimeEnvironment {
     else if (typeof value !== "boolean") fail(`${path}.capabilities.${key}`, "capability must be boolean, number, or string");
     capabilities[key] = value;
   }
+  const browserProduct = boundedString(browser.product, `${path}.browser.product`, 128);
+  const browserVersion = exactProductVersion(browser.version, `${path}.browser.version`);
+  const browserBuild = exactBrowserBuild(browser.build, `${path}.browser.build`);
+  if (!browserBuildMatchesProductVersion(browserProduct, browserVersion, browserBuild)) {
+    fail(`${path}.browser.build`, "browser build does not match the product version");
+  }
   const result: RuntimeEnvironment = {
     platformClass: identifier(environment.platformClass, `${path}.platformClass`),
     browser: {
-      product: boundedString(browser.product, `${path}.browser.product`, 128),
-      version: fullVersion(browser.version, `${path}.browser.version`),
-      build: boundedString(browser.build, `${path}.browser.build`, 128),
+      product: browserProduct,
+      version: browserVersion,
+      build: browserBuild,
       channel: boundedString(browser.channel, `${path}.browser.channel`, 64),
       engineVersion: fullVersion(browser.engineVersion, `${path}.browser.engineVersion`),
       flags: uniqueStrings(browser.flags, `${path}.browser.flags`, 64),
@@ -260,7 +279,7 @@ function validateEnvironment(input: unknown, path: string): RuntimeEnvironment {
     },
     os: {
       product: boundedString(os.product, `${path}.os.product`, 128),
-      version: fullVersion(os.version, `${path}.os.version`),
+      version: exactProductVersion(os.version, `${path}.os.version`),
       build: boundedString(os.build, `${path}.os.build`, 128),
       architecture: boundedString(os.architecture, `${path}.os.architecture`, 64),
       patchState: boundedString(os.patchState, `${path}.os.patchState`, 128)
@@ -459,6 +478,18 @@ function timestamp(value: unknown, path: string): string {
 function fullVersion(value: unknown, path: string): string {
   const result = boundedString(value, path, 128);
   if (/^(?:latest|stable|current)$/iu.test(result) || !/\d/u.test(result)) fail(path, "exact version/build is required");
+  return result;
+}
+
+function exactProductVersion(value: unknown, path: string): string {
+  const result = boundedString(value, path, 128);
+  if (!isExactProductVersion(result)) fail(path, "exact version is required");
+  return result;
+}
+
+function exactBrowserBuild(value: unknown, path: string): string {
+  const result = boundedString(value, path, 128);
+  if (!isExactBrowserBuild(result)) fail(path, "exact browser build is required");
   return result;
 }
 
