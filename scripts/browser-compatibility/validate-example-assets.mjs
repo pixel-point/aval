@@ -46,6 +46,7 @@ const BUNDLE_CONTRACTS = Object.freeze([
     frameRate: "24/1",
     units: RABBIT_UNITS,
     h264Codec: "avc1.42E01E",
+    layout: "opaque",
     reentryMaxWaitFrames: 47,
     page: "examples/grass-rabbit/index.html",
     sourcePrefix: "%BASE_URL%grass-rabbit/"
@@ -57,6 +58,7 @@ const BUNDLE_CONTRACTS = Object.freeze([
     frameRate: "24/1",
     units: RABBIT_UNITS,
     h264Codec: "avc1.42E01F",
+    layout: "opaque",
     reentryMaxWaitFrames: 47,
     dynamicPage: "examples/grass-rabbit-codecs/index.html",
     controller: "examples/grass-rabbit-codecs/codec-demo-controller.js"
@@ -68,6 +70,7 @@ const BUNDLE_CONTRACTS = Object.freeze([
     frameRate: "24/1",
     units: KINETIC_ORB_UNITS,
     h264Codec: "avc1.42E01E",
+    layout: "opaque",
     reentryMaxWaitFrames: 11,
     page: "examples/kinetic-orb/index.html",
     sourcePrefix: "%BASE_URL%kinetic-orb/"
@@ -79,6 +82,7 @@ const BUNDLE_CONTRACTS = Object.freeze([
     frameRate: "30/1",
     units: PLAYGROUND_UNITS,
     h264Codec: "avc1.42E00B",
+    layout: "packed-alpha",
     page: "examples/end-user-playground/index.html",
     sourcePrefix: "/favorite/"
   })
@@ -86,7 +90,13 @@ const BUNDLE_CONTRACTS = Object.freeze([
 
 /**
  * Validate every checked-in browser demo asset against its compiler report,
- * generated page markup, authored state graph, and canonical fixture mirror.
+ * generated page markup, authored state graph, and wire/output profile.
+ *
+ * The end-user Playground intentionally compiles the current wire-1.1
+ * packed-alpha profile. `fixtures/conformance/v1` remains the frozen wire-1.0
+ * compatibility authority, so byte equality between those independently
+ * versioned artifacts would prevent the browser example from adopting the
+ * output-qualification contract this gate is responsible for validating.
  */
 export async function validateExampleAssets({
   repositoryRoot = DEFAULT_REPOSITORY_ROOT
@@ -123,25 +133,25 @@ export async function validateExampleAssets({
     fail(`built compiler inspection failed:\n${inspectorFailures.join("\n")}`);
   }
 
+  let packedWitnessesValidated = 0;
   for (const bundle of loadedBundles) {
-    await validateBundle(root, bundle, inspections);
+    packedWitnessesValidated += await validateBundle(root, bundle, inspections);
   }
-
-  const playground = requireBundle(loadedBundles, "end-user-playground");
-  await validatePlaygroundFixtureMirror(root, playground);
+  expectEqual(packedWitnessesValidated, 4, "packed browser asset witness count");
 
   return Object.freeze({
     assetsInspected: inspections.size,
     bundlesValidated: Object.freeze(
       loadedBundles.map((bundle) => bundle.contract.id)
     ),
+    wireAssetsValidated: inspections.size,
+    packedWitnessesValidated,
     staticSourcePagesValidated: Object.freeze([
       "grass-rabbit",
       "kinetic-orb",
       "end-user-playground"
     ]),
-    dynamicSourcePagesValidated: Object.freeze(["grass-rabbit-codecs"]),
-    fixtureMirrorValidated: true
+    dynamicSourcePagesValidated: Object.freeze(["grass-rabbit-codecs"])
   });
 }
 
@@ -154,11 +164,12 @@ async function loadBundle(root, contract) {
   } catch (error) {
     fail(`${contract.id} build report is invalid: ${errorMessage(error)}`);
   }
-  return Object.freeze({ contract, rawReport, report });
+  return Object.freeze({ contract, report });
 }
 
 async function validateBundle(root, bundle, inspections) {
   const { contract, report } = bundle;
+  let packedWitnessesValidated = 0;
   expectDeepEqual(
     report.assets.map((asset) => asset.codec),
     contract.codecs,
@@ -219,11 +230,19 @@ async function validateBundle(root, bundle, inspections) {
       );
     }
 
+    const frontIndex = parseFrontIndex(bytes);
+    packedWitnessesValidated += validateAssetWireProfile(
+      contract,
+      report,
+      asset,
+      frontIndex
+    );
+
     if (contract.reentryMaxWaitFrames !== undefined) {
       validateReentryEdge(
         contract.id,
         asset.path,
-        parseFrontIndex(bytes).manifest.edges,
+        frontIndex.manifest.edges,
         contract.reentryMaxWaitFrames
       );
     }
@@ -234,6 +253,84 @@ async function validateBundle(root, bundle, inspections) {
   } else {
     await validateDynamicCodecChooser(root, bundle);
   }
+  return packedWitnessesValidated;
+}
+
+function validateAssetWireProfile(contract, report, asset, frontIndex) {
+  const label = `${contract.id}/${asset.path}`;
+  expectEqual(frontIndex.header.major, 1, `${label} wire major`);
+  expectEqual(frontIndex.header.minor, 1, `${label} wire minor`);
+  expectEqual(frontIndex.manifest.formatVersion, "1.1", `${label} manifest version`);
+  expectEqual(frontIndex.manifest.layout, contract.layout, `${label} video layout`);
+  expectEqual(frontIndex.manifest.renditions.length, 1, `${label} rendition count`);
+
+  const rendition = frontIndex.manifest.renditions[0];
+  expect(rendition !== undefined, `${label} has no rendition`);
+  const codecVerificationInvocations = report.invocations.filter(({ operation }) =>
+    operation.startsWith(`${asset.codec}:`) &&
+    operation.endsWith(":verify-packed-alpha")
+  );
+
+  if (contract.layout === "opaque") {
+    expectEqual(rendition.alphaLayout.type, "opaque", `${label} alpha layout`);
+    expect(
+      !("outputQualification" in rendition),
+      `${label} opaque rendition unexpectedly carries output qualification`
+    );
+    expectEqual(
+      codecVerificationInvocations.length,
+      0,
+      `${label} packed-alpha verification invocation count`
+    );
+    return 0;
+  }
+
+  expectEqual(rendition.alphaLayout.type, "stacked", `${label} alpha layout`);
+  const witness = rendition.outputQualification;
+  expect(witness !== undefined, `${label} packed rendition has no output qualification`);
+  const expectedOperation =
+    `${asset.codec}:${rendition.id}:${witness.unit}:verify-packed-alpha`;
+  expectEqual(
+    codecVerificationInvocations.length,
+    1,
+    `${label} packed-alpha verification invocation count`
+  );
+  const invocation = codecVerificationInvocations[0];
+  expect(invocation !== undefined, `${label} packed-alpha verification invocation is missing`);
+  expectEqual(invocation.operation, expectedOperation, `${label} verification operation`);
+  expectEqual(invocation.tool, "ffmpeg", `${label} verification tool`);
+  expectArgumentPair(
+    invocation.arguments,
+    "-f",
+    verificationInputFormat(asset.codec),
+    `${label} verification input format`
+  );
+  expectArgumentPair(
+    invocation.arguments,
+    "-vf",
+    `select=eq(n\\,${String(witness.frame)}),format=rgba`,
+    `${label} verification frame`
+  );
+  expectArgumentPair(
+    invocation.arguments,
+    "-pix_fmt",
+    "rgba",
+    `${label} verification output format`
+  );
+  return 1;
+}
+
+function verificationInputFormat(codec) {
+  if (codec === "av1" || codec === "vp9") return "ivf";
+  if (codec === "h265") return "hevc";
+  return "h264";
+}
+
+function expectArgumentPair(arguments_, flag, value, label) {
+  const found = arguments_.some((argument, index) =>
+    argument === flag && arguments_[index + 1] === value
+  );
+  expect(found, `${label}: expected ${format(flag)} followed by ${format(value)}`);
 }
 
 function inspectWithBuiltCompiler(root, assetFile) {
@@ -364,35 +461,6 @@ async function validateDynamicCodecChooser(root, bundle) {
   );
 }
 
-async function validatePlaygroundFixtureMirror(root, playground) {
-  const fixtureDirectory = path.join(root, "fixtures/conformance/v1");
-  const fixtureReportFile = path.join(fixtureDirectory, "build.json");
-  const rawFixtureReport = await readJson(fixtureReportFile);
-  try {
-    parseCompileBundleReport(rawFixtureReport);
-  } catch (error) {
-    fail(`conformance fixture build report is invalid: ${errorMessage(error)}`);
-  }
-
-  expectDeepEqual(
-    playground.rawReport,
-    rawFixtureReport,
-    "playground and conformance build reports"
-  );
-
-  for (const codec of FOUR_CODEC_ORDER) {
-    const fileName = `${codec}.avl`;
-    const playgroundBytes = await readFile(
-      path.join(root, playground.contract.directory, fileName)
-    );
-    const fixtureBytes = await readFile(path.join(fixtureDirectory, fileName));
-    expect(
-      playgroundBytes.equals(fixtureBytes),
-      `playground ${fileName} is not byte-identical to fixtures/conformance/v1/${fileName}`
-    );
-  }
-}
-
 function extractSourceElements(markup, label) {
   const tags = markup.match(/<source\b[^>]*>/giu) ?? [];
   return tags.map((tag, index) => {
@@ -442,12 +510,6 @@ async function readJson(file) {
   } catch (error) {
     fail(`${file} is not JSON: ${errorMessage(error)}`);
   }
-}
-
-function requireBundle(bundles, id) {
-  const bundle = bundles.find((candidate) => candidate.contract.id === id);
-  expect(bundle !== undefined, `missing loaded bundle ${id}`);
-  return bundle;
 }
 
 function requireInspection(inspections, bundleId, codec) {

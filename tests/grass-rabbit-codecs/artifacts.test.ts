@@ -132,8 +132,9 @@ describe("grass-rabbit native multi-codec artifacts", () => {
       validateCompleteAsset({ bytes, frontIndex: front });
       fronts.set(codec, front);
       expect(front.header.declaredFileLength).toBe(reported.bytes);
+      expect(front.header).toMatchObject({ major: 1, minor: 1 });
       expect(front.manifest).toMatchObject({
-        formatVersion: "1.0",
+        formatVersion: "1.1",
         codec,
         bitstream: BITSTREAMS[codec],
         layout: "opaque",
@@ -142,6 +143,7 @@ describe("grass-rabbit native multi-codec artifacts", () => {
       });
       expect(front.manifest.renditions).toHaveLength(1);
       const rendition = front.manifest.renditions[0]!;
+      expect("outputQualification" in rendition).toBe(false);
       expect(parseVideoCodecString(rendition.codec)?.family).toBe(codec);
       expect(reported.codecString).toBe(rendition.codec);
       if (codec === "h264") {
