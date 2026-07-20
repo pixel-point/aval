@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { FormatError } from "../src/errors.js";
 import { splitAnnexBAccessUnit } from "../src/h264/annex-b.js";
-import { prepareH264EncoderRendition } from "../src/h264/index.js";
+import {
+  inspectH264AnnexBRendition,
+  prepareH264EncoderRendition
+} from "../src/h264/index.js";
 import {
   concat,
   makeAccessUnit,
@@ -26,8 +29,45 @@ const REAL_X264_HIGH_B_FRAMES =
   "AAAAAQkQAAAAAWdkAAqs2YzbAWoCAgKAAAADAIAAAB5HiRLNAAAAAWjpeBnLIsAAAAFliIQB//731LfMsu4HIrYLqPdus2Ds53A03ybfoqbhhHgfAAAAAQkwAAABQZokbF/+2qZ00AAAAAEJUAAAAUGeQji/AB8RAAAAAQlQAAABAZ5hNF8AHxAAAAABCVAAAAEBnmNqXwAfEQAAAAEJMAAAAUGaZ0moQWiZTAv//tqmdNEAAAABCVAAAAFBnoUuUTf/AB8RAAAAAQlQAAABAZ6mbl8AHxE=";
 
 describe("H264 encoder preparation", () => {
-  it("accepts a real libx264 High-profile closed GOP with B-frame reordering", () => {
+  it("canonicalizes libx264 C0 Baseline signalling to strict E0", () => {
+    const sps = makeSps({
+      profileIdc: 66,
+      compatibility: 0xc0,
+      maxNumRefFrames: 1,
+      maxNumReorderFrames: 0,
+      maxDecFrameBuffering: 1
+    });
+    const pps = makePps({ profileIdc: 66 });
+    const bytes = makeAccessUnit({
+      idr: true,
+      frameNum: 0,
+      sps,
+      pps,
+      aud: makeAud(0),
+      entropyCoding: false
+    }).bytes;
+
     const prepared = prepareH264EncoderRendition({
+      profile: PROFILE,
+      units: [{ id: "unit", bytes, expectedAccessUnitCount: 1 }]
+    });
+    const canonical = prepared.units[0]?.accessUnits[0]?.bytes;
+    const canonicalSps = splitAnnexBAccessUnit(
+      canonical ?? new Uint8Array(),
+      "canonical"
+    ).find(({ type }) => type === 7);
+
+    expect(canonicalSps?.payload[2]).toBe(0xe0);
+    expect(splitAnnexBAccessUnit(bytes, "candidate").find(({ type }) => type === 7)
+      ?.payload[2]).toBe(0xc0);
+    expect(prepared.inspection.parameterSet).toMatchObject({
+      profile: "constrained-baseline",
+      codec: "avc1.42E020"
+    });
+  });
+
+  it("rejects a real libx264 High-profile candidate at the publication boundary", () => {
+    expectProfileError(() => prepareH264EncoderRendition({
       profile: {
         codedWidth: 48,
         codedHeight: 96,
@@ -40,41 +80,58 @@ describe("H264 encoder preparation", () => {
         bytes: new Uint8Array(Buffer.from(REAL_X264_HIGH_B_FRAMES, "base64")),
         expectedAccessUnitCount: 8
       }]
-    });
-    const unit = prepared.inspection.units[0];
-
-    expect(unit?.accessUnits.map(({ sliceType }) => sliceType))
-      .toEqual(["I", "P", "B", "B", "B", "P", "B", "B"]);
-    expect(unit?.accessUnits.map(({ pictureOrderCount }) => pictureOrderCount))
-      .toEqual([0, 8, 4, 2, 6, 14, 10, 12]);
-    expect(unit?.decodeToPresentation).toEqual([0, 4, 2, 1, 3, 7, 5, 6]);
+    }));
   });
 
-  it("normalizes a High-profile closed GOP and retains decode/presentation order", () => {
-    const bytes = reorderedStream();
-    const prepared = prepareH264EncoderRendition({
-      profile: PROFILE,
-      units: [{ id: "unit", bytes, expectedAccessUnitCount: 5 }]
+  it("keeps the real legacy High rendition readable through strict inspection", () => {
+    const bytes = new Uint8Array(Buffer.from(REAL_X264_HIGH_B_FRAMES, "base64"));
+    const accessUnitOffsets = splitAnnexBAccessUnit(bytes, "legacy-high")
+      .filter(({ type }) => type === 9)
+      .map(({ offset, prefixLength }) => offset - prefixLength);
+    const inspection = inspectH264AnnexBRendition({
+      profile: {
+        codedWidth: 48,
+        codedHeight: 96,
+        expectedVisibleRect: [0, 0, 48, 96],
+        frameRate: { numerator: 30, denominator: 1 },
+        requireBt709LimitedRange: true
+      },
+      units: [{
+        id: "unit",
+        accessUnits: accessUnitOffsets.map((offset, index) => ({
+          key: index === 0,
+          bytes: canonicalizeStartCodes(bytes.slice(
+            offset,
+            accessUnitOffsets[index + 1] ?? bytes.length
+          ))
+        }))
+      }]
     });
 
-    expect(prepared.units[0]?.accessUnits).toHaveLength(5);
-    expect(prepared.inspection.parameterSet.codec).toBe("avc1.640020");
-    expect(prepared.inspection.units[0]?.decodeToPresentation)
-      .toEqual([0, 4, 2, 1, 3]);
-    expect(prepared.inspection.units[0]?.accessUnits.map(({ sliceType }) => sliceType))
-      .toEqual(["I", "P", "B", "B", "B"]);
+    expect(inspection.parameterSet.codec).toBe("avc1.64000A");
+    expect(inspection.units[0]?.accessUnits.map(({ sliceType }) => sliceType))
+      .toEqual(["I", "P", "B", "B", "B", "P", "B", "B"]);
+    expect(inspection.units[0]?.decodeToPresentation)
+      .toEqual([0, 4, 2, 1, 3, 7, 5, 6]);
   });
 
   it("strips bounded encoder SEI and emits canonical four-byte start codes", () => {
-    const sps = makeSps();
-    const pps = makePps();
+    const sps = makeSps({
+      profileIdc: 66,
+      compatibility: 0xc0,
+      maxNumRefFrames: 1,
+      maxNumReorderFrames: 0,
+      maxDecFrameBuffering: 1
+    });
+    const pps = makePps({ profileIdc: 66 });
     const key = makeAccessUnit({
       idr: true,
       frameNum: 0,
       picOrderCntLsb: 0,
       sps,
       pps,
-      aud: makeAud(0)
+      aud: makeAud(0),
+      entropyCoding: false
     });
     const sei = nal(0x06, Uint8Array.of(0x80), 3);
     const bytes = concat(
@@ -101,16 +158,16 @@ describe("H264 encoder preparation", () => {
   });
 
   it("rejects count mismatches, duplicate unit ids, and unsupported NAL syntax", () => {
-    const bytes = reorderedStream();
+    const bytes = baselineStream();
     expectProfileError(() => prepareH264EncoderRendition({
       profile: PROFILE,
-      units: [{ id: "unit", bytes, expectedAccessUnitCount: 4 }]
+      units: [{ id: "unit", bytes, expectedAccessUnitCount: 1 }]
     }));
     expectProfileError(() => prepareH264EncoderRendition({
       profile: PROFILE,
       units: [
-        { id: "unit", bytes, expectedAccessUnitCount: 5 },
-        { id: "unit", bytes, expectedAccessUnitCount: 5 }
+        { id: "unit", bytes, expectedAccessUnitCount: 2 },
+        { id: "unit", bytes, expectedAccessUnitCount: 2 }
       ]
     }));
     expectProfileError(() => prepareH264EncoderRendition({
@@ -124,32 +181,41 @@ describe("H264 encoder preparation", () => {
   });
 });
 
-function reorderedStream(): Uint8Array {
-  const sps = makeSps();
-  const pps = makePps();
+function baselineStream(): Uint8Array {
+  const sps = makeSps({
+    profileIdc: 66,
+    compatibility: 0xc0,
+    maxNumRefFrames: 1,
+    maxNumReorderFrames: 0,
+    maxDecFrameBuffering: 1
+  });
+  const pps = makePps({ profileIdc: 66 });
   return concat(
-    makeAccessUnit({ idr: true, frameNum: 0, picOrderCntLsb: 0, sps, pps, aud: makeAud(0) }).bytes,
-    makeAccessUnit({ idr: false, frameNum: 1, picOrderCntLsb: 8, aud: makeAud(1) }).bytes,
-    makeAccessUnit({ idr: false, frameNum: 2, sliceType: "B", picOrderCntLsb: 4, aud: makeAud(2) }).bytes,
     makeAccessUnit({
-      idr: false,
-      frameNum: 3,
-      sliceType: "B",
-      reference: false,
-      picOrderCntLsb: 2,
-      aud: makeAud(2)
+      idr: true,
+      frameNum: 0,
+      picOrderCntLsb: 0,
+      sps,
+      pps,
+      aud: makeAud(0),
+      entropyCoding: false
     }).bytes,
     makeAccessUnit({
       idr: false,
-      frameNum: 3,
-      sliceType: "B",
-      reference: false,
-      picOrderCntLsb: 6,
-      aud: makeAud(2)
+      frameNum: 1,
+      picOrderCntLsb: 2,
+      aud: makeAud(1),
+      entropyCoding: false
     }).bytes
   );
 }
 
 function expectProfileError(operation: () => unknown): void {
   expect(operation).toThrow(FormatError);
+}
+
+function canonicalizeStartCodes(accessUnit: Uint8Array): Uint8Array {
+  const startCode = Uint8Array.of(0, 0, 0, 1);
+  const nals = splitAnnexBAccessUnit(accessUnit, "legacy-high.access-unit");
+  return concat(...nals.flatMap(({ payload }) => [startCode, payload]));
 }

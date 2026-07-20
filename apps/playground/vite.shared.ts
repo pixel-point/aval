@@ -2,12 +2,12 @@ import { fileURLToPath } from "node:url";
 
 import type { UserConfig } from "vite";
 
-import { v1HttpFixturePlugin } from "./v1-http-fixture-plugin.js";
+import { playgroundFixturePlugin } from "./http-fixture-plugin.js";
 
 /** Inputs and local fixture authorities shared by development and release builds. */
 export function createPlaygroundConfig(): UserConfig {
   return {
-    plugins: [v1HttpFixturePlugin()],
+    plugins: [playgroundFixturePlugin()],
     build: {
       rollupOptions: {
         input: {

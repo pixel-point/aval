@@ -1,26 +1,26 @@
-import type {
-  MotionGraphEngine,
-  MotionGraphResult
+import {
+  sameGraphPresentation,
+  type MotionGraphEngine,
+  type MotionGraphResult
 } from "@pixel-point/aval-graph";
 
 import type { EffectHost } from "./effect-host.js";
 import {
   IntegratedPlaybackInvariantError,
-  PlaybackFallbackError,
-  type IntegratedCandidateAttempt,
-  type IntegratedFallbackStore
+  type IntegratedCandidateAttempt
 } from "./integrated-player-contracts.js";
+import type { IntegratedStateStore } from "./state-store.js";
 import type { IntegratedAnimatedActivationCommit } from "./integrated-animated-preparation.js";
 import type { IntegratedOperationGate } from "./integrated-operation-gate.js";
 import type { IntegratedPlayerMotion } from "./integrated-player-motion.js";
 import {
   assertIntegratedStaticPresentation,
-  sameGraphPresentation,
   throwIfIntegratedAborted,
   validateIntegratedPlaybackTraceState
 } from "./integrated-player-support.js";
 import type { IntegratedTraceHarness } from "./integrated-trace-harness.js";
 import {
+  RuntimePlaybackError,
   normalizeRuntimeFailure,
   type RuntimeFailure
 } from "./errors.js";
@@ -30,6 +30,7 @@ import {
   type RuntimeReadinessResult
 } from "./model.js";
 import type { RealtimeDriver } from "./realtime-driver.js";
+import { listenForBrowserPlaybackTerminal } from "./browser-playback-terminal-listener.js";
 
 interface IntegratedPlayerActivationState {
   readonly isDisposed: () => boolean;
@@ -48,13 +49,18 @@ interface IntegratedPlayerActivationState {
 interface IntegratedPlayerActivationCoordinatorOptions {
   readonly graph: MotionGraphEngine;
   readonly effects: EffectHost;
-  readonly fallbackStore: IntegratedFallbackStore;
+  readonly stateStore: IntegratedStateStore;
   readonly trace: IntegratedTraceHarness;
   readonly operationGate: IntegratedOperationGate;
   readonly state: Readonly<IntegratedPlayerActivationState>;
   readonly getMotion: () => IntegratedPlayerMotion;
   readonly getRealtime: () => RealtimeDriver | null;
-  readonly startRecovery: (failure: Readonly<RuntimeFailure>) => void;
+  readonly startRecovery: (
+    failure: Readonly<RuntimeFailure>
+  ) => RuntimePlaybackError;
+  readonly startTerminalPlayback: (
+    error: RuntimePlaybackError
+  ) => RuntimePlaybackError;
   readonly settleRecovery: () => Promise<void>;
   readonly reportFailure: (failure: Readonly<RuntimeFailure>) => void;
   readonly releaseCandidateResidency: (rendition: string) => void;
@@ -68,13 +74,18 @@ interface IntegratedPlayerActivationCoordinatorOptions {
 export class IntegratedPlayerActivationCoordinator {
   readonly #graph: MotionGraphEngine;
   readonly #effects: EffectHost;
-  readonly #fallbackStore: IntegratedFallbackStore;
+  readonly #stateStore: IntegratedStateStore;
   readonly #trace: IntegratedTraceHarness;
   readonly #operationGate: IntegratedOperationGate;
   readonly #state: Readonly<IntegratedPlayerActivationState>;
   readonly #getMotion: () => IntegratedPlayerMotion;
   readonly #getRealtime: () => RealtimeDriver | null;
-  readonly #startRecovery: (failure: Readonly<RuntimeFailure>) => void;
+  readonly #startRecovery: (
+    failure: Readonly<RuntimeFailure>
+  ) => RuntimePlaybackError;
+  readonly #startTerminalPlayback: (
+    error: RuntimePlaybackError
+  ) => RuntimePlaybackError;
   readonly #settleRecovery: () => Promise<void>;
   readonly #reportFailure: (failure: Readonly<RuntimeFailure>) => void;
   readonly #releaseCandidateResidency: (rendition: string) => void;
@@ -84,13 +95,14 @@ export class IntegratedPlayerActivationCoordinator {
   ) {
     this.#graph = options.graph;
     this.#effects = options.effects;
-    this.#fallbackStore = options.fallbackStore;
+    this.#stateStore = options.stateStore;
     this.#trace = options.trace;
     this.#operationGate = options.operationGate;
     this.#state = options.state;
     this.#getMotion = options.getMotion;
     this.#getRealtime = options.getRealtime;
     this.#startRecovery = options.startRecovery;
+    this.#startTerminalPlayback = options.startTerminalPlayback;
     this.#settleRecovery = options.settleRecovery;
     this.#reportFailure = options.reportFailure;
     this.#releaseCandidateResidency = options.releaseCandidateResidency;
@@ -107,6 +119,7 @@ export class IntegratedPlayerActivationCoordinator {
       this.#state.setSelectedRendition(commit.renditionId);
       this.#state.setReadyResult(commit.result);
       this.#getMotion().stageReadyResult(commit.result);
+      this.#listenForPlaybackTerminal(commit.attempt);
       const animated = this.#graph.beginAnimated();
       if (!sameGraphPresentation(
         animated.presentation,
@@ -128,11 +141,6 @@ export class IntegratedPlayerActivationCoordinator {
         }
         commit.attempt.drawInitial(commit.activation, presentation);
       });
-      // Keep the host fallback visibly covering until the prepared first
-      // animated frame has crossed the synchronous draw barrier. A reveal
-      // failure now occurs with an owned active candidate and therefore runs
-      // through the ordinary cover-before-cleanup recovery lane.
-      this.#fallbackStore.revealAnimated();
       throwIfIntegratedAborted(commit.signal);
       this.#recordOperation(animated, commit.attempt);
       return commit.result;
@@ -147,6 +155,7 @@ export class IntegratedPlayerActivationCoordinator {
       this.#state.setActiveCandidate(commit.attempt);
       this.#state.setSelectedRendition(commit.renditionId);
       this.#state.setReadyResult(commit.result);
+      this.#listenForPlaybackTerminal(commit.attempt);
       const animated = this.#graph.resumeAnimated();
       if (!sameGraphPresentation(
         animated.presentation,
@@ -173,21 +182,31 @@ export class IntegratedPlayerActivationCoordinator {
           "animated re-entry motion transition became stale"
         );
       }
-      this.#fallbackStore.revealAnimated();
       this.#recordOperation(animated, commit.attempt);
       return commit.result;
     });
   }
 
   public rollbackAnimatedActivation(attempt: IntegratedCandidateAttempt): void {
-    // A precommit attempt never revealed animated pixels, so the retained
-    // fallback state is already authoritative. Rollback only detaches state;
-    // replaying a fallible visibility host would add no visual transition.
+    // A precommit attempt never made animated pixels authoritative. Rollback
+    // only detaches runtime state; alternate presentation is consumer-owned.
     if (this.#state.getActiveCandidate() === attempt) {
       this.#state.setActiveCandidate(null);
       this.#state.setSelectedRendition(null);
       this.#state.setReadyResult(null);
     }
+  }
+
+  #listenForPlaybackTerminal(attempt: IntegratedCandidateAttempt): void {
+    listenForBrowserPlaybackTerminal(attempt.playback, (error) => {
+      this.#operationGate.run(() => {
+        if (
+          this.#state.isDisposed() ||
+          this.#state.getActiveCandidate() !== attempt
+        ) return;
+        this.#startTerminalPlayback(error);
+      });
+    });
   }
 
   public pauseForMotionPolicy(): boolean {
@@ -199,7 +218,7 @@ export class IntegratedPlayerActivationCoordinator {
       // RealtimeDriver clears running/pending ownership before invoking the
       // hostile cancellation host. A cancellation exception therefore cannot
       // unwind the serialized reduction and strand its transition; report it
-      // observationally and continue to the host-fallback cover barrier.
+      // observationally and continue to the logical-state commit barrier.
       this.#reportFailure(normalizeRuntimeFailure(
         "readiness-failure",
         error,
@@ -274,28 +293,29 @@ export class IntegratedPlayerActivationCoordinator {
     }
   }
 
-  public coverReducedSurface(state: string): void {
-    this.#coverStagedSurface(state, "reduced-motion");
+  public assertReducedState(state: string): void {
+    this.#assertStagedState(state, "reduced-motion");
   }
 
-  public coverVisibilitySurface(state: string): void {
-    this.#coverStagedSurface(state, "visibility");
+  public assertVisibilityState(state: string): void {
+    this.#assertStagedState(state, "visibility");
   }
 
-  public coverContextSurface(): string {
+  public captureContextState(): string {
     return this.#operationGate.run(() => {
-      const state = this.#fallbackStore.currentState();
+      const state = this.#stateStore.currentState();
       if (state === null) {
-        throw new PlaybackFallbackError(
-          "context loss has no retained fallback state"
-        );
+        throw new RuntimePlaybackError(normalizeRuntimeFailure(
+          "context-loss",
+          "context loss has no retained logical state",
+          { operation: "context-loss-state" }
+        ));
       }
-      this.#fallbackStore.coverCurrent();
       return state;
     });
   }
 
-  #coverStagedSurface(state: string, operation: string): void {
+  #assertStagedState(state: string, operation: string): void {
     this.#operationGate.run(() => {
       const snapshot = this.#graph.snapshot();
       if (snapshot.requestedState !== state) {
@@ -303,12 +323,11 @@ export class IntegratedPlayerActivationCoordinator {
           `staged ${operation} surface became stale`
         );
       }
-      if (this.#fallbackStore.currentState() !== state) {
+      if (this.#stateStore.currentState() !== state) {
         throw new IntegratedPlaybackInvariantError(
           `staged ${operation} surface has the wrong state identity`
         );
       }
-      this.#fallbackStore.coverCurrent();
     });
   }
 
@@ -364,19 +383,14 @@ export class IntegratedPlayerActivationCoordinator {
       const active = this.#state.getActiveCandidate();
       if (active === null) return null;
       if (state === null) {
-        this.#state.setSelectedRendition(null);
-        this.#state.setReadyResult(null);
-        const failed = this.#graph.failStatic(
-          "context loss has no usable fallback state"
-        );
-        const failedForHost = this.#effects.applyFailure(failed);
-        this.#recordOperationBestEffort(
-          failedForHost,
-          active,
-          "context-static-failure-trace"
-        );
-        this.#state.setActiveCandidate(null);
-        return active;
+        this.#startRecovery(normalizeRuntimeFailure(
+          "context-loss",
+          "context loss has no usable logical state",
+          { operation: "context-static-failure" }
+        ));
+        // Recovery now owns terminal publication, retained error identity,
+        // trace capture, candidate detachment, and asynchronous cleanup.
+        return null;
       }
       const reports = (
         this.#state.getReadyResult()?.report.candidates ?? []
@@ -445,9 +459,8 @@ export class IntegratedPlayerActivationCoordinator {
       this.#getMotion().stageReadyResult(ready);
       this.#effects.applyRecovery(reduced, (presentation) => {
         assertIntegratedStaticPresentation(presentation, state);
-        // coverReducedSurface already completed the visible static barrier.
-        // This callback orders the graph effects without replaying a fallible
-        // visibility host after the motion-mode commit.
+        // The logical state was validated before the mode commit. This
+        // callback orders graph effects without owning presentation UI.
       });
       const active = this.#state.getActiveCandidate();
       if (active !== null) {
@@ -467,135 +480,19 @@ export class IntegratedPlayerActivationCoordinator {
     );
   }
 
-  public async commitResourcePressureState(state: string): Promise<void> {
-    let rendition: string | null = null;
-    const candidate = this.#operationGate.run(() => {
-      rendition = this.#state.getSelectedRendition();
-      const reports = (
-        this.#state.getReadyResult()?.report.candidates ?? []
-      ).map((report) => createRuntimeCandidateReport({
-        ...report,
-        outcome: report.outcome === "selected" ? "eligible" : report.outcome,
-        failure: report.outcome === "selected" ? null : report.failure
-      }));
-      const ready = Object.freeze({
-        mode: "static" as const,
-        reason: "resource-budget" as const,
-        report: createRuntimeReadinessReport({
-          readiness: "staticReady",
-          selectedRendition: null,
-          candidates: reports
-        })
-      });
-      const fallback = this.#graph.recoverStatic("resource-budget");
-      this.#state.setSelectedRendition(null);
-      this.#state.setReadyResult(ready);
-      this.#getMotion().stageReadyResult(ready);
-      this.#effects.applyRecovery(fallback, (presentation) => {
-        assertIntegratedStaticPresentation(presentation, state);
-      });
-      const active = this.#state.getActiveCandidate();
-      if (active !== null) {
-        this.#recordOperationBestEffort(
-          fallback,
-          active,
-          "resource-pressure-trace"
-        );
-        this.#state.setActiveCandidate(null);
-      }
-      return active;
-    });
-    await this.#disposeCandidate(
-      candidate,
-      "resource-pressure-candidate-cleanup",
-      rendition
-    );
-  }
-
-  public async failReduction(error: unknown): Promise<void> {
-    let rendition: string | null = null;
-    const candidate = this.#operationGate.run(() => {
-      rendition = this.#state.getSelectedRendition();
-      const retainedVisualState = this.#effects.visualState;
-      const failure = normalizeRuntimeFailure(
-        "renderer-failure",
-        error,
-        { operation: "reduced-motion-host-fallback" }
-      );
-      let staticCovered = false;
-      let retainedStaticMatches = false;
-      try {
-        retainedStaticMatches = retainedVisualState !== null &&
-          this.#fallbackStore.currentState() === retainedVisualState;
-      } catch {
-        // The reduction staging failure remains authoritative.
-      }
-      if (retainedStaticMatches) {
-        try {
-          this.#fallbackStore.coverCurrent();
-          staticCovered = true;
-        } catch {
-          // The animated candidate remains the only proven matching pixels.
-        }
-      }
-      if (!staticCovered) {
-        const failed = this.#graph.failStatic(
-          failure.message,
-          retainedVisualState === null ? {} : { retainedVisualState }
-        );
-        this.#state.setSelectedRendition(null);
-        this.#state.setReadyResult(null);
-        const failedForHost = this.#effects.applyFailure(failed);
-        const active = this.#state.getActiveCandidate();
-        if (active !== null) {
-          this.#recordOperationBestEffort(
-            failedForHost,
-            active,
-            "failed-reduction-terminal-trace"
-          );
-        }
-        return null;
-      }
-      const ready = Object.freeze({
-        mode: "static" as const,
-        reason: "animation-failure" as const,
-        report: createRuntimeReadinessReport({
-          readiness: "staticReady",
-          selectedRendition: null,
-          candidates: []
-        })
-      });
-      const recovered = this.#graph.recoverStatic(
-        "animation-failure",
-        retainedVisualState === null ? {} : { retainedVisualState }
-      );
-      this.#state.setSelectedRendition(null);
-      this.#state.setReadyResult(ready);
-      this.#getMotion().stageReadyResult(ready);
-      this.#effects.applyRecovery(recovered, (presentation) => {
-        if (retainedVisualState === null) {
-          throw new IntegratedPlaybackInvariantError(
-            "failed reduction has no retained visual state"
-          );
-        }
-        assertIntegratedStaticPresentation(presentation, retainedVisualState);
-      });
-      const active = this.#state.getActiveCandidate();
-      if (active !== null) {
-        this.#recordOperationBestEffort(
-          recovered,
-          active,
-          "failed-reduction-trace"
-        );
-        this.#state.setActiveCandidate(null);
-      }
-      return active;
-    });
-    await this.#disposeCandidate(
-      candidate,
-      "failed-reduction-candidate-cleanup",
-      rendition
-    );
+  public async failReduction(error: unknown): Promise<never> {
+    const terminal = this.#startRecovery(normalizeRuntimeFailure(
+      "renderer-failure",
+      error,
+      { operation: "reduced-motion-state-transition" }
+    ));
+    try {
+      await this.#settleRecovery();
+    } catch (settledError) {
+      if (settledError === terminal) throw terminal;
+      throw settledError;
+    }
+    throw terminal;
   }
 
   public rejectAnimatedReentry(
@@ -610,10 +507,15 @@ export class IntegratedPlayerActivationCoordinator {
 
   public async recoverAnimatedActivation(
     failure: Readonly<RuntimeFailure>
-  ): Promise<Readonly<RuntimeReadinessResult> | null> {
-    this.#startRecovery(failure);
-    await this.#settleRecovery();
-    return this.#state.getReadyResult();
+  ): Promise<never> {
+    const terminal = this.#startRecovery(failure);
+    try {
+      await this.#settleRecovery();
+    } catch (error) {
+      if (error === terminal) throw terminal;
+      throw error;
+    }
+    throw terminal;
   }
 
   #recordOperation(

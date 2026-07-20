@@ -5,10 +5,11 @@ import { createIntegratedTestAsset } from "./asset-test-support.js";
 import type { RuntimeFailure } from "./errors.js";
 import {
   IntegratedPlayer,
+  integratedStateStoreOption,
   type IntegratedCandidateAttempt,
   type IntegratedCandidateFactory,
   type IntegratedPlaybackSession,
-  type IntegratedFallbackStore
+  type IntegratedStateStore
 } from "./integrated-player.js";
 import { createIntegratedTestVideoSource } from "./integrated-player-video-test-support.js";
 
@@ -19,7 +20,7 @@ describe("IntegratedPlayer terminal disposal", () => {
     let diagnostics = 0;
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => store,
+      ...integratedStateStoreOption(() => store),
       candidateFactory: factory,
       diagnosticsSink: (_failure: Readonly<RuntimeFailure>) => {
         diagnostics += 1;
@@ -64,31 +65,32 @@ describe("IntegratedPlayer terminal disposal", () => {
     })).toThrow("disposed");
   });
 
-  it("makes prepare join an in-flight recovery instead of returning stale animated readiness", async () => {
+  it("makes prepare reject the retained in-flight terminal error", async () => {
     const store = new GatedRecoveryStore();
     const factory = new ThrowingCandidateFactory();
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => store,
+      ...integratedStateStoreOption(() => store),
       candidateFactory: factory,
       timers: new IdleTimers()
     });
     await expect(player.prepare()).resolves.toMatchObject({ mode: "animated" });
     factory.session.tickFailure = new Error("injected runtime failure");
 
-    expect(player.tryContentTick({
-      presentationOrdinal: 1n,
-      rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
+    let terminal: unknown;
+    try {
+      player.tryContentTick({
+        presentationOrdinal: 1n,
+        rationalDeadlineUs: 33_333
+      });
+    } catch (error) {
+      terminal = error;
+    }
     const joined = player.prepare();
-    await expectPending(joined);
-    store.gate.resolve();
 
-    await expect(joined).resolves.toMatchObject({
-      mode: "static",
-      reason: "animation-failure"
-    });
-    expect(player.snapshot().readiness).toBe("staticReady");
+    await expect(joined).rejects.toBe(terminal);
+    await expect(player.settled()).rejects.toBe(terminal);
+    expect(player.snapshot().readiness).toBe("error");
     await player.dispose();
   });
 
@@ -96,7 +98,7 @@ describe("IntegratedPlayer terminal disposal", () => {
     const store = new GatedSettlementStore();
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => store,
+      ...integratedStateStoreOption(() => store),
       candidateFactory: new ThrowingCandidateFactory(),
       timers: new IdleTimers()
     });
@@ -128,7 +130,7 @@ describe("IntegratedPlayer terminal disposal", () => {
         : new ThrowingCandidateFactory();
       const player = new IntegratedPlayer({
         ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-        createFallbackStore: () => store,
+        ...integratedStateStoreOption(() => store),
         candidateFactory: factory,
         timers: new IdleTimers()
       });
@@ -160,7 +162,7 @@ describe("IntegratedPlayer terminal disposal", () => {
     const factory = new GatedReentryCandidateFactory(order);
     const player = new IntegratedPlayer({
       ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-      createFallbackStore: () => store,
+      ...integratedStateStoreOption(() => store),
       candidateFactory: factory,
       motionPolicy: "reduce",
       timers: new IdleTimers()
@@ -248,7 +250,7 @@ class DisposalPlaybackSession implements IntegratedPlaybackSession {
   }
 }
 
-class ThrowingStaticStore implements IntegratedFallbackStore {
+class ThrowingStaticStore implements IntegratedStateStore {
   public throwDispose = false;
   public disposeCalls = 0;
   #state = "idle";
@@ -265,8 +267,6 @@ class ThrowingStaticStore implements IntegratedFallbackStore {
     _options: { readonly signal: AbortSignal }
   ): Promise<void> { this.#state = _state; }
   public currentState(): string | null { return this.#state; }
-  public coverCurrent(): void {}
-  public revealAnimated(): void {}
   public async settled(): Promise<void> {}
 
   public dispose(): void {

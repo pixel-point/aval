@@ -5,6 +5,7 @@ import type {
 } from "@pixel-point/aval-element";
 
 import type { RouteLedger } from "./route-ledger.js";
+import { FUNCTIONAL_SOURCE_TYPE } from "./functional-fixture.js";
 
 export const PUBLIC_EVENT_NAMES = Object.freeze([
   "requestedstatechange",
@@ -12,18 +13,17 @@ export const PUBLIC_EVENT_NAMES = Object.freeze([
   "visualstatechange",
   "transitionend",
   "underflow",
-  "fallback",
   "error"
 ] as const);
 
-const DEFAULT_SOURCE_TYPE =
-  'application/vnd.aval; codecs="avc1.42E020"';
+const consumerAlternates = new WeakMap<AvalElement, HTMLElement>();
 
 export function createPublicMotionElement(
   sourceUrl: string,
   parent: HTMLElement,
   routeLedger?: RouteLedger,
-  integrity?: string
+  integrity?: string,
+  errorObserver?: EventListener
 ): AvalElement {
   const element = document.createElement("aval-player");
   element.className = "certification-motion";
@@ -31,14 +31,25 @@ export function createPublicMotionElement(
   element.motion = "full";
   const source = document.createElement("source");
   source.src = sourceUrl;
-  source.type = DEFAULT_SOURCE_TYPE;
+  source.type = FUNCTIONAL_SOURCE_TYPE;
   if (integrity !== undefined) source.setAttribute("integrity", integrity);
-  const fallback = document.createElement("span");
-  fallback.slot = "fallback";
-  fallback.textContent = "Motion fallback";
-  element.append(source, fallback);
+  const alternate = document.createElement("span");
+  alternate.className = "certification-motion-unavailable";
+  alternate.textContent = "Motion unavailable";
+  alternate.hidden = true;
+  element.append(source);
+  element.addEventListener("error", ((event: AvalElementEventMap["error"]) => {
+    if (!event.detail.fatal) return;
+    alternate.hidden = false;
+  }) as EventListener);
+  element.addEventListener("readinesschange", () => {
+    if (element.readiness !== "interactiveReady") return;
+    alternate.hidden = true;
+  });
+  if (errorObserver !== undefined) element.addEventListener("error", errorObserver);
+  consumerAlternates.set(element, alternate);
   if (routeLedger !== undefined) attachRouteLedger(element, routeLedger);
-  parent.append(element);
+  parent.append(element, alternate);
   return element;
 }
 
@@ -51,6 +62,11 @@ export function replacePublicMotionSource(
   if (!(source instanceof HTMLSourceElement)) {
     throw new Error("public motion source is unavailable");
   }
+  // Source replacement is an explicit consumer recovery attempt. The host is
+  // deliberately kept laid out while the consumer-owned alternate is shown,
+  // so this cannot create a visibility-suspended replacement generation.
+  const alternate = consumerAlternates.get(element);
+  if (alternate !== undefined) alternate.hidden = false;
   source.src = sourceUrl;
   if (integrity === undefined) source.removeAttribute("integrity");
   else source.setAttribute("integrity", integrity);
@@ -64,24 +80,20 @@ export async function preparePublicMotion(
   await waitForEffectiveVisibility(element, Math.min(timeoutMs, 2_000), signal);
   await element.prepare({ timeoutMs, ...(signal === undefined ? {} : { signal }) });
   let diagnostics = element.getDiagnostics({ trace: true });
-  if (
-    diagnostics.readiness === "staticReady" &&
-    diagnostics.staticReason === "visibility-suspended" &&
-    diagnostics.effectivelyVisible
-  ) {
-    diagnostics = await waitForVisibilityRecovery(
+  if (diagnostics.readiness === "staticReady") {
+    diagnostics = await waitForInteractiveRecovery(
       element,
       Math.min(timeoutMs, 5_000),
       signal
     );
   }
-  if (diagnostics.readiness !== "interactiveReady" && diagnostics.readiness !== "staticReady") {
+  if (diagnostics.readiness !== "interactiveReady") {
     throw new Error(`unexpected public readiness ${diagnostics.readiness}`);
   }
   return diagnostics;
 }
 
-async function waitForVisibilityRecovery(
+async function waitForInteractiveRecovery(
   element: AvalElement,
   timeoutMs: number,
   signal?: AbortSignal
@@ -90,12 +102,9 @@ async function waitForVisibilityRecovery(
   for (;;) {
     signal?.throwIfAborted();
     const diagnostics = element.getDiagnostics({ trace: true });
-    if (
-      diagnostics.readiness === "interactiveReady" ||
-      diagnostics.staticReason !== "visibility-suspended"
-    ) return diagnostics;
+    if (diagnostics.readiness !== "staticReady") return diagnostics;
     if (performance.now() >= deadline) {
-      throw new Error("public element visibility recovery did not settle before preparation");
+      throw new Error("public element did not become interactive after nonfatal static policy");
     }
     await new Promise((resolve) => setTimeout(resolve, 16));
   }
@@ -123,6 +132,8 @@ async function waitForEffectiveVisibility(
 
 export async function retirePublicMotion(element: AvalElement): Promise<Readonly<AvalDiagnostics>> {
   element.remove();
+  consumerAlternates.get(element)?.remove();
+  consumerAlternates.delete(element);
   await element.dispose();
   const diagnostics = element.getDiagnostics({ trace: true });
   if (!diagnostics.finalDisposed || diagnostics.readiness !== "disposed") {

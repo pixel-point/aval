@@ -1,10 +1,9 @@
-import {
-  PlaybackFallbackError,
-  type IntegratedPrepareOptions
-} from "./integrated-player-contracts.js";
+import type { IntegratedPrepareOptions } from "./integrated-player-contracts.js";
+import type { RuntimePlaybackError } from "./errors.js";
 import {
   DEFAULT_INTEGRATED_PREPARATION_TIMEOUT_MS,
   integratedAbortReason,
+  integratedReadinessError,
   integratedDisposedError,
   isIntegratedAbortError,
   validatePreparationTimeout
@@ -32,10 +31,9 @@ interface IntegratedPlayerMotionOptions {
   readonly resumeAfterCancelledReduction: (wasRunning: boolean) => void;
   readonly resumeAfterReentry: (wasRunning: boolean) => void;
   readonly resumeAfterVisibilityReentry: (wasRunning: boolean) => void;
-  readonly coverReducedSurface: (state: string) => void;
+  readonly assertReducedState: (state: string) => void;
   readonly commitReducedState: (state: string) => Promise<void>;
-  readonly commitResourcePressureState: (state: string) => Promise<void>;
-  readonly failReduction: (error: unknown) => Promise<void>;
+  readonly failReduction: (error: unknown) => Promise<never>;
   readonly prepareFull: (
     signal: AbortSignal
   ) => Promise<Readonly<RuntimeReadinessResult> | null>;
@@ -46,7 +44,7 @@ interface IntegratedPlayerMotionOptions {
   readonly reportTransitionFailure: (
     error: unknown,
     transition: MotionPolicyTransitionKind
-  ) => void;
+  ) => RuntimePlaybackError;
 }
 
 /** Player integration for initial motion policy and later transition ownership. */
@@ -59,10 +57,9 @@ export class IntegratedPlayerMotion {
   readonly #resumeAfterCancelledReduction: (wasRunning: boolean) => void;
   readonly #resumeAfterReentry: (wasRunning: boolean) => void;
   readonly #resumeAfterVisibilityReentry: (wasRunning: boolean) => void;
-  readonly #coverReducedSurface: (state: string) => void;
+  readonly #assertReducedState: (state: string) => void;
   readonly #commitReducedState: (state: string) => Promise<void>;
-  readonly #commitResourcePressureState: (state: string) => Promise<void>;
-  readonly #failReduction: (error: unknown) => Promise<void>;
+  readonly #failReduction: (error: unknown) => Promise<never>;
   readonly #prepareFull: IntegratedPlayerMotionOptions["prepareFull"];
   readonly #rejectReentry: IntegratedPlayerMotionOptions["rejectReentry"];
   readonly #reportTransitionFailure: IntegratedPlayerMotionOptions[
@@ -89,9 +86,8 @@ export class IntegratedPlayerMotion {
     this.#resumeAfterReentry = options.resumeAfterReentry;
     this.#resumeAfterVisibilityReentry =
       options.resumeAfterVisibilityReentry;
-    this.#coverReducedSurface = options.coverReducedSurface;
+    this.#assertReducedState = options.assertReducedState;
     this.#commitReducedState = options.commitReducedState;
-    this.#commitResourcePressureState = options.commitResourcePressureState;
     this.#failReduction = options.failReduction;
     this.#prepareFull = options.prepareFull;
     this.#rejectReentry = options.rejectReentry;
@@ -138,7 +134,7 @@ export class IntegratedPlayerMotion {
         snapshot.actualMode === "static" &&
         snapshot.staticOrigin === result.reason
       ) return;
-      this.#coordinator.failToStatic(result.reason);
+      this.#coordinator.suspendStatic(result.reason);
     }
   }
 
@@ -197,9 +193,15 @@ export class IntegratedPlayerMotion {
     return this.#scheduleTransitions();
   }
 
-  /** Host fallback for page pressure without mutating the motion policy. */
+  /** Static policy mode for page pressure without mutating the motion policy. */
   public reclaimForResourcePressure(): Promise<boolean> {
-    const operation = this.#tail.then(() => this.#enterResourcePressure());
+    const operation = this.#tail.then(async () => {
+      await this.#failReduction(integratedReadinessError(
+        "page resource pressure cannot preserve animated playback",
+        "page-resource-pressure"
+      ));
+      return false;
+    });
     this.#tail = operation.then(
       () => undefined,
       () => undefined
@@ -210,16 +212,12 @@ export class IntegratedPlayerMotion {
   public stageContextSuspended(): void {
     const actual = this.#coordinator.snapshot().actualMode;
     if (actual === "unprepared") this.#coordinator.installStatic("context-loss");
-    else if (actual !== "disposed") this.#coordinator.failToStatic("context-loss");
+    else if (actual !== "disposed") this.#coordinator.suspendStatic("context-loss");
   }
 
   public failContextRecovery(): void {
     this.#transitionsEnabled = false;
     this.abort();
-    const actual = this.#coordinator.snapshot().actualMode;
-    if (actual !== "unprepared" && actual !== "disposed") {
-      this.#coordinator.failToStatic("animation-failure");
-    }
   }
 
   public async prepareReduced(
@@ -255,30 +253,18 @@ export class IntegratedPlayerMotion {
         throw integratedAbortReason(control.externalSignal);
       }
       if (control.timedOut) {
-        if (this.#staticPreparation.staticReady) {
-          return await this.#staticPreparation.finishBounded(
-            "preparation-timeout",
-            [],
-            timeoutMs
-          );
-        }
-        this.#staticPreparation.fail(
-          "static readiness did not complete before timeout"
+        const terminal = integratedReadinessError(
+          "reduced-motion readiness did not complete before timeout",
+          "motion-static-readiness-timeout"
         );
-        throw new PlaybackFallbackError(
-          "static readiness did not complete before preparation timeout"
-        );
+        throw this.#staticPreparation.fail(terminal);
       }
       if (isIntegratedAbortError(error)) throw error;
-      if (!this.#staticPreparation.staticReady) {
-        this.#staticPreparation.fail("static readiness failed");
-        throw new PlaybackFallbackError("static readiness failed");
-      }
-      return await this.#staticPreparation.finishBounded(
-        "readiness-failed",
-        [],
-        timeoutMs
+      const terminal = integratedReadinessError(
+        error,
+        "motion-static-readiness"
       );
+      throw this.#staticPreparation.fail(terminal);
     } finally {
       this.#staticPreparation.releaseControl(control);
       if (this.#control === control) this.#control = null;
@@ -347,7 +333,7 @@ export class IntegratedPlayerMotion {
         this.#resumeAfterCancelledReduction(wasRunning);
         return;
       }
-      this.#coverReducedSurface(state);
+      this.#assertReducedState(state);
       if (!this.#coordinator.commitStatic(transition)) {
         this.#resumeAfterCancelledReduction(wasRunning);
         return;
@@ -359,38 +345,8 @@ export class IntegratedPlayerMotion {
         this.#resumeAfterCancelledReduction(wasRunning);
         return;
       }
-      this.#reportTransitionFailure(error, transition.kind);
       this.#resumeRealtimeOnReentry = false;
-      try {
-        await this.#failReduction(error);
-      } finally {
-        this.#coordinator.failToStatic("fallback-failure");
-      }
-    }
-  }
-
-  async #enterResourcePressure(): Promise<boolean> {
-    if (this.#isDisposed()) return false;
-    const snapshot = this.#coordinator.snapshot();
-    if (snapshot.actualMode === "static") return true;
-    if (snapshot.actualMode !== "animated") return false;
-    this.abort();
-    this.#coordinator.cancelTransition();
-    const wasRunning = this.#pauseForPolicy();
-    let covered = false;
-    try {
-      const state = await this.#staticPreparation.stageLatest(
-        new AbortController().signal
-      );
-      if (this.#isDisposed()) return false;
-      this.#coverReducedSurface(state);
-      covered = true;
-      this.#coordinator.failToStatic("resource-budget");
-      await this.#commitResourcePressureState(state);
-      return true;
-    } catch (error) {
-      if (!covered) this.#resumeAfterCancelledReduction(wasRunning);
-      throw error;
+      await this.#failReduction(error);
     }
   }
 
@@ -416,22 +372,22 @@ export class IntegratedPlayerMotion {
         this.#resumeRealtimeOnReentry = false;
         return;
       }
-      const failure = new PlaybackFallbackError(
-        "animated re-entry exhausted every candidate"
+      if (result?.mode === "static" && result.reason === "decoder-queued") {
+        this.#coordinator.suspendStatic("decoder-queued");
+        this.#resumeRealtimeOnReentry = false;
+        this.#rejectReentry(null, result);
+        return;
+      }
+      const failure = integratedReadinessError(
+        "animated re-entry exhausted every candidate",
+        "animated-reentry-candidates"
       );
-      const reason = result?.mode === "static" && result.reason !== "reduced-motion"
-        ? result.reason
-        : "readiness-failed";
-      this.#coordinator.failToStatic(reason);
       this.#resumeRealtimeOnReentry = false;
-      this.#rejectReentry(failure, result);
-      this.#reportTransitionFailure(failure, transition.kind);
+      throw failure;
     } catch (error) {
       if (transition.signal.aborted || isIntegratedAbortError(error)) return;
-      this.#coordinator.failToStatic("readiness-failed");
       this.#resumeRealtimeOnReentry = false;
-      this.#rejectReentry(error, null);
-      this.#reportTransitionFailure(error, transition.kind);
+      throw this.#reportTransitionFailure(error, transition.kind);
     } finally {
       if (this.#activeReentry === transition) this.#activeReentry = null;
     }

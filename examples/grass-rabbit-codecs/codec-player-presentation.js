@@ -3,23 +3,29 @@ import { RENDERED_READINESS, isRecord } from "./codec-demo-model.js";
 export function bindPlayerPresentation({
   player,
   hotspot,
-  parts,
+  getStateBadge,
   isCurrent,
   onFailure,
   prefersReducedMotion
 }) {
-  const reveal = () => revealPlayerWhenRendered(player, hotspot, isCurrent);
-  player.addEventListener("readinesschange", reveal);
+  const reflectRendered = () => reflectPlayerRenderedState(
+    player,
+    hotspot,
+    isCurrent
+  );
+  player.addEventListener("readinesschange", reflectRendered);
   player.addEventListener("readinesschange", () => {
     if (!isCurrent()) return;
     if (player.readiness === "interactiveReady") {
-      requestAnimationFrame(() => trackInitialPresentation(player, parts, isCurrent));
-    } else if (player.readiness === "staticReady") {
-      setStateLabel(parts.stateBadge, player.visualState);
+      requestAnimationFrame(() => trackInitialPresentation(
+        player,
+        getStateBadge(),
+        isCurrent
+      ));
     }
   });
   player.addEventListener("visualstatechange", (event) => {
-    if (isCurrent()) setStateLabel(parts.stateBadge, event.detail.to);
+    if (isCurrent()) setStateLabel(getStateBadge(), event.detail.to);
   });
   player.addEventListener("error", (event) => {
     if (!isCurrent() || !isRecord(event.detail) || event.detail.fatal !== true) return;
@@ -29,7 +35,11 @@ export function bindPlayerPresentation({
     void onFailure(kind).catch(() => undefined);
   });
 
-  const dismiss = () => dismissHotspot(hotspot, parts.stateBadge, prefersReducedMotion);
+  const dismiss = () => dismissHotspot(
+    hotspot,
+    getStateBadge(),
+    prefersReducedMotion
+  );
   const armPointer = () => player.addEventListener("pointerenter", dismiss, { once: true });
   player.addEventListener("focusin", dismiss, { once: true });
   if (player.matches(":hover")) {
@@ -39,10 +49,15 @@ export function bindPlayerPresentation({
   }
 }
 
-export function revealPlayerWhenRendered(player, hotspot, isCurrent) {
-  if (!isCurrent() || !RENDERED_READINESS.has(player.readiness)) return;
+export function reflectPlayerRenderedState(player, hotspot, isCurrent) {
+  if (!isCurrent()) return;
+  if (!RENDERED_READINESS.has(player.readiness)) {
+    delete player.dataset.rendered;
+    hotspot.classList.remove("is-rendered");
+    return;
+  }
   requestAnimationFrame(() => {
-    if (!isCurrent()) return;
+    if (!isCurrent() || !RENDERED_READINESS.has(player.readiness)) return;
     player.dataset.rendered = "";
     hotspot.classList.add("is-rendered");
   });
@@ -60,16 +75,20 @@ export function failureCode(value) {
   return null;
 }
 
-function trackInitialPresentation(player, parts, isCurrent) {
-  if (!isCurrent()) return;
+function trackInitialPresentation(player, stateBadge, isCurrent) {
+  if (!isCurrent() || player.readiness !== "interactiveReady") return;
   const trace = player.getDiagnostics({ trace: true }).runtimeTrace ?? [];
   const presentation = trace.at(-1)?.graph?.presentation ?? null;
   if (presentation?.kind === "intro") {
-    setStateLabel(parts.stateBadge, "intro");
-    requestAnimationFrame(() => trackInitialPresentation(player, parts, isCurrent));
+    setStateLabel(stateBadge, "intro");
+    requestAnimationFrame(() => trackInitialPresentation(
+      player,
+      stateBadge,
+      isCurrent
+    ));
     return;
   }
-  setStateLabel(parts.stateBadge, presentation?.state ?? player.visualState);
+  setStateLabel(stateBadge, presentation?.state ?? player.visualState);
 }
 
 function setStateLabel(badge, state) {

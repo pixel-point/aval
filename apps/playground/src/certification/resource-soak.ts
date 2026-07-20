@@ -60,7 +60,7 @@ export async function runResourceSoak(options: Readonly<{
     // once, otherwise Promise.all waits for a lease that no live peer can
     // release until the same Promise.all settles.
     const elements = indexes.map((index) => createPublicMotionElement(
-      `${options.sourceUrl}${options.sourceUrl.includes("?") ? "&" : "?"}soak=${String(index)}`,
+      sourceGenerationUrl(options.sourceUrl, index),
       options.parent,
       undefined,
       options.sourceIntegrity
@@ -132,6 +132,12 @@ export async function runResourceSoak(options: Readonly<{
     terminalCounters: Object.freeze(terminalCounters),
     failures: Object.freeze(failures)
   });
+}
+
+function sourceGenerationUrl(sourceUrl: string, index: number): string {
+  const url = new URL(sourceUrl, location.href);
+  url.hash = `aval-certification-soak-${String(index)}`;
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function playerBatches(playerCount: number, capacity: number): readonly (readonly number[])[] {

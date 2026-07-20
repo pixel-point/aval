@@ -4,7 +4,12 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["packages/**/*.test.ts", "apps/**/*.test.ts", "tests/**/*.test.ts"],
+    include: [
+      "packages/**/*.test.ts",
+      "apps/**/*.test.ts",
+      "tests/**/*.test.ts",
+      "scripts/**/*.test.ts"
+    ],
     exclude: ["**/node_modules/**", "**/dist/**"],
     pool: "threads",
     maxWorkers: 1,

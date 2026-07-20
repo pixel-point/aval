@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { inspectTarballBytes } from "../../scripts/release/inspect-tarball.mjs";
+import { ELEMENT_RELEASE_WORKER } from "../../scripts/release/element-release-contract.mjs";
 import { validatePublishManifest } from "../../scripts/release/publish-manifest.mjs";
+import { COMPILER_WORKER_REGISTRY_ENTRY } from "../../scripts/release/worker-entry-contract.mjs";
 import {
   RELEASE_PACKAGE_NAMES,
   RELEASE_PACKAGE_SPECS,
@@ -24,8 +26,8 @@ describe("verified five-package release set", () => {
     expect(RELEASE_PACKAGE_NAMES).toEqual([
       "@pixel-point/aval-graph",
       "@pixel-point/aval-format",
-      "@pixel-point/aval-player-web",
       "@pixel-point/aval-element",
+      "@pixel-point/aval-player-web",
       "@pixel-point/aval-compiler"
     ]);
     expect(RELEASE_PACKAGE_SPECS.map(({ directory }) => directory)).toEqual(["graph", "format", "player-web", "element", "compiler"]);
@@ -116,6 +118,45 @@ describe("bounded tar inspection", () => {
       ...baseEntries(manifest),
       { path: "package/dist/private.ts", bytes: Buffer.from("export {};\n") }
     ]))).toThrow(/TypeScript source/u);
+  });
+
+  it("rejects an element archive that omits its URL-referenced worker", () => {
+    const manifest = packageManifest(
+      "@pixel-point/aval-element",
+      ["@pixel-point/aval-graph", "@pixel-point/aval-format"]
+    );
+    const withoutWorker = baseEntries(manifest).filter(({ path }) => path !== `package/dist/${ELEMENT_RELEASE_WORKER.output}`);
+    expect(() => inspectTarballBytes(tarGzip(withoutWorker))).toThrow(new RegExp(`missing dist/${ELEMENT_RELEASE_WORKER.output.replace(".", "\\.")}`, "u"));
+  });
+
+  it("requires the exact compiler worker registry and rejects every other JSON payload", () => {
+    const compiler = packageManifest("@pixel-point/aval-compiler", [
+      "@pixel-point/aval-graph",
+      "@pixel-point/aval-format",
+      "@pixel-point/aval-element",
+      "@pixel-point/aval-player-web"
+    ]);
+    const inspected = inspectTarballBytes(tarGzip(baseEntries(compiler)));
+    expect(inspected.files).toContain(`dist/${COMPILER_WORKER_REGISTRY_ENTRY.output}`);
+
+    const withoutRegistry = baseEntries(compiler).filter(({ path }) =>
+      path !== `package/dist/${COMPILER_WORKER_REGISTRY_ENTRY.output}`
+    );
+    expect(() => inspectTarballBytes(tarGzip(withoutRegistry))).toThrow(
+      new RegExp(`missing dist/${COMPILER_WORKER_REGISTRY_ENTRY.output.replaceAll(".", "\\.")}`, "u")
+    );
+
+    const tamperedRegistry = baseEntries(compiler).map((entry) =>
+      entry.path === `package/dist/${COMPILER_WORKER_REGISTRY_ENTRY.output}`
+        ? { ...entry, bytes: Buffer.from("[]\n") }
+        : entry
+    );
+    expect(() => inspectTarballBytes(tarGzip(tamperedRegistry))).toThrow(/non-canonical compiler worker registry/u);
+
+    expect(() => inspectTarballBytes(tarGzip([
+      ...baseEntries(compiler),
+      { path: "package/dist/unreviewed.json", bytes: Buffer.from("{}\n") }
+    ]))).toThrow(/unreviewed distribution file type/u);
   });
 
   it("rejects lifecycle hooks, publish redirection, and decompression bombs", () => {
@@ -217,11 +258,18 @@ function baseEntries(manifest: TestManifest): TarEntry[] {
     { path: "package/dist/index.js", bytes: Buffer.from("export {};\n") },
     { path: "package/dist/index.d.ts", bytes: Buffer.from("export {};\n") }
   ];
-  if (manifest.name === "@pixel-point/aval-compiler") entries.push({ path: "package/dist/cli.js", bytes: Buffer.from("#!/usr/bin/env node\n"), mode: 0o755 });
+  if (manifest.name === "@pixel-point/aval-compiler") entries.push(
+    { path: "package/dist/cli.js", bytes: Buffer.from("#!/usr/bin/env node\n"), mode: 0o755 },
+    {
+      path: `package/dist/${COMPILER_WORKER_REGISTRY_ENTRY.output}`,
+      bytes: Buffer.from(COMPILER_WORKER_REGISTRY_ENTRY.contents)
+    }
+  );
   if (manifest.name === "@pixel-point/aval-player-web") entries.push({ path: "package/dist/decoder-worker/entry.js", bytes: Buffer.from("export {};\n") });
   if (manifest.name === "@pixel-point/aval-element") entries.push(
     { path: "package/dist/auto.js", bytes: Buffer.from("export {};\n") },
-    { path: "package/dist/auto.d.ts", bytes: Buffer.from("export {};\n") }
+    { path: "package/dist/auto.d.ts", bytes: Buffer.from("export {};\n") },
+    { path: `package/dist/${ELEMENT_RELEASE_WORKER.output}`, bytes: Buffer.from("export {};\n") }
   );
   return entries;
 }

@@ -1,7 +1,7 @@
 import type {
-  CompiledManifest,
+  CompiledManifestV1_0,
   EncodedChunkRecord,
-  ProductionRendition,
+  ProductionRenditionV1_0,
   Unit
 } from "@pixel-point/aval-format";
 import { describe, expect, it, vi } from "vitest";
@@ -12,9 +12,9 @@ import { certifyVideoRenditions } from "./video-rendition-certification.js";
 
 const ACCESS_UNITS = Object.freeze([
   fromHex(
-    "0000000109100000000167640020ace5109a6a02020280000003008000001e46d04422cb0000000168eeb2c8b00000000165b840fc"
+    "000000010910000000016742e020f42134d40404050000030001000003003c8da08846a00000000168ce32c80000000165b840fc"
   ),
-  fromHex("0000000109300000000141e243f8")
+  fromHex("0000000109300000000141e243f0")
 ]);
 
 describe("selected catalog video rendition inspection", () => {
@@ -30,7 +30,7 @@ describe("selected catalog video rendition inspection", () => {
       bitstream: "annex-b",
       bitDepth: 8,
       decoderConfig: {
-        codec: "avc1.640020",
+        codec: "avc1.42E020",
         codedWidth: 64,
         codedHeight: 64
       },
@@ -56,23 +56,31 @@ describe("selected catalog video rendition inspection", () => {
         ...fixture.manifest.renditions[0]!,
         bitrate: { average: 90_000, peak: 140_000 }
       }]
-    } satisfies CompiledManifest;
+    } satisfies CompiledManifestV1_0;
     const foreign = certifyVideoRenditions(foreignManifest)[0]!;
 
     expect(() => inspectSelectedVideoRendition(fixture.catalog, foreign))
       .toThrow(/does not belong to this asset catalog/iu);
     expect(fixture.copyChunk).not.toHaveBeenCalled();
   });
+
+  it("rejects an H264 manifest profile that disagrees with the inspected SPS", () => {
+    const fixture = createCatalogFixture("avc1.640020");
+    const selected = fixture.catalog.videoRenditions[0]!;
+
+    expect(() => inspectSelectedVideoRendition(fixture.catalog, selected))
+      .toThrow(/inspected codec string disagrees/iu);
+  });
 });
 
-function createCatalogFixture(): Readonly<{
-  manifest: Readonly<CompiledManifest>;
+function createCatalogFixture(codec = "avc1.42E020"): Readonly<{
+  manifest: Readonly<CompiledManifestV1_0>;
   catalog: RuntimeAssetCatalog;
   copyChunk: ReturnType<typeof vi.fn>;
 }> {
-  const rendition: ProductionRendition = Object.freeze({
+  const rendition: ProductionRenditionV1_0 = Object.freeze({
     id: "main",
-    codec: "avc1.640020",
+    codec,
     bitDepth: 8,
     codedWidth: 64,
     codedHeight: 64,
@@ -96,7 +104,7 @@ function createCatalogFixture(): Readonly<{
       sha256: "0".repeat(64)
     })])
   });
-  const manifest: Readonly<CompiledManifest> = Object.freeze({
+  const manifest: Readonly<CompiledManifestV1_0> = Object.freeze({
     formatVersion: "1.0",
     generator: "inspection-test",
     codec: "h264",
@@ -183,7 +191,9 @@ function createCatalogFixture(): Readonly<{
 }
 
 function fromHex(value: string): Uint8Array {
-  return Uint8Array.from(value.match(/.{2}/gu)!.map((byte) => Number.parseInt(byte, 16)));
+  return Uint8Array.from(
+    value.match(/.{2}/gu)!.map((byte) => Number.parseInt(byte, 16))
+  );
 }
 
 function isDeeplyFrozen(value: unknown, seen = new Set<object>()): boolean {

@@ -8,20 +8,45 @@ npm install @pixel-point/aval-element@1.0.0
 
 ```js
 import { defineAvalElement } from "@pixel-point/aval-element";
+
+const motion = document.querySelector("#orbit");
+const unavailable = document.querySelector("#orbit-unavailable");
+motion.addEventListener("readinesschange", () => {
+  if (motion.readiness === "interactiveReady") unavailable.hidden = true;
+});
+motion.addEventListener("error", (event) => {
+  const diagnostics = motion.getDiagnostics();
+  if (
+    event.detail.fatal === true &&
+    motion.readiness === "error" &&
+    event.detail.failure === diagnostics.lastFailure
+  ) {
+    unavailable.hidden = false;
+  }
+});
+
 defineAvalElement();
 ```
 
 ```html
-<aval-player src="/assets/orbit.avl" width="96" height="96">
-  <img slot="fallback" src="/assets/orbit.png" alt="" width="96" height="96">
+<aval-player id="orbit" width="96" height="96">
+  <source
+    src="/assets/orbit.h264.avl"
+    type='application/vnd.aval; codecs="avc1.42E01E"'
+  >
 </aval-player>
+<img id="orbit-unavailable" src="/assets/orbit.png" alt="" width="96" height="96" hidden>
 ```
 
 Connection automatically prepares metadata. When animation is supported and
 visible, the first revealed internal pixels are a decoded frame and a direct
 one-state compile plays its authored intro and body loop without application
-code. Unsupported or reduced-motion paths leave the author-owned fallback
-visible. Network, parser, integrity, or decode failure does the same.
+code. Network, parser, integrity, capability, or decode failure rejects
+`prepare()` with `AvalPlaybackError`; the application can then reveal its
+sibling image or choose another response. Reduced motion is a separate
+nonfatal policy condition and does not automatically reveal application DOM.
+Install the listener before `defineAvalElement()` so an upgrade-time terminal
+failure cannot outrun the consumer boundary.
 
 For a browser-only pinned CDN import, use the explicit side-effect entry:
 

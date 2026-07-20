@@ -6,12 +6,13 @@ import { createIntegratedTestAsset } from "./asset-test-support.js";
 import type { VideoCandidateResourceAuthority } from "./video-candidate-model.js";
 import {
   IntegratedPlayer,
+  integratedStateStoreOption,
   type IntegratedCandidateAttempt,
   type IntegratedCandidateAttemptContext,
   type IntegratedCandidateFactory,
   type IntegratedPlaybackSession,
   type IntegratedPreparedActivation,
-  type IntegratedFallbackStore
+  type IntegratedStateStore
 } from "./integrated-player.js";
 import { ManualTimers } from "./integrated-player-preparation-test-support.js";
 import { selectIntegratedTestVideoRendition } from "./integrated-player-video-test-support.js";
@@ -265,7 +266,7 @@ describe("IntegratedPlayer page participant composition", () => {
       assetSessionOwnership: "external",
       selectedRendition: selectIntegratedTestVideoRendition(session.catalog),
       participantBinding: resources.participant,
-      createFallbackStore: () => store,
+      ...integratedStateStoreOption(() => store),
       candidateFactory: factory,
       timers: new ManualTimers()
     });
@@ -323,7 +324,9 @@ async function createThreePlayerPage(): Promise<ThreePlayerPage> {
     assetSessionOwnership: "player",
     selectedRendition: selectIntegratedTestVideoRendition(session.catalog),
     participantBinding: resources[index]!.participant,
-    createFallbackStore: (catalog) => new VerifiedCatalogStaticStore(catalog),
+    ...integratedStateStoreOption((catalog) =>
+      new VerifiedCatalogStaticStore(catalog)
+    ),
     candidateFactory: factories[index]!,
     timers: new ManualTimers()
   }));
@@ -344,7 +347,7 @@ async function createThreePlayerPage(): Promise<ThreePlayerPage> {
   };
 }
 
-class VerifiedCatalogStaticStore implements IntegratedFallbackStore {
+class VerifiedCatalogStaticStore implements IntegratedStateStore {
   public stateUpdates = 0;
   readonly #catalog: RuntimeAssetCatalog;
   #state: string | null = null;
@@ -371,8 +374,6 @@ class VerifiedCatalogStaticStore implements IntegratedFallbackStore {
     this.#state = state;
   }
   public currentState(): string | null { return this.#state; }
-  public coverCurrent(): void {}
-  public revealAnimated(): void {}
   public async settled(): Promise<void> {}
   public dispose(): void {}
 }

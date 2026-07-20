@@ -1,6 +1,7 @@
 import type {
   CompiledManifest,
-  ProductionRendition,
+  CompiledManifestV1_0,
+  ProductionRenditionV1_0,
   VideoCodec,
   VideoLayout
 } from "@pixel-point/aval-format";
@@ -167,8 +168,8 @@ function createManifest(options: Readonly<{
   layout?: VideoLayout;
   width?: number;
   height?: number;
-  renditions?: readonly ProductionRendition[];
-}>): CompiledManifest {
+  renditions?: readonly ProductionRenditionV1_0[];
+}>): CompiledManifestV1_0 {
   const spec = CODECS[options.family];
   const width = options.width ?? 64;
   const height = options.height ?? 32;
@@ -202,7 +203,7 @@ function createRendition(
   family: VideoCodec,
   width: number,
   height: number
-): ProductionRendition {
+): ProductionRenditionV1_0 {
   const spec = CODECS[family];
   return {
     id,

@@ -16,7 +16,7 @@ import type {
 } from "../src/model.js";
 
 const WIDTH = 64;
-const HEIGHT = 32;
+const HEIGHT = 28;
 const FRAMES = 6;
 const CODEC_CASES = Object.freeze([
   {
@@ -61,7 +61,10 @@ describe("codec-typed rendition pipeline", () => {
         view.setUint16(offset, (24 + frame * 24) * 257, true);
         view.setUint16(offset + 2, 64 * 257, true);
         view.setUint16(offset + 4, (192 - frame * 16) * 257, true);
-        view.setUint16(offset + 6, 65_535, true);
+        const alpha = frame === 0
+          ? pixel % WIDTH < WIDTH / 2 ? 16 : 224
+          : 128;
+        view.setUint16(offset + 6, alpha * 257, true);
       }
     }
     await writeFile(rgbaPath, bytes);
@@ -80,7 +83,7 @@ describe("codec-typed rendition pipeline", () => {
       const compiled = await compileVideoEncodingRenditions({
         project,
         encoding,
-        layout: "opaque",
+        layout: "packed-alpha",
         sources: new Map([[source.id, source]]),
         executable: "ffmpeg",
         timeoutMs: 30_000
@@ -88,14 +91,92 @@ describe("codec-typed rendition pipeline", () => {
 
       expect(compiled.invocations.map(({ operation }) => operation)).toEqual([
         `${codec}:video.main:idle.body:scale-rgba`,
-        `${codec}:video.main:idle.body:encode`
+        `${codec}:video.main:idle.body:encode`,
+        `${codec}:video.main:idle.body:verify-packed-alpha`
       ]);
+      const verificationInvocation = compiled.invocations[2];
+      expect(verificationInvocation).toMatchObject({
+        tool: "ffmpeg",
+        arguments: expect.arrayContaining([
+          "-vf", "select=eq(n\\,0),format=rgba",
+          "-f", "rawvideo",
+          "-pix_fmt", "rgba"
+        ])
+      });
+      expect(JSON.stringify(verificationInvocation?.arguments)).not.toContain(directory);
       expect(compiled.renditions[0]).toMatchObject({
         id: "video.main",
-        bitDepth: 8,
-        geometry: { codedWidth: WIDTH, codedHeight: HEIGHT }
+        bitDepth: codec === "av1" ? 10 : 8,
+        geometry: {
+          layout: "packed-alpha",
+          codedWidth: WIDTH,
+          visibleAlphaRect: [0, 36, WIDTH, HEIGHT]
+        },
+        outputQualification: {
+          kind: "packed-alpha-v1",
+          unit: "idle.body",
+          frame: 0
+        }
       });
+      const range = compiled.renditions[0]?.outputQualification?.samples[0]?.expectedRange;
+      expect(compiled.renditions[0]?.outputQualification?.samples[0])
+        .toMatchObject({ x: 0, y: 0 });
+      expect(range?.[0]).toBe(0);
+      expect(range?.[1]).toBeGreaterThanOrEqual(16);
+      expect(range?.[1]).toBeLessThan(100);
+      expect((range?.[1] ?? 0) - (range?.[0] ?? 0)).toBeLessThanOrEqual(96);
+      const samples = compiled.renditions[0]?.outputQualification?.samples ?? [];
+      expect(samples.length).toBeGreaterThanOrEqual(2);
+      expect(samples.some((left) => samples.some((right) =>
+        left.expectedRange[1] < right.expectedRange[0]
+      ))).toBe(true);
       expect(compiled.renditions[0]?.codec).toMatch(pattern);
+      if (codec === "h264") {
+        // This assertion is backed by a real libx264 encode when the encoder is
+        // installed, and proves preparation rewrote its C0 SPS to strict E0.
+        expect(compiled.renditions[0]?.codec).toBe("avc1.42E00B");
+      }
+      const artifact = compileProjectEncoding({
+        project,
+        encoding,
+        layout: "packed-alpha",
+        renditions: compiled.renditions
+      });
+      const front = parseFrontIndex(artifact.assetBytes);
+      expect(front.manifest).toMatchObject({
+        formatVersion: "1.1",
+        codec,
+        bitstream,
+        layout: "packed-alpha"
+      });
+      expect(front.records.reduce(
+        (total, chunk) => total + chunk.displayedFrameCount,
+        0
+      )).toBe(FRAMES);
+    },
+    40_000
+  );
+
+  it.skipIf(!hasEncoder("libx264"))(
+    "keeps opaque rendition compilation on wire 1.1 without a witness pass",
+    async () => {
+      const project = projectFixture(encodingFixture("h264"), "opaque");
+      const source = preparedSource();
+      const encoding = project.encodings[0]!;
+      const compiled = await compileVideoEncodingRenditions({
+        project,
+        encoding,
+        layout: "opaque",
+        sources: new Map([[source.id, source]]),
+        executable: "ffmpeg",
+        timeoutMs: 30_000
+      });
+
+      expect(compiled.invocations.map(({ operation }) => operation)).toEqual([
+        "h264:video.main:idle.body:scale-rgba",
+        "h264:video.main:idle.body:encode"
+      ]);
+      expect(compiled.renditions[0]?.outputQualification).toBeUndefined();
       const artifact = compileProjectEncoding({
         project,
         encoding,
@@ -104,14 +185,10 @@ describe("codec-typed rendition pipeline", () => {
       });
       const front = parseFrontIndex(artifact.assetBytes);
       expect(front.manifest).toMatchObject({
-        codec,
-        bitstream,
+        formatVersion: "1.1",
         layout: "opaque"
       });
-      expect(front.records.reduce(
-        (total, chunk) => total + chunk.displayedFrameCount,
-        0
-      )).toBe(FRAMES);
+      expect(front.manifest.renditions[0]?.outputQualification).toBeUndefined();
     },
     40_000
   );
@@ -135,11 +212,12 @@ describe("codec-typed rendition pipeline", () => {
 });
 
 function projectFixture(
-  encoding: Readonly<NormalizedVideoEncoding>
+  encoding: Readonly<NormalizedVideoEncoding>,
+  alpha: "opaque" | "packed" = "packed"
 ): NormalizedSourceProject {
   return {
     projectVersion: "1.0",
-    alpha: "opaque",
+    alpha,
     canvas: {
       width: WIDTH,
       height: HEIGHT,
@@ -190,7 +268,7 @@ function encodingFixture(codec: VideoCodec): NormalizedVideoEncoding {
     case "av1":
       return Object.freeze({
         codec,
-        bitDepth: 8,
+        bitDepth: 10,
         cpuUsed: 8,
         tiles: Object.freeze({ columns: 1, rows: 1 }),
         rowMt: true,

@@ -231,7 +231,7 @@ function createCalibrationPayload() {
     layout: "packed-alpha",
     visibleWidth: 15,
     visibleHeight: 17,
-    storage: { widthAlignment: 2, heightAlignment: 2 }
+    storage: { widthAlignment: 16, heightAlignment: 16 }
   });
   const packed = Array.from({ length: 2 }, (_, frame) => {
     const rgba = new Uint16Array(15 * 17 * 4);

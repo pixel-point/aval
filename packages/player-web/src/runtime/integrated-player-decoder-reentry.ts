@@ -60,8 +60,6 @@ export class IntegratedPlayerDecoderReentry {
 
   public syncEligibility(): void {
     const motion = this.#motion().snapshot();
-    this.#participant.setEligible(
-      motion.desiredMode === "full" && !motion.stickyFailure
-    );
+    this.#participant.setEligible(motion.desiredMode === "full");
   }
 }

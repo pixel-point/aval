@@ -4,13 +4,6 @@
 
 ```ts
 
-import type { Binding } from '@pixel-point/aval-player-web';
-import type { MotionPolicy } from '@pixel-point/aval-player-web';
-import type { RuntimeFailureCode } from '@pixel-point/aval-player-web';
-import type { RuntimeReadiness } from '@pixel-point/aval-player-web';
-import type { RuntimeReadinessResult } from '@pixel-point/aval-player-web';
-import type { StaticReason } from '@pixel-point/aval-player-web';
-
 // @public (undocumented)
 export const AVAL_ELEMENT_API_MAJOR: 1;
 
@@ -23,8 +16,122 @@ export type AvalAutoplay = "visible" | "manual";
 // @public (undocumented)
 export type AvalBindings = "auto" | "none";
 
+// @public
+export interface AvalCleanupReceipt {
+    // (undocumented)
+    readonly activeTransportBodies: number;
+    // (undocumented)
+    readonly completed: boolean;
+    // (undocumented)
+    readonly contextListenerCount: number;
+    // (undocumented)
+    readonly elementGeneration: number;
+    // (undocumented)
+    readonly failureCount: number;
+    // (undocumented)
+    readonly interestedWaiters: number;
+    // (undocumented)
+    readonly openFrames: number;
+    // (undocumented)
+    readonly pageActiveDecoderSlotCount: number;
+    // (undocumented)
+    readonly pageParkedDecoderTicketCount: number;
+    // (undocumented)
+    readonly pageParticipantCount: number;
+    // (undocumented)
+    readonly pagePhysicalBytes: number;
+    // (undocumented)
+    readonly pageQueuedDecoderTicketCount: number;
+    // (undocumented)
+    readonly participantActiveLeaseCount: number;
+    // (undocumented)
+    readonly participantDecoderState: string | null;
+    // (undocumented)
+    readonly participantDecoderTicketCount: number;
+    // (undocumented)
+    readonly participantDisposed: boolean;
+    // (undocumented)
+    readonly participantLogicalBytes: number;
+    // (undocumented)
+    readonly participantPendingWaitCount: number;
+    // (undocumented)
+    readonly participantRegistered: boolean;
+    // (undocumented)
+    readonly participantRegisteredCleanupCount: number;
+    // (undocumented)
+    readonly participantTrackedWorkCount: number;
+    // (undocumented)
+    readonly pendingLoads: number;
+    // (undocumented)
+    readonly pendingRuntimeOperations: number;
+    // (undocumented)
+    readonly playerDisposed: boolean;
+    // (undocumented)
+    readonly rendererResourceCount: number;
+    // (undocumented)
+    readonly rendererStagingBytes: number;
+    // (undocumented)
+    readonly sourceCopiesInFlight: number;
+    // (undocumented)
+    readonly sourceGeneration: number;
+    // (undocumented)
+    readonly stalePublicationCount: number;
+    // (undocumented)
+    readonly workerCount: number;
+}
+
 // @public (undocumented)
 export type AvalCrossOrigin = "anonymous" | "use-credentials";
+
+// @public
+export interface AvalDecoderDiagnostic {
+    // (undocumented)
+    readonly code: "unsupported-config" | "decoder-operation" | "invalid-output" | "transport" | "watchdog-timeout";
+    // (undocumented)
+    readonly codec: string;
+    // (undocumented)
+    readonly decodeOrdinal: number | null;
+    // (undocumented)
+    readonly exception: Readonly<{
+        readonly name: string;
+        readonly message: string;
+    }> | null;
+    // Warning: (ae-forgotten-export) The symbol "AvalDecoderFrameDiagnostic" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly firstFrame: Readonly<AvalDecoderFrameDiagnostic> | null;
+    // (undocumented)
+    readonly graph: Readonly<{
+        readonly requestedState: string | null;
+        readonly visualState: string | null;
+        readonly activeUnit: string | null;
+        readonly pendingUnit: string | null;
+    }>;
+    // (undocumented)
+    readonly lane: 0 | 1;
+    // (undocumented)
+    readonly lastGoodFrame: Readonly<AvalDecoderFrameDiagnostic> | null;
+    // (undocumented)
+    readonly logicalRunId: number | null;
+    // Warning: (ae-forgotten-export) The symbol "AvalDecoderOutputFailureDiagnostic" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly outputFailure: Readonly<AvalDecoderOutputFailureDiagnostic> | null;
+    // (undocumented)
+    readonly phase: "probe" | "configure" | "decode" | "flush" | "output-validation" | "frame-transfer";
+    // (undocumented)
+    readonly rendition: string;
+    // (undocumented)
+    readonly role: "foreground" | "candidate" | null;
+    // (undocumented)
+    readonly run: number | null;
+    // (undocumented)
+    readonly sourceGeneration: number;
+    // (undocumented)
+    readonly sourceIndex: number;
+    // (undocumented)
+    readonly unit: string | null;
+}
 
 // @public (undocumented)
 export interface AvalDiagnostics {
@@ -32,8 +139,6 @@ export interface AvalDiagnostics {
     readonly assurance: "best-effort" | null;
     // (undocumented)
     readonly autoplay: AvalAutoplay;
-    // Warning: (ae-forgotten-export) The symbol "AvalCleanupReceipt" needs to be exported by the entry point index.d.ts
-    //
     // (undocumented)
     readonly cleanup: Readonly<AvalCleanupReceipt> | null;
     // (undocumented)
@@ -115,6 +220,7 @@ export interface AvalDiagnostics {
     readonly runtime: Readonly<{
         selectedRendition: string | null;
         selectedCodec: string | null;
+        rendererBackend: "webgl2" | "canvas2d" | null;
         selectedBitDepth: 8 | 10 | null;
         transportMode: "range" | "full" | null;
         declaredFileBytes: number;
@@ -124,13 +230,22 @@ export interface AvalDiagnostics {
         activeTransportBodies: number;
         pendingLoads: number;
         interestedWaiters: number;
+        stalePublicationCount: number;
         playerTrackedBytes: number;
         pagePhysicalBytes: number;
         activeLeaseCount: number;
         decoderLeaseState: string | null;
+        pageActiveDecoderSlotCount: number;
+        pageQueuedDecoderTicketCount: number;
+        pageParkedDecoderTicketCount: number;
+        pageParticipantCount: number;
         reclamationCount: number;
         contextLossCount: number;
         contextRecoveryCount: number;
+        cleanupFailureCount: number;
+        playbackLifecycle: Readonly<AvalPlaybackLifecycleCounters>;
+        decoderDiagnostics: readonly Readonly<AvalDecoderDiagnostic>[];
+        rendererDiagnostics: readonly Readonly<AvalRendererDiagnostic>[];
     }>;
     // (undocumented)
     readonly runtimeTrace?: readonly Readonly<AvalRuntimeTraceRecord>[];
@@ -271,8 +386,6 @@ export interface AvalElementEventMap {
     // (undocumented)
     readonly error: CustomEvent<Readonly<AvalErrorDetail>>;
     // (undocumented)
-    readonly fallback: CustomEvent<Readonly<AvalFallbackDetail>>;
-    // (undocumented)
     readonly readinesschange: CustomEvent<Readonly<AvalReadinessChangeDetail>>;
     // (undocumented)
     readonly requestedstatechange: CustomEvent<Readonly<AvalRequestedStateChangeDetail>>;
@@ -302,29 +415,50 @@ export interface AvalErrorDetail {
 }
 
 // @public (undocumented)
-export interface AvalFallbackDetail {
-    // (undocumented)
-    readonly generation: number;
-    // (undocumented)
-    readonly reason: StaticReason;
-    // (undocumented)
-    readonly requestedState: string | null;
-    // (undocumented)
-    readonly visualState: string | null;
-}
-
-// @public (undocumented)
 export type AvalFit = "contain" | "cover" | "fill" | "none";
 
 // @public (undocumented)
 export type AvalMode = "animated" | "static" | null;
 
 // @public (undocumented)
-export type AvalMotion = MotionPolicy;
+export type AvalMotion = "auto" | "reduce" | "full";
 
 // @public (undocumented)
 export class AvalNotReadyError extends Error {
     constructor(message?: string);
+}
+
+// @public (undocumented)
+export class AvalPlaybackError extends Error {
+    constructor(failure: Readonly<AvalPublicFailure>, generation: number);
+    // (undocumented)
+    readonly failure: Readonly<AvalPublicFailure>;
+    // (undocumented)
+    readonly generation: number;
+}
+
+// @public
+export interface AvalPlaybackLifecycleCounters {
+    // (undocumented)
+    readonly candidateCommits: number;
+    // (undocumented)
+    readonly drawsCompleted: number;
+    // (undocumented)
+    readonly logicalRunsCreated: number;
+    // (undocumented)
+    readonly loopCrossings: number;
+    // (undocumented)
+    readonly nativeDecoderClosesByLane: readonly [lane0: number, lane1: number];
+    // (undocumented)
+    readonly nativeDecoderCreatesByLane: readonly [lane0: number, lane1: number];
+    // (undocumented)
+    readonly outputsAccepted: number;
+    // (undocumented)
+    readonly runsClosed: number;
+    // (undocumented)
+    readonly transitionEnds: number;
+    // (undocumented)
+    readonly transitionStarts: number;
 }
 
 // @public (undocumented)
@@ -337,6 +471,7 @@ export interface AvalPrepareOptions {
 
 // @public (undocumented)
 export interface AvalPublicFailure {
+    // Warning: (ae-forgotten-export) The symbol "RuntimeFailureCode" needs to be exported by the entry point index.d.ts
     // Warning: (ae-forgotten-export) The symbol "AvalElementFailureCode" needs to be exported by the entry point index.d.ts
     //
     // (undocumented)
@@ -357,6 +492,63 @@ export interface AvalReadinessChangeDetail {
     readonly reason?: StaticReason;
     // (undocumented)
     readonly to: RuntimeReadiness;
+}
+
+// @public
+export interface AvalRendererDiagnostic {
+    // (undocumented)
+    readonly backend: "webgl2" | "canvas2d";
+    // Warning: (ae-forgotten-export) The symbol "AvalRendererDiagnosticBacking" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly backing: Readonly<AvalRendererDiagnosticBacking>;
+    // Warning: (ae-forgotten-export) The symbol "AvalRendererDiagnosticBytes" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly bytes: Readonly<AvalRendererDiagnosticBytes>;
+    // (undocumented)
+    readonly codec: string;
+    // Warning: (ae-forgotten-export) The symbol "AvalRendererDiagnosticContextAttributes" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly contextAttributes: Readonly<AvalRendererDiagnosticContextAttributes> | null;
+    // (undocumented)
+    readonly contextLost: boolean;
+    // (undocumented)
+    readonly exception: Readonly<{
+        readonly name: string;
+        readonly message: string;
+    }> | null;
+    // (undocumented)
+    readonly glError: number | null;
+    // Warning: (ae-forgotten-export) The symbol "AvalRendererDiagnosticLayout" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly layout: Readonly<AvalRendererDiagnosticLayout>;
+    // Warning: (ae-forgotten-export) The symbol "AvalRendererDiagnosticLimits" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly limits: Readonly<AvalRendererDiagnosticLimits>;
+    // (undocumented)
+    readonly operation: "construct" | "runtime" | "restore";
+    // (undocumented)
+    readonly operationOrdinal: number;
+    // (undocumented)
+    readonly phase: "backing-admission" | "context-create" | "capability-query" | "device-limits" | "program-create" | "stream-texture-create" | "resident-texture-create" | "native-upload" | "semantic-upload" | "rgba-copy" | "rgba-upload" | "draw" | "resize" | "context-event";
+    // (undocumented)
+    readonly renderer: string | null;
+    // (undocumented)
+    readonly rendition: string;
+    // (undocumented)
+    readonly sourceGeneration: number;
+    // (undocumented)
+    readonly sourceIndex: number;
+    // (undocumented)
+    readonly textureOrdinal: number | null;
+    // (undocumented)
+    readonly uploadPath: "native" | "rgba-copy" | null;
+    // (undocumented)
+    readonly vendor: string | null;
 }
 
 // @public (undocumented)
@@ -392,7 +584,6 @@ export interface AvalRuntimeTraceRecord {
     // (undocumented)
     readonly counters: Readonly<{
         readonly underflows: number;
-        readonly fallbacks: number;
         readonly settledRequests: number;
         readonly cleanedFrames: number;
     }>;
@@ -410,7 +601,7 @@ export interface AvalRuntimeTraceRecord {
     // (undocumented)
     readonly index: number;
     // (undocumented)
-    readonly kind: "operation" | "content-tick" | "readiness" | "fallback" | "cleanup";
+    readonly kind: "operation" | "content-tick" | "readiness" | "cleanup";
     // (undocumented)
     readonly media: Readonly<Record<string, unknown>> | null;
     // (undocumented)
@@ -491,16 +682,47 @@ export interface AvalVisualStateChangeDetail {
     readonly to: string;
 }
 
-export { Binding }
+// @public (undocumented)
+export interface Binding {
+    // (undocumented)
+    readonly event: string;
+    // Warning: (ae-forgotten-export) The symbol "BindingSource" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly source: BindingSource;
+}
 
 // @public (undocumented)
 export function defineAvalElement(): AvalElementConstructor;
 
-export { RuntimeReadiness }
+// @public
+export const ELEMENT_DECODER_CAPACITY: Readonly<{
+    workerCount: 2;
+    ringSize: 12;
+    candidateReadyFrames: 6;
+    totalDecodedSurfaces: number;
+}>;
 
-export { RuntimeReadinessResult }
+// @public (undocumented)
+export type RuntimeReadiness = "unready" | "metadataReady" | "visualReady" | "interactiveReady" | "staticReady" | "disposed" | "error";
 
-export { StaticReason }
+// @public (undocumented)
+export type RuntimeReadinessResult = {
+    readonly mode: "animated";
+    readonly assurance: "best-effort";
+    readonly report: Readonly<RuntimeReadinessReport>;
+} | {
+    readonly mode: "static";
+    readonly reason: StaticReason;
+    readonly report: Readonly<RuntimeReadinessReport>;
+};
+
+// @public (undocumented)
+export type StaticReason = "reduced-motion" | "visibility-suspended" | "decoder-queued";
+
+// Warnings were encountered during analysis:
+//
+// dist/public-types.d.ts:66:5 - (ae-forgotten-export) The symbol "RuntimeReadinessReport" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

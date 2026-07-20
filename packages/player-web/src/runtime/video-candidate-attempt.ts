@@ -1,4 +1,7 @@
-import type { GraphPresentation } from "@pixel-point/aval-graph";
+import {
+  sameGraphPresentation,
+  type GraphPresentation
+} from "@pixel-point/aval-graph";
 
 import {
   IntegratedPlaybackInvariantError,
@@ -9,8 +12,7 @@ import {
 } from "./integrated-player-contracts.js";
 import {
   createIntegratedActivationPresentation,
-  createIntegratedResumePresentation,
-  sameGraphPresentation
+  createIntegratedResumePresentation
 } from "./integrated-player-support.js";
 import { prepareInteractionCache } from "./interaction-cache-preparation.js";
 import type {

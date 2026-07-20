@@ -70,16 +70,26 @@ limited-range BT.709 color configuration. Each result is one of:
 - `unsupported`: the panel shows `This codec is not supported in your browser.`;
 - `unavailable`: the panel shows `Codec support could not be checked in your browser.`.
 
-The first supported codec in authored order (AV1, VP9, H.265, H.264) is loaded
-initially. If no result is supported, AV1 remains selected with its status
-message. Unsupported and unavailable selections never create `aval-player`.
+The default player always receives all four sources in authored order (AV1,
+VP9, H.265, H.264), independent of those preflight results. AVAL's typed startup
+qualification therefore owns the authoritative fallback decision and can
+advance through the complete ladder before publishing a winner. The selected
+tab then tracks the codec that actually reached `interactiveReady`. If none can
+qualify, the full-ladder player emits its typed terminal error; the example does
+not replace it with fallback content or rewrite one codec's probe badge.
 
-The probe is a preflight rather than proof that decoding will start. After a
-positive probe, the page also inspects the result of `aval-player.prepare()`.
-An exact `codec-unsupported` fallback reclassifies that codec as unsupported,
-disposes the player, and shows the same unsupported message. Other preparation
-or decoder failures remain distinct and show `This codec could not be played
-in your browser.`; network, integrity, or malformed-source failures are never
+An explicitly selected tab creates a standalone one-source player for
+comparison and remains probe-gated. Selecting an `unsupported` or `unavailable`
+tab does not create that comparison player.
+
+The probe is a tab-status preflight rather than proof that decoding will start.
+For an explicit one-source comparison, a rejected `AvalPlaybackError` with
+`unsupported-profile`, or the matching fatal `error` event, reclassifies that
+codec as unsupported. Automatic full-ladder exhaustion does not reclassify only
+its initially visible AV1 tab. Other fatal playback failures remain distinct
+and show `This codec could not be played in your browser.`; nonfatal static
+policy readiness and retained candidate diagnostics do not activate the page's
+error UI. Network, integrity, and malformed-source failures are never
 mislabelled as codec support failures.
 
 To inspect that example-owned unsupported state even on a machine that exposes
@@ -88,10 +98,11 @@ local example URL. The default URL always uses the browser probe without an
 override.
 
 Tabs use the ARIA tab/tabpanel pattern. Arrow keys, Home, and End move focus;
-Enter, Space, or a pointer click activates the focused tab. On activation the
-page awaits disposal of the prior player before removing it, then mounts one
-new player containing exactly one `<source>`. Its URL, `type`, and `integrity`
-all come from `build.json`. Repeated rapid activations are latest-wins.
+Enter, Space, or a pointer click activates the focused tab. On explicit
+activation the page awaits disposal of the prior player before removing it,
+then mounts one new player containing exactly one `<source>`. Its URL, `type`,
+and `integrity` all come from `build.json`. Repeated rapid activations are
+latest-wins.
 
 For browser tests and local inspection, the page exposes:
 

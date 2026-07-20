@@ -156,7 +156,16 @@ function parseManifest(
   } catch (error) {
     rethrowAtFileOffset(error, header.manifestOffset);
   }
-  return validateCompiledManifest(parsed, options);
+  const manifest = validateCompiledManifest(parsed, options);
+  const headerVersion = `${String(header.major)}.${String(header.minor)}`;
+  if (manifest.formatVersion !== headerVersion) {
+    throw new FormatError(
+      "MANIFEST_INVALID",
+      `formatVersion must match header version ${headerVersion}`,
+      { path: "formatVersion" }
+    );
+  }
+  return manifest;
 }
 
 /**

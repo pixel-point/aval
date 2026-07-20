@@ -14,651 +14,176 @@ import {
 } from "./errors.js";
 import {
   IntegratedPlayer,
+  integratedStateStoreOption,
   type IntegratedCandidateAttempt,
   type IntegratedCandidateFactory,
   type IntegratedPlaybackSession,
   type IntegratedPreparedContentTick,
-  type IntegratedFallbackStore
+  type IntegratedStateStore
 } from "./integrated-player.js";
 
-describe("IntegratedPlayer animated failure recovery", () => {
-  it("recovers a fatal media boundary to the newest requested static state", async () => {
+describe("IntegratedPlayer terminal playback failure", () => {
+  it("raises and retains one canonical worker failure without alternate UI", async () => {
     const harness = await createHarness();
-    const order = harness.order;
-    const requestTrace: string[] = [];
-    const request = harness.player.requestState("hover");
-    void request.then(() => requestTrace.push("resolved"));
     harness.session.failure = fatalWorkerFailure();
 
-    expect(harness.player.tryContentTick({
+    const terminal = caughtRuntimeError(() => harness.player.tryContentTick({
       presentationOrdinal: 1n,
       rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
-    await harness.player.settled();
-    await request;
-    await settleMicrotasks();
+    }));
 
+    expect(terminal.code).toBe("worker-decode-failure");
     expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      requestedState: "hover",
-      visualState: "hover",
+      readiness: "error",
+      requestedState: "idle",
+      visualState: "idle",
       selectedRendition: null,
       isTransitioning: false
     });
+    expect(harness.store.presented).toEqual([]);
+    await expect(harness.player.settled()).rejects.toBe(terminal);
+    await expect(harness.player.prepare()).rejects.toBe(terminal);
+    await expect(harness.player.requestState("hover")).rejects.toBe(terminal);
+    expect(caughtRuntimeError(() => harness.player.send("pointerenter")))
+      .toBe(terminal);
     expect(harness.factory.disposals).toBe(1);
-    expect(harness.store.presented).toEqual(["hover"]);
-    expect(harness.failures).toHaveLength(1);
-    expect(harness.failures[0]).toMatchObject({
-      code: "worker-decode-failure"
-    });
-    expect(requestTrace).toEqual(["resolved"]);
-
-    const recovery = order.slice(order.indexOf("stage:hover"));
-    expect(recovery).toEqual([
-      "stage:hover",
-      "effect:readinesschange",
-      "effect:fallback",
-      "effect:transitionstart",
-      "draw:static",
-      "effect:visualstatechange",
-      "effect:transitionend",
-      "dispose:animated"
+    expect(harness.failures).toEqual([
+      expect.objectContaining({ code: "worker-decode-failure" })
     ]);
-
-    await harness.player.requestState("idle");
-    await settleMicrotasks();
-    expect(harness.store.presented).toEqual(["hover", "idle"]);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      requestedState: "idle",
-      visualState: "idle"
-    });
   });
 
-  it("covers with host fallback before asynchronous candidate cleanup", async () => {
+  it("publishes terminal error before asynchronous candidate cleanup", async () => {
     const harness = await createHarness();
     const disposalGate = deferred<void>();
     harness.factory.nextDisposeGate = disposalGate;
     harness.session.failure = fatalWorkerFailure();
 
-    expect(harness.player.tryContentTick({
+    const terminal = caughtRuntimeError(() => harness.player.tryContentTick({
       presentationOrdinal: 1n,
       rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
+    }));
     await waitFor(() => harness.order.includes("dispose:animated:start"));
 
-    const cover = harness.order.indexOf("draw:static");
-    const disposalStart = harness.order.indexOf("dispose:animated:start");
-    expect(harness.order).toContain("stage:idle");
-    expect(cover).toBeGreaterThan(harness.order.indexOf("stage:idle"));
-    expect(disposalStart).toBeGreaterThan(cover);
-    expect(harness.order).not.toContain("dispose:animated:end");
+    expect(harness.player.snapshot().readiness).toBe("error");
+    expect(harness.store.presented).toEqual([]);
     expect(harness.factory.disposals).toBe(0);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      selectedRendition: null,
-      requestedState: "idle",
-      visualState: "idle"
-    });
 
-    const newerRequest = harness.player.requestState("hover");
+    const settlement = harness.player.settled();
+    const observed = settlement.then(
+      () => "resolved",
+      () => "rejected"
+    );
     await settleMicrotasks();
-    expect(harness.order).not.toContain("present:hover");
+    expect(await Promise.race([observed, Promise.resolve("pending")]))
+      .toBe("pending");
 
     disposalGate.resolve();
-    await harness.player.settled();
-    await newerRequest;
-
-    const disposalEnd = harness.order.indexOf("dispose:animated:end");
-    expect(disposalEnd).toBeGreaterThan(disposalStart);
+    await expect(settlement).rejects.toBe(terminal);
     expect(harness.factory.disposals).toBe(1);
-    expect(harness.order.indexOf("present:hover")).toBeGreaterThan(disposalEnd);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      requestedState: "hover",
-      visualState: "hover"
-    });
+    expect(harness.order).toContain("dispose:animated:end");
   });
 
-  it("retries a transient recovery cover before committing static readiness", async () => {
-    const harness = await createHarness();
-    harness.store.coverFailuresRemaining = 1;
-    harness.session.failure = fatalWorkerFailure();
-
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 1n,
-      rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
-    await harness.player.settled();
-
-    expect(harness.store.coverCalls).toBe(2);
-    expect(harness.order.filter((event) => event === "draw:static"))
-      .toHaveLength(1);
-    expect(harness.factory.disposals).toBe(1);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      selectedRendition: null,
-      visualState: "idle"
-    });
-  });
-
-  it("terminalizes a recovery whose host fallback cannot cover", async () => {
-    const harness = await createHarness();
-    harness.store.coverFailuresRemaining = 2;
-    harness.session.failure = fatalWorkerFailure();
-
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 1n,
-      rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
-    await expect(harness.player.settled()).rejects.toThrow(
-      "injected recovery cover failure"
-    );
-
-    expect(harness.store.coverCalls).toBe(2);
-    expect(harness.order).not.toContain("draw:static");
-    expect(harness.factory.disposals).toBe(0);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "error",
-      selectedRendition: null,
-      visualState: "idle",
-      isTransitioning: false
-    });
-    expect(harness.failures.at(-1)).toMatchObject({
-      code: "renderer-failure",
-      context: { operation: "animated-recovery-cover" }
-    });
-
-    await harness.player.dispose();
-    expect(harness.factory.disposals).toBe(1);
-  });
-
-  it("recovers a synchronous renderer failure after graph tick without advancing again", async () => {
+  it("retains one canonical renderer failure across repeated content ticks", async () => {
     const harness = await createHarness();
     harness.session.failure = new Error("injected renderer draw failure");
     harness.session.failOnDraw = true;
 
-    expect(harness.player.tryContentTick({
+    const terminal = caughtRuntimeError(() => harness.player.tryContentTick({
       presentationOrdinal: 1n,
       rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 1n,
-      rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
-    await harness.player.settled();
+    }));
 
-    expect(harness.failures[0]).toMatchObject({ code: "renderer-failure" });
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      requestedState: "idle",
-      visualState: "idle"
-    });
-    expect(harness.store.presented).toEqual(["idle"]);
+    expect(terminal.code).toBe("renderer-failure");
+    expect(caughtRuntimeError(() => harness.player.tryContentTick({
+      presentationOrdinal: 1n,
+      rationalDeadlineUs: 33_333
+    }))).toBe(terminal);
+    await expect(harness.player.settled()).rejects.toBe(terminal);
+    expect(harness.store.presented).toEqual([]);
+    expect(harness.player.snapshot().readiness).toBe("error");
   });
 
-  it("turns a live request synchronization failure into static recovery", async () => {
+  it("rejects request synchronization with the retained canonical error", async () => {
     const harness = await createHarness();
     harness.session.failOnSynchronize = true;
 
-    let request!: Promise<void>;
-    expect(() => {
-      request = harness.player.requestState("hover");
-    }).not.toThrow();
-    await harness.player.settled();
-    await expect(request).resolves.toBeUndefined();
+    const terminal = await rejectedRuntimeError(
+      harness.player.requestState("hover")
+    );
 
-    expect(harness.failures[0]).toMatchObject({
+    expect(terminal).toMatchObject({
       code: "readiness-failure",
-      context: { state: "hover", operation: "request-synchronization" }
+      failure: {
+        context: {
+          state: "hover",
+          operation: "request-synchronization"
+        }
+      }
     });
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      requestedState: "hover",
-      visualState: "hover",
-      isTransitioning: false
-    });
-    expect(harness.factory.disposals).toBe(1);
-  });
-
-  it("completes an interrupted transitionless draw barrier with the recovery pixels", async () => {
-    const harness = await createHarness();
-    harness.session.script.push(
-      frame("intro", "idle", null, "intro", 1),
-      frame("body", "idle", null, "idle-body", 0),
-      frame("body", "hover", null, "hover-body", 0)
-    );
-    advanceOnce(harness, 1n);
-    advanceOnce(harness, 2n);
-    const request = harness.player.requestState("hover");
-    harness.session.failure = new Error("injected cut target draw failure");
-    harness.session.failOnDraw = true;
-
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 3n,
-      rationalDeadlineUs: 99_999
-    })).toEqual({ status: "stopped" });
-    await harness.player.settled();
-    await request;
-
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      requestedState: "hover",
-      visualState: "hover",
-      isTransitioning: false
-    });
-    const recoveryDraw = harness.order.lastIndexOf("draw:static");
-    expect(harness.order.slice(recoveryDraw + 1)).toEqual([
-      "effect:visualstatechange",
-      "effect:transitionend",
-      "dispose:animated"
-    ]);
-  });
-
-  it("retains the last committed visual state if interrupted recovery also fails", async () => {
-    const harness = await createHarness();
-    harness.session.script.push(
-      frame("intro", "idle", null, "intro", 1),
-      frame("body", "idle", null, "idle-body", 0),
-      frame("body", "hover", null, "hover-body", 0)
-    );
-    advanceOnce(harness, 1n);
-    advanceOnce(harness, 2n);
-    const request = harness.player.requestState("hover");
-    const outcome = request.then(
-      () => "resolved",
-      (error: unknown) => error instanceof Error ? error.name : "unknown"
-    );
-    harness.session.failure = new Error("injected target draw failure");
-    harness.session.failOnDraw = true;
-    harness.store.failure = new Error("injected recovery draw failure");
-
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 3n,
-      rationalDeadlineUs: 99_999
-    }).status).toBe("stopped");
-    await expect(harness.player.settled()).rejects.toThrow(
-      "injected recovery draw failure"
-    );
-
-    expect(await outcome).toBe("PlaybackFallbackError");
+    await expect(harness.player.settled()).rejects.toBe(terminal);
+    await expect(harness.player.requestState("idle")).rejects.toBe(terminal);
+    expect(harness.store.presented).toEqual([]);
     expect(harness.player.snapshot()).toMatchObject({
       readiness: "error",
       requestedState: "hover",
-      visualState: "idle",
-      isTransitioning: false
-    });
-    expect(harness.order).not.toContain("effect:visualstatechange");
-  });
-
-  it("aborts an interrupted draw transaction cleanly when disposal wins recovery", async () => {
-    const harness = await createHarness();
-    harness.session.script.push(
-      frame("intro", "idle", null, "intro", 1),
-      frame("body", "idle", null, "idle-body", 0),
-      frame("body", "hover", null, "hover-body", 0)
-    );
-    advanceOnce(harness, 1n);
-    advanceOnce(harness, 2n);
-    const request = harness.player.requestState("hover");
-    const outcome = request.then(
-      () => "resolved",
-      (error: unknown) => error instanceof Error ? error.name : "unknown"
-    );
-    harness.session.failure = new Error("injected target draw failure");
-    harness.session.failOnDraw = true;
-    harness.store.nextGate = deferred<void>();
-
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 3n,
-      rationalDeadlineUs: 99_999
-    }).status).toBe("stopped");
-    await waitFor(() => harness.store.activePresentations === 1);
-    await expect(harness.player.dispose()).resolves.toBeUndefined();
-
-    expect(await outcome).toBe("AbortError");
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "disposed",
-      requestedState: "hover",
-      visualState: "idle",
-      isTransitioning: false,
-      disposed: true
-    });
-    expect(harness.store.activePresentations).toBe(0);
-  });
-
-  it("admits the latest request while an interrupted draw awaits recovery", async () => {
-    const harness = await createHarness();
-    harness.session.script.push(
-      frame("intro", "idle", null, "intro", 1),
-      frame("body", "idle", null, "idle-body", 0),
-      frame("body", "hover", null, "hover-body", 0)
-    );
-    advanceOnce(harness, 1n);
-    advanceOnce(harness, 2n);
-    const hover = harness.player.requestState("hover");
-    const hoverOutcome = hover.then(
-      () => "resolved",
-      (error: unknown) => error instanceof Error ? error.name : "unknown"
-    );
-    harness.session.failure = new Error("injected target draw failure");
-    harness.session.failOnDraw = true;
-    harness.store.nextGate = deferred<void>();
-
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 3n,
-      rationalDeadlineUs: 99_999
-    }).status).toBe("stopped");
-    await waitFor(() => harness.store.activePresentations === 1);
-
-    let idle!: Promise<void>;
-    expect(() => {
-      idle = harness.player.requestState("idle");
-    }).not.toThrow();
-    await harness.player.settled();
-    await expect(idle).resolves.toBeUndefined();
-
-    expect(await hoverOutcome).toBe("AbortError");
-    expect(harness.store.committed).toEqual(["idle"]);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      requestedState: "idle",
-      visualState: "idle",
-      isTransitioning: false
-    });
-  });
-
-  it("restarts recovery presentation when a newer accepted request arrives", async () => {
-    const harness = await createHarness();
-    const firstGate = deferred<void>();
-    harness.store.nextGate = firstGate;
-    const hover = harness.player.requestState("hover");
-    const hoverOutcome = hover.then(
-      () => "resolved",
-      (error: unknown) => error instanceof Error ? error.name : "unknown"
-    );
-    harness.session.failure = fatalWorkerFailure();
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 1n,
-      rationalDeadlineUs: 33_333
-    }).status).toBe("stopped");
-    await waitFor(() => harness.store.activePresentations === 1);
-
-    const idle = harness.player.requestState("idle");
-    firstGate.resolve();
-    await harness.player.settled();
-    await idle;
-
-    expect(await hoverOutcome).toBe("AbortError");
-    expect(harness.store.presented).toEqual(["hover", "idle"]);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      requestedState: "idle",
       visualState: "idle"
     });
   });
 
-  it("serializes a motion-policy change behind the active recovery surface", async () => {
+  it("terminalizes a failed reduced-motion state staging operation", async () => {
     const harness = await createHarness();
-    const gate = deferred<void>();
-    harness.store.nextGate = gate;
+    harness.store.failure = new Error("injected reduced state failure");
+
+    const terminal = await rejectedRuntimeError(
+      harness.player.setMotionPolicy("reduce")
+    );
+
+    expect(terminal.code).toBe("renderer-failure");
+    await expect(harness.player.settled()).rejects.toBe(terminal);
+    await expect(harness.player.setMotionPolicy("full")).rejects.toBe(terminal);
+    expect(harness.player.snapshot().readiness).toBe("error");
+    expect(harness.player.motionSnapshot().actualMode).toBe("animated");
+  });
+
+  it("sinks report-only recovery handling without changing public rejection", async () => {
+    const harness = await createHarness();
     harness.session.failure = fatalWorkerFailure();
 
-    expect(harness.player.tryContentTick({
+    const terminal = caughtRuntimeError(() => harness.player.tryContentTick({
       presentationOrdinal: 1n,
       rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
-    await waitFor(() => harness.store.activePresentations === 1);
-    const reducing = harness.player.setMotionPolicy("reduce");
+    }));
     await settleMicrotasks();
 
-    expect(harness.store.activePresentations).toBe(1);
-    expect(harness.store.presented).toEqual(["idle"]);
-    gate.resolve();
-    await harness.player.settled();
-    await reducing;
-
-    expect(harness.store.maximumActivePresentations).toBe(1);
-    expect(harness.store.presented).toEqual(["idle"]);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      visualState: "idle"
-    });
-    expect(harness.player.motionSnapshot()).toMatchObject({
-      desiredMode: "reduce",
-      actualMode: "static",
-      stickyFailure: true
-    });
-  });
-
-  it("aborts a superseded recovery surface before obsolete pixels commit", async () => {
-    const harness = await createHarness();
-    harness.store.nextGate = deferred<void>();
-    const hover = harness.player.requestState("hover");
-    const hoverOutcome = hover.then(
-      () => "resolved",
-      (error: unknown) => error instanceof Error ? error.name : "unknown"
-    );
-    harness.session.failure = fatalWorkerFailure();
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 1n,
-      rationalDeadlineUs: 33_333
-    }).status).toBe("stopped");
-    await waitFor(() => harness.store.activePresentations === 1);
-
-    const idle = harness.player.requestState("idle");
-    await harness.player.settled();
-    await idle;
-
-    expect(await hoverOutcome).toBe("AbortError");
-    expect(harness.store.presented).toEqual(["hover", "idle"]);
-    expect(harness.store.committed).toEqual(["idle"]);
-    expect(harness.store.maximumActivePresentations).toBe(1);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
-      requestedState: "idle",
-      visualState: "idle"
-    });
-  });
-
-  it("serializes later static requests and never commits out of draw order", async () => {
-    const harness = await recoveredHarness();
-    const gate = deferred<void>();
-    harness.store.nextGate = gate;
-
-    const idle = harness.player.requestState("idle");
-    await waitFor(() => harness.store.activePresentations === 1);
-    const hover = harness.player.requestState("hover");
-    await settleMicrotasks();
-    expect(harness.store.activePresentations).toBe(1);
-    expect(harness.store.maximumActivePresentations).toBe(1);
-
-    gate.resolve();
-    await Promise.all([idle, hover]);
-    await harness.player.settled();
-    expect(harness.store.presented.slice(-2)).toEqual(["idle", "hover"]);
-    expect(harness.store.maximumActivePresentations).toBe(1);
-    expect(harness.player.snapshot()).toMatchObject({
-      requestedState: "hover",
-      visualState: "hover"
-    });
-  });
-
-  it("rejects invalid static intents without drawing and terminalizes a failed valid replacement", async () => {
-    const harness = await recoveredHarness();
-    const before = [...harness.store.presented];
-    await expect(harness.player.requestState("missing")).rejects.toMatchObject({
-      name: "RouteError"
-    });
-    expect(harness.store.presented).toEqual(before);
-    expect(harness.player.snapshot()).toMatchObject({
-      requestedState: "hover",
-      visualState: "hover",
-      readiness: "staticReady"
-    });
-
-    harness.store.failure = new Error("injected later static failure");
-    await expect(harness.player.requestState("idle")).rejects.toMatchObject({
-      name: "PlaybackFallbackError"
-    });
-    expect(harness.player.snapshot()).toMatchObject({
-      requestedState: "hover",
-      visualState: "hover",
-      readiness: "error",
-      isTransitioning: false
-    });
-  });
-
-  it("terminalizes with PlaybackFallbackError when recovery static draw fails", async () => {
-    const harness = await createHarness();
-    const request = harness.player.requestState("hover");
-    const requestOutcome = request.then(
-      () => "resolved",
-      (error: unknown) => error instanceof Error ? error.name : "unknown"
-    );
-    harness.store.failure = new Error("injected static presentation failure");
-    harness.session.failure = fatalWorkerFailure();
-
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 1n,
-      rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
-    await expect(harness.player.settled()).rejects.toThrow(
-      "injected static presentation failure"
-    );
-    expect(await requestOutcome).toBe("PlaybackFallbackError");
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "error",
-      requestedState: "hover",
-      visualState: "idle"
-    });
-    expect(harness.store.coverCalls).toBeGreaterThan(0);
-    expect(harness.factory.disposals).toBe(0);
-    expect(harness.player.motionSnapshot().actualMode).toBe("animated");
+    expect(harness.player.snapshot().readiness).toBe("error");
+    await expect(harness.player.prepare()).rejects.toBe(terminal);
     await harness.player.dispose();
     expect(harness.factory.disposals).toBe(1);
   });
 
-  it("retains failed-recovery animated pixels when the old static cannot cover", async () => {
-    const harness = await createHarness();
-    harness.store.failure = new Error("injected static presentation failure");
-    harness.store.coverFailuresRemaining = 1;
-    harness.session.failure = fatalWorkerFailure();
-
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 1n,
-      rationalDeadlineUs: 33_333
-    })).toEqual({ status: "stopped" });
-    await expect(harness.player.settled()).rejects.toThrow(
-      "injected static presentation failure"
-    );
-
-    expect(harness.factory.disposals).toBe(0);
-    expect(harness.player.snapshot()).toMatchObject({ readiness: "error" });
-    await harness.player.dispose();
-    expect(harness.factory.disposals).toBe(1);
-  });
-
-  it("never covers stale idle static when hover recovery staging fails", async () => {
-    const harness = await createHarness();
-    harness.session.script.push(
-      frame("intro", "idle", null, "intro", 1),
-      frame("body", "idle", null, "idle-body", 0),
-      frame("body", "hover", null, "hover-body", 0)
-    );
-    advanceOnce(harness, 1n);
-    advanceOnce(harness, 2n);
-    const hover = harness.player.requestState("hover");
-    advanceOnce(harness, 3n);
-    await hover;
-    expect(harness.player.snapshot().visualState).toBe("hover");
-    expect(harness.store.currentState()).toBe("idle");
-
-    harness.store.failure = new Error("injected hover static failure");
-    harness.session.failure = fatalWorkerFailure();
-    expect(harness.player.tryContentTick({
-      presentationOrdinal: 4n,
-      rationalDeadlineUs: 133_332
-    })).toEqual({ status: "stopped" });
-    await expect(harness.player.settled()).rejects.toThrow(
-      "injected hover static failure"
-    );
-
-    expect(harness.store.coverCalls).toBe(0);
-    expect(harness.factory.disposals).toBe(0);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "error",
-      visualState: "hover",
-      selectedRendition: null
-    });
-    expect(harness.player.motionSnapshot().actualMode).toBe("animated");
-    await harness.player.dispose();
-    expect(harness.factory.disposals).toBe(1);
-  });
-
-  it("never covers stale idle static when hover reduction staging fails", async () => {
-    const harness = await createHarness();
-    harness.session.script.push(
-      frame("intro", "idle", null, "intro", 1),
-      frame("body", "idle", null, "idle-body", 0),
-      frame("body", "hover", null, "hover-body", 0)
-    );
-    advanceOnce(harness, 1n);
-    advanceOnce(harness, 2n);
-    const hover = harness.player.requestState("hover");
-    advanceOnce(harness, 3n);
-    await hover;
-    harness.store.failure = new Error("injected hover reduction failure");
-
-    await harness.player.setMotionPolicy("reduce");
-
-    expect(harness.store.currentState()).toBe("idle");
-    expect(harness.store.coverCalls).toBe(0);
-    expect(harness.factory.disposals).toBe(0);
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "error",
-      visualState: "hover",
-      selectedRendition: null
-    });
-    expect(harness.player.motionSnapshot()).toMatchObject({
-      actualMode: "static",
-      staticOrigin: "fallback-failure",
-      stickyFailure: true
-    });
-    await harness.player.dispose();
-    expect(harness.factory.disposals).toBe(1);
-  });
-
-  it("aborts an active static request and settles every owner on disposal", async () => {
-    const harness = await recoveredHarness();
-    const gate = deferred<void>();
-    harness.store.nextGate = gate;
-    const request = harness.player.requestState("idle");
-    const requestOutcome = request.then(
-      () => "resolved",
-      (error: unknown) => error instanceof Error ? error.name : "unknown"
-    );
-    await waitFor(() => harness.store.activePresentations === 1);
-
-    const firstDispose = harness.player.dispose();
-    const secondDispose = harness.player.dispose();
-    expect(secondDispose).toBe(firstDispose);
-    await firstDispose;
-
-    expect(await requestOutcome).toBe("AbortError");
-    expect(harness.player.snapshot()).toMatchObject({
-      readiness: "disposed",
-      disposed: true
-    });
-    expect(harness.factory.disposals).toBe(1);
-    expect(harness.store.disposeCalls).toBe(1);
-    expect(harness.store.activePresentations).toBe(0);
-    expect(() => harness.player.tryContentTick({
-      presentationOrdinal: 1n,
-      rationalDeadlineUs: 33_333
-    })).toThrow("disposed");
-  });
 });
+
+function caughtRuntimeError(operation: () => unknown): RuntimePlaybackError {
+  try {
+    operation();
+  } catch (error) {
+    expect(error).toBeInstanceOf(RuntimePlaybackError);
+    return error as RuntimePlaybackError;
+  }
+  throw new Error("expected RuntimePlaybackError");
+}
+
+async function rejectedRuntimeError(
+  promise: Promise<unknown>
+): Promise<RuntimePlaybackError> {
+  try {
+    await promise;
+  } catch (error) {
+    expect(error).toBeInstanceOf(RuntimePlaybackError);
+    return error as RuntimePlaybackError;
+  }
+  throw new Error("expected RuntimePlaybackError rejection");
+}
 
 interface RecoveryHarness {
   readonly player: IntegratedPlayer;
@@ -678,7 +203,7 @@ async function createHarness(): Promise<RecoveryHarness> {
   const failures: Readonly<RuntimeFailure>[] = [];
   const player = new IntegratedPlayer({
     ...createIntegratedTestVideoSource(createIntegratedTestAsset()),
-    createFallbackStore: () => store,
+    ...integratedStateStoreOption(() => store),
     candidateFactory: factory,
     eventSink(event) {
       events.push(event);
@@ -699,19 +224,6 @@ async function createHarness(): Promise<RecoveryHarness> {
     events,
     failures
   };
-}
-
-async function recoveredHarness(): Promise<RecoveryHarness> {
-  const harness = await createHarness();
-  const request = harness.player.requestState("hover");
-  harness.session.failure = fatalWorkerFailure();
-  expect(harness.player.tryContentTick({
-    presentationOrdinal: 1n,
-    rationalDeadlineUs: 33_333
-  }).status).toBe("stopped");
-  await harness.player.settled();
-  await request;
-  return harness;
 }
 
 function fatalWorkerFailure(): RuntimePlaybackError {
@@ -858,13 +370,6 @@ function frame(
   return Object.freeze({ kind, state, edge, unit, localFrame });
 }
 
-function advanceOnce(harness: RecoveryHarness, ordinal: bigint): void {
-  expect(harness.player.tryContentTick({
-    presentationOrdinal: ordinal,
-    rationalDeadlineUs: Number(ordinal) * 33_333
-  })).toEqual({ status: "advanced" });
-}
-
 function schedulerSnapshot(cursor: Readonly<{
   path: string;
   unit: string;
@@ -884,15 +389,13 @@ function schedulerSnapshot(cursor: Readonly<{
   });
 }
 
-class RecoveryStaticStore implements IntegratedFallbackStore {
+class RecoveryStaticStore implements IntegratedStateStore {
   public readonly presented: string[] = [];
   public readonly committed: string[] = [];
   public failure: Error | null = null;
   public nextGate: ReturnType<typeof deferred<void>> | null = null;
   public activePresentations = 0;
   public maximumActivePresentations = 0;
-  public coverCalls = 0;
-  public coverFailuresRemaining = 0;
   public disposeCalls = 0;
   readonly #order: string[];
 
@@ -905,7 +408,7 @@ class RecoveryStaticStore implements IntegratedFallbackStore {
 
   public async presentState(
     state: string,
-    options: { readonly signal: AbortSignal; readonly cover?: boolean }
+    options: { readonly signal: AbortSignal }
   ): Promise<void> {
     this.activePresentations += 1;
     this.maximumActivePresentations = Math.max(
@@ -913,7 +416,7 @@ class RecoveryStaticStore implements IntegratedFallbackStore {
       this.activePresentations
     );
     this.presented.push(state);
-    this.#order.push(`${options.cover === false ? "stage" : "present"}:${state}`);
+    this.#order.push(`present:${state}`);
     const gate = this.nextGate;
     this.nextGate = null;
     try {
@@ -926,20 +429,9 @@ class RecoveryStaticStore implements IntegratedFallbackStore {
     }
   }
 
-  public coverCurrent(): void {
-    this.coverCalls += 1;
-    if (this.coverFailuresRemaining > 0) {
-      this.coverFailuresRemaining -= 1;
-      throw new Error("injected recovery cover failure");
-    }
-    this.#order.push("draw:static");
-  }
-
   public currentState(): string | null {
     return this.committed.at(-1) ?? "idle";
   }
-
-  public revealAnimated(): void {}
 
   public async settled(): Promise<void> {}
 

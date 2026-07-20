@@ -11,23 +11,27 @@ import { IntegratedPlayerParticipantController } from "./integrated-player-parti
 import { IntegratedPlayerDecoderReentry } from "./integrated-player-decoder-reentry.js";
 import type { IntegratedPlayerParticipantSnapshot } from "./integrated-player-participant.js";
 import { EffectHost } from "./effect-host.js";
-import { normalizeRuntimeFailure, type RuntimeFailure } from "./errors.js";
-import { IntegratedPlaybackInvariantError, PlaybackFallbackError,
+import {
+  RuntimePlaybackError,
+  normalizeRuntimeFailure,
+  type RuntimeFailure
+} from "./errors.js";
+import { IntegratedPlaybackInvariantError,
   type IntegratedCandidateAttempt, type IntegratedContentTickContext,
   type IntegratedContentTickResult, type IntegratedPlaybackTraceState,
   type IntegratedPlayerTrace, type IntegratedPlayerOptions,
   type IntegratedRealtimeDriverOptions, type IntegratedPlayerSnapshot,
-  type IntegratedPrepareOptions, type IntegratedFallbackStore,
+  type IntegratedPrepareOptions,
   type IntegratedTimerHost } from "./integrated-player-contracts.js";
 import {
   DEFAULT_INTEGRATED_PREPARATION_TIMEOUT_MS,
   DEFAULT_INTEGRATED_TIMERS, defaultIntegratedNow,
-  disposeInvalidIntegratedFallbackStore, snapshotIntegratedRealtimeOptions,
+  disposeInvalidIntegratedStateStore, snapshotIntegratedRealtimeOptions,
   integratedRealtimeDeadlineUs as realtimeDeadlineUs,
   integratedAbortError as abortError, integratedDisposedError as disposedError,
   validateIntegratedPlayerOptions as validateOptions,
   validateIntegratedPlaybackTraceState as validatePlaybackTraceState,
-  validateIntegratedFallbackStore as validateFallbackStore,
+  validateIntegratedStateStore as validateStateStore,
   validatePreparationTimeout
 } from "./integrated-player-support.js";
 import { IntegratedAnimatedPreparation } from "./integrated-animated-preparation.js";
@@ -49,7 +53,13 @@ import { admitIntegratedPlayerAssetSource } from "./integrated-player-resource-a
 import type { RuntimeCanvasResourceLease } from "./canvas-resource-plan.js";
 import { IntegratedContentTicker } from "./integrated-content-ticker.js";
 import { assertSelectedVideoRenditionCatalogIdentity } from "./video-rendition-inspection.js";
+import {
+  createIntegratedStateStore,
+  type IntegratedStateStore
+} from "./state-store.js";
 export * from "./integrated-player-contracts.js";
+export type { IntegratedStateStore } from "./state-store.js";
+export { integratedStateStoreOption } from "./state-store.js";
 export type { RuntimeVisibilitySnapshot, RuntimeVisibilityState } from "./model.js";
 /**
  * Internal playback facade. Concrete preparation, worker, renderer, cache,
@@ -64,7 +74,7 @@ export class IntegratedPlayer {
   readonly #graph = new MotionGraphEngine();
   readonly #requests = new RequestPromises();
   readonly #effects: EffectHost;
-  readonly #fallbackStore: IntegratedFallbackStore;
+  readonly #stateStore: IntegratedStateStore;
   readonly #diagnostics: (failure: Readonly<RuntimeFailure>) => void;
   readonly #now: () => number;
   readonly #timers: IntegratedTimerHost;
@@ -89,6 +99,7 @@ export class IntegratedPlayer {
   #preparationTimeoutMs: number = DEFAULT_INTEGRATED_PREPARATION_TIMEOUT_MS;
   #readyResult: Readonly<RuntimeReadinessResult> | null = null;
   #disposePromise: Promise<void> | null = null;
+  #terminalError: RuntimePlaybackError | null = null;
   #terminalOwnerCallbackDepth = 0;
   #lastPresentationOrdinal = 0n;
   #manuallyPaused = true;
@@ -96,9 +107,8 @@ export class IntegratedPlayer {
   public constructor(options: IntegratedPlayerOptions) {
     const assetSource = validateOptions(options);
     // Host option objects are capability boundaries. Snapshot every value the
-    // constructor will need before acquiring catalog, canvas, or fallback-store
+    // constructor will need before acquiring catalog or canvas
     // ownership so a hostile or time-varying getter cannot strand them.
-    const createFallbackStore = options.createFallbackStore;
     const candidateFactory = options.candidateFactory;
     const candidateAvailability = candidateFactory.availability;
     const contextTarget = candidateFactory.contextTarget;
@@ -131,7 +141,7 @@ export class IntegratedPlayer {
     this.#assetBinding = sourceAdmission.binding;
     const hostMaxRuntimeBytes = admission.hostMaxRuntimeBytes;
     const canvasResourceLease = admission.canvasResourceLease;
-    let fallbackStoreCandidate: unknown = null;
+    let stateStoreCandidate: unknown = null;
     let contextCandidate: IntegratedPlayerContextBinding | null = null;
     let participantCandidate: IntegratedPlayerParticipantController | null = null;
     try {
@@ -155,9 +165,10 @@ export class IntegratedPlayer {
               })
             })
       });
-      fallbackStoreCandidate = createFallbackStore.call(options, this.#catalog);
-      this.#fallbackStore = fallbackStoreCandidate as IntegratedFallbackStore;
-      validateFallbackStore(this.#fallbackStore);
+      const createdStateStore = createIntegratedStateStore(this.#catalog, options);
+      stateStoreCandidate = createdStateStore;
+      this.#stateStore = createdStateStore;
+      validateStateStore(this.#stateStore);
       this.#canvasResourceLease = canvasResourceLease;
       this.#diagnostics = diagnosticsSink ?? (() => undefined);
       this.#now = now ?? defaultIntegratedNow;
@@ -172,9 +183,8 @@ export class IntegratedPlayer {
         catalog: this.#catalog,
         graph: this.#graph,
         effects: this.#effects,
-        fallbackStore: this.#fallbackStore,
+        stateStore: this.#stateStore,
         installResult: this.#installResult,
-        lifecycleSignal: this.#lifecycleController.signal,
         now: this.#now,
         timers: this.#timers,
         stageReadyResult: (result) => this.#stageStaticReadyResult(result)
@@ -183,13 +193,12 @@ export class IntegratedPlayer {
         catalog: this.#catalog,
         graph: this.#graph,
         effects: this.#effects,
-        fallbackStore: this.#fallbackStore,
+        stateStore: this.#stateStore,
         trace: this.#trace,
         getActiveCandidate: () => this.#activeCandidate,
         detachActiveCandidate: (candidate) => {
           if (this.#activeCandidate === candidate) this.#activeCandidate = null;
         },
-        getReadyResult: () => this.#readyResult,
         getSelectedRendition: () => this.#selectedRendition,
         registerRequest: (requestId) => this.#requests.register(requestId),
         stageReadyResult: (result) => this.#stageStaticReadyResult(result),
@@ -200,7 +209,7 @@ export class IntegratedPlayer {
       this.#activation = new IntegratedPlayerActivationCoordinator({
         graph: this.#graph,
         effects: this.#effects,
-        fallbackStore: this.#fallbackStore,
+        stateStore: this.#stateStore,
         trace: this.#trace,
         operationGate: this.#operationGate,
         state: {
@@ -222,6 +231,8 @@ export class IntegratedPlayer {
         getMotion: () => this.#motion,
         getRealtime: () => this.#realtime,
         startRecovery: (failure) => this.#startRecovery(failure),
+        startTerminalPlayback: (error) =>
+          this.#startTerminalPlayback(error),
         settleRecovery: () => this.#recovery.settled(),
         reportFailure: (failure) => this.#reportFailure(failure),
         releaseCandidateResidency: (rendition) =>
@@ -261,12 +272,10 @@ export class IntegratedPlayer {
           this.#activation.resumeRealtimeAfterReentry(wasRunning),
         resumeAfterVisibilityReentry: (wasRunning) =>
           this.#activation.resumeRealtimeAfterVisibilityReentry(wasRunning),
-        coverReducedSurface: (state) =>
-          this.#activation.coverReducedSurface(state),
+        assertReducedState: (state) =>
+          this.#activation.assertReducedState(state),
         commitReducedState: (state) =>
           this.#activation.commitReducedState(state),
-        commitResourcePressureState: (state) =>
-          this.#activation.commitResourcePressureState(state),
         failReduction: (error) => this.#activation.failReduction(error),
         prepareFull: (signal) => this.#animatedPreparation.reenter({
           signal,
@@ -275,7 +284,7 @@ export class IntegratedPlayer {
         rejectReentry: (error, result) =>
           this.#activation.rejectAnimatedReentry(error, result),
         reportTransitionFailure: (error, transition) =>
-          this.#reportFailure(normalizeRuntimeFailure(
+          this.#startRecovery(normalizeRuntimeFailure(
             "readiness-failure",
             error,
             { operation: `motion-policy-${transition}` }
@@ -303,12 +312,12 @@ export class IntegratedPlayer {
         pauseForVisibility: () => this.#activation.pauseForVisibility(),
         resumeCancelledVisibility: (wasRunning) =>
           this.#activation.resumeRealtimeAfterVisibilityReentry(wasRunning),
-        coverVisibilitySurface: (state) =>
-          this.#activation.coverVisibilitySurface(state),
+        assertVisibilityState: (state) =>
+          this.#activation.assertVisibilityState(state),
         commitVisibilitySuspended: (state) =>
           this.#activation.commitVisibilitySuspended(state),
         reportFailure: (error, operation) =>
-          this.#reportFailure(normalizeRuntimeFailure(
+          this.#startRecovery(normalizeRuntimeFailure(
             "readiness-failure",
             error,
             { operation }
@@ -333,7 +342,7 @@ export class IntegratedPlayer {
             getPreparePromise: () => this.#preparePromise,
             invalidateInitialPreparation: () =>
               this.#invalidateInitialPreparation(),
-            reportFailure: (failure) => this.#reportFailure(failure)
+            reportFailure: (failure) => { this.#startRecovery(failure); }
           });
       this.#context = contextCandidate;
       this.#contentTicker = new IntegratedContentTicker({
@@ -356,7 +365,7 @@ export class IntegratedPlayer {
     } catch (error) {
       void contextCandidate?.dispose();
       participantCandidate?.dispose();
-      disposeInvalidIntegratedFallbackStore(fallbackStoreCandidate);
+      disposeInvalidIntegratedStateStore(stateStoreCandidate);
       try {
         canvasResourceLease?.release();
       } catch {
@@ -400,6 +409,10 @@ export class IntegratedPlayer {
     visibility: RuntimeVisibilityState
   ): Promise<Readonly<RuntimeVisibilitySnapshot>> {
     if (this.#disposed) return Promise.reject(disposedError());
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) {
+      return Promise.reject(terminal);
+    }
     this.#participant.setVisibility(visibility);
     if (this.#recovery.busy) {
       return this.#reconcileContextAfter(this.#recovery.settled().then(() => {
@@ -424,6 +437,10 @@ export class IntegratedPlayer {
     policy: MotionPolicy
   ): Promise<Readonly<MotionPolicySnapshot>> {
     if (this.#disposed) return Promise.reject(disposedError());
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) {
+      return Promise.reject(terminal);
+    }
     if (this.#recovery.active) {
       return this.#reconcileContextAfter(this.#recovery.settled().then(() => {
         if (this.#disposed) throw disposedError();
@@ -445,6 +462,10 @@ export class IntegratedPlayer {
     reduced: boolean
   ): Promise<Readonly<MotionPolicySnapshot>> {
     if (this.#disposed) return Promise.reject(disposedError());
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) {
+      return Promise.reject(terminal);
+    }
     if (this.#recovery.active) {
       return this.#reconcileContextAfter(this.#recovery.settled().then(() => {
         if (this.#disposed) throw disposedError();
@@ -465,18 +486,24 @@ export class IntegratedPlayer {
     );
   }
 
-  /** Commit a host-owned resource fallback without changing host policy. */
+  /** Reject playback terminally when page resource pressure cannot be met. */
   public reclaimForPagePressure(): Promise<boolean> {
     if (this.#disposed) return Promise.reject(disposedError());
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) {
+      return Promise.reject(terminal);
+    }
     const operation = this.#motion.reclaimForResourcePressure();
-    return operation.then((covered) => {
+    return operation.then((committed) => {
       this.#decoderReentry.syncEligibility();
-      return covered;
+      return committed;
     });
   }
   /** Starts the player-owned M5.5 presentation clock after animated readiness. */
   public startRealtime(): void {
     if (this.#disposed) throw disposedError();
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) throw terminal;
     if (this.#operationGate.active) {
       throw new IntegratedPlaybackInvariantError(
         "realtime playback cannot start inside an effect transaction"
@@ -511,6 +538,8 @@ export class IntegratedPlayer {
   public tryContentTick(
     context: IntegratedContentTickContext
   ): Readonly<IntegratedContentTickResult> {
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) throw terminal;
     return this.#contentTicker.try(context);
   }
 
@@ -520,10 +549,14 @@ export class IntegratedPlayer {
     if (this.#disposed) {
       return Promise.reject(disposedError());
     }
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) {
+      return Promise.reject(terminal);
+    }
     if (this.#recovery.promise !== null) {
       return this.#recovery.promise.then(() => {
         if (this.#readyResult === null) {
-          throw new PlaybackFallbackError(
+          throw new IntegratedPlaybackInvariantError(
             "animation recovery completed without a ready result"
           );
         }
@@ -548,7 +581,11 @@ export class IntegratedPlayer {
     this.#participant.markPreparing();
     const operation = Promise.resolve().then(() =>
       this.#prepareLatestMotionMode(capturedOptions)
-    );
+    ).catch((error: unknown) => {
+      if (!(error instanceof RuntimePlaybackError)) throw error;
+      this.#terminalError ??= error;
+      throw this.#terminalError;
+    });
     this.#preparePromise = operation;
     void operation.finally(() => {
       if (this.#preparePromise === operation && this.#readyResult === null) {
@@ -632,6 +669,8 @@ export class IntegratedPlayer {
 
   /** Route one authored host event through the sole installed graph. */
   public send(event: string): boolean {
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) throw terminal;
     if (typeof event !== "string") return false;
     if (this.#disposed || this.#operationGate.active) return false;
     this.#participant.touch();
@@ -695,6 +734,8 @@ export class IntegratedPlayer {
   /** Resume only when animated, visible ownership is currently usable. */
   public async resumeRealtime(): Promise<void> {
     if (this.#disposed) throw disposedError();
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) throw terminal;
     this.#manuallyPaused = false;
     await this.settled();
     if (
@@ -726,12 +767,11 @@ export class IntegratedPlayer {
       playback?.synchronizeGraph(result);
     } catch (error) {
       this.#effects.apply(result);
-      this.#startRecovery(normalizeRuntimeFailure(
+      throw this.#startRecovery(normalizeRuntimeFailure(
         "readiness-failure",
         error,
         { operation: "send-synchronization" }
       ));
-      return accepted;
     }
     if (!accepted) return false;
     this.#effects.apply(result);
@@ -746,6 +786,8 @@ export class IntegratedPlayer {
 
   #requestStateNow(target: string): Promise<void> {
     if (this.#disposed) return Promise.reject(disposedError());
+    const terminalError = this.#retainedTerminalError();
+    if (terminalError !== null) return Promise.reject(terminalError);
     this.#participant.touch();
     if (this.#effects.readiness === "staticReady") {
       return this.#visibility.snapshot().visibility === "hidden"
@@ -771,12 +813,13 @@ export class IntegratedPlayer {
       // The graph intent is already admitted. Mirror it before recovering so
       // the returned graph-issued promise remains the only public outcome.
       this.#effects.apply(result);
-      this.#startRecovery(normalizeRuntimeFailure(
+      const terminal = this.#startRecovery(normalizeRuntimeFailure(
         "readiness-failure",
         error,
         { state: target, operation: "request-synchronization" }
       ));
-      return request;
+      void request.catch(() => undefined);
+      return Promise.reject(terminal);
     }
     this.#effects.apply(result);
     this.#visibility.supersedePresentation(
@@ -797,11 +840,13 @@ export class IntegratedPlayer {
           readiness: this.#effects.readiness
         });
       } catch (error) {
-        this.#startRecovery(normalizeRuntimeFailure(
+        const terminal = this.#startRecovery(normalizeRuntimeFailure(
           "readiness-failure",
           error,
           { state: target, operation: "request-trace" }
         ));
+        void request.catch(() => undefined);
+        return Promise.reject(terminal);
       }
     }
     return request;
@@ -813,6 +858,8 @@ export class IntegratedPlayer {
     await this.#context?.settled();
     await this.#visibility.settled();
     await this.#motion.settled();
+    const terminal = this.#retainedTerminalError();
+    if (terminal !== null) throw terminal;
   }
 
   public dispose(): Promise<void> {
@@ -922,21 +969,21 @@ export class IntegratedPlayer {
         ));
       }
       try {
-        this.#fallbackStore.dispose();
+        this.#stateStore.dispose();
       } catch (error) {
         this.#reportFailure(normalizeRuntimeFailure(
           "disposed",
           error,
-          { operation: "fallback-store-disposal" }
+          { operation: "state-store-disposal" }
         ));
       }
       try {
-        await this.#invokeTerminalOwner(() => this.#fallbackStore.settled());
+        await this.#invokeTerminalOwner(() => this.#stateStore.settled());
       } catch (error) {
         this.#reportFailure(normalizeRuntimeFailure(
           "disposed",
           error,
-          { operation: "fallback-store-settlement" }
+          { operation: "state-store-settlement" }
         ));
       }
       try {
@@ -1005,7 +1052,19 @@ export class IntegratedPlayer {
     });
   }
 
-  #startRecovery(failure: Readonly<RuntimeFailure>): void {
+  #startRecovery(failure: Readonly<RuntimeFailure>): RuntimePlaybackError {
+    return this.#startTerminalRecovery(failure);
+  }
+
+  #startTerminalPlayback(error: RuntimePlaybackError): RuntimePlaybackError {
+    return this.#startTerminalRecovery(error);
+  }
+
+  #startTerminalRecovery(
+    failure: Readonly<RuntimeFailure> | RuntimePlaybackError
+  ): RuntimePlaybackError {
+    const retained = this.#retainedTerminalError();
+    if (retained !== null) return retained;
     try {
       this.#realtime?.stopAfterFailure();
     } catch (error) {
@@ -1015,7 +1074,15 @@ export class IntegratedPlayer {
         { operation: "realtime-recovery-stop" }
       ));
     }
-    this.#recovery.start(failure);
+    const terminal = failure instanceof RuntimePlaybackError
+      ? this.#recovery.startTerminal(failure)
+      : this.#recovery.start(failure);
+    this.#terminalError = terminal;
+    return terminal;
+  }
+
+  #retainedTerminalError(): RuntimePlaybackError | null {
+    return this.#terminalError ?? this.#recovery.terminalError;
   }
 
   #stageStaticReadyResult(

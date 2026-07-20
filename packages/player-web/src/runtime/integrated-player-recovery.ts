@@ -7,11 +7,10 @@ import type { RuntimeAssetCatalog } from "./asset-catalog.js";
 import type { EffectHost } from "./effect-host.js";
 import {
   IntegratedPlaybackInvariantError,
-  PlaybackFallbackError,
   type IntegratedCandidateAttempt,
-  type IntegratedPlaybackTraceState,
-  type IntegratedFallbackStore
+  type IntegratedPlaybackTraceState
 } from "./integrated-player-contracts.js";
+import type { IntegratedStateStore } from "./state-store.js";
 import {
   assertIntegratedStaticPresentation,
   integratedAbortReason,
@@ -21,27 +20,23 @@ import {
 } from "./integrated-player-support.js";
 import type { IntegratedTraceHarness } from "./integrated-trace-harness.js";
 import {
+  RuntimePlaybackError,
   normalizeRuntimeFailure,
   type RuntimeFailure
 } from "./errors.js";
-import {
-  createRuntimeCandidateReport,
-  createRuntimeReadinessReport,
-  type RuntimeReadinessResult
-} from "./model.js";
+import type { RuntimeReadinessResult } from "./model.js";
 import { StaticOperationQueue } from "./static-operation-queue.js";
 
 interface IntegratedRecoveryCoordinatorOptions {
   readonly catalog: RuntimeAssetCatalog;
   readonly graph: MotionGraphEngine;
   readonly effects: EffectHost;
-  readonly fallbackStore: IntegratedFallbackStore;
+  readonly stateStore: IntegratedStateStore;
   readonly trace: IntegratedTraceHarness;
   readonly getActiveCandidate: () => IntegratedCandidateAttempt | null;
   readonly detachActiveCandidate: (
     candidate: IntegratedCandidateAttempt
   ) => void;
-  readonly getReadyResult: () => Readonly<RuntimeReadinessResult> | null;
   readonly getSelectedRendition: () => string | null;
   readonly registerRequest: (requestId: number) => Promise<void>;
   readonly stageReadyResult: (
@@ -56,13 +51,12 @@ export class IntegratedRecoveryCoordinator {
   readonly #catalog: RuntimeAssetCatalog;
   readonly #graph: MotionGraphEngine;
   readonly #effects: EffectHost;
-  readonly #fallbackStore: IntegratedFallbackStore;
+  readonly #stateStore: IntegratedStateStore;
   readonly #trace: IntegratedTraceHarness;
   readonly #getActiveCandidate: () => IntegratedCandidateAttempt | null;
   readonly #detachActiveCandidate: (
     candidate: IntegratedCandidateAttempt
   ) => void;
-  readonly #getReadyResult: () => Readonly<RuntimeReadinessResult> | null;
   readonly #getSelectedRendition: () => string | null;
   readonly #registerRequest: (requestId: number) => Promise<void>;
   readonly #stageReadyResult: (
@@ -73,10 +67,7 @@ export class IntegratedRecoveryCoordinator {
   readonly #operations = new StaticOperationQueue();
 
   #recovery: Promise<void> | null = null;
-  #recoveryPresentation: {
-    readonly state: string;
-    readonly controller: AbortController;
-  } | null = null;
+  #terminalError: RuntimePlaybackError | null = null;
   #latestStaticRequestGeneration = 0;
   #latestStaticPresentation: AbortController | null = null;
 
@@ -84,11 +75,10 @@ export class IntegratedRecoveryCoordinator {
     this.#catalog = options.catalog;
     this.#graph = options.graph;
     this.#effects = options.effects;
-    this.#fallbackStore = options.fallbackStore;
+    this.#stateStore = options.stateStore;
     this.#trace = options.trace;
     this.#getActiveCandidate = options.getActiveCandidate;
     this.#detachActiveCandidate = options.detachActiveCandidate;
-    this.#getReadyResult = options.getReadyResult;
     this.#getSelectedRendition = options.getSelectedRendition;
     this.#registerRequest = options.registerRequest;
     this.#stageReadyResult = options.stageReadyResult;
@@ -108,16 +98,32 @@ export class IntegratedRecoveryCoordinator {
     return this.#recovery !== null || this.#operations.snapshot().pending > 0;
   }
 
-  public start(failure: Readonly<RuntimeFailure>): void {
-    if (this.#recovery !== null) return;
-    const recovery = this.#operations.enqueue(({ signal }) =>
-      this.#recover(failure, signal)
-    );
+  public get terminalError(): RuntimePlaybackError | null {
+    return this.#terminalError;
+  }
+
+  public start(failure: Readonly<RuntimeFailure>): RuntimePlaybackError {
+    if (this.#terminalError !== null) return this.#terminalError;
+    return this.startTerminal(new RuntimePlaybackError(failure));
+  }
+
+  /** Retains an already-canonical terminal without reconstructing its error. */
+  public startTerminal(error: RuntimePlaybackError): RuntimePlaybackError {
+    if (this.#terminalError !== null) return this.#terminalError;
+    if (!(error instanceof RuntimePlaybackError)) {
+      throw new TypeError("terminal playback error must be RuntimePlaybackError");
+    }
+    this.#terminalError = error;
+    const recovery = this.#recover(error);
     this.#recovery = recovery;
+    // Keep the original rejection observable through promise/settled while
+    // report-only call sites cannot create a process-level unhandled rejection.
     void recovery.catch(() => undefined);
+    return error;
   }
 
   public requestStaticState(target: string): Promise<void> {
+    if (this.#terminalError !== null) return Promise.reject(this.#terminalError);
     return this.#operations.enqueue(({ signal }) =>
       this.#requestStatic(target, signal)
     );
@@ -125,6 +131,7 @@ export class IntegratedRecoveryCoordinator {
 
   /** Hidden-time requests coalesce before spending decode/presentation work. */
   public requestLatestStaticState(target: string): Promise<void> {
+    if (this.#terminalError !== null) return Promise.reject(this.#terminalError);
     if (this.#latestStaticRequestGeneration >= Number.MAX_SAFE_INTEGER) {
       return Promise.reject(new RangeError(
         "latest static request generation exceeds safe range"
@@ -141,20 +148,9 @@ export class IntegratedRecoveryCoordinator {
     );
   }
 
-  /** Cancel an obsolete in-flight recovery surface before it can commit. */
-  public supersedeRecoveryPresentation(requestedState: string | null): void {
-    const presentation = this.#recoveryPresentation;
-    if (
-      presentation === null ||
-      presentation.state === requestedState ||
-      presentation.controller.signal.aborted
-    ) {
-      return;
-    }
-    presentation.controller.abort(new DOMException(
-      "recovery presentation was superseded",
-      "AbortError"
-    ));
+  /** Terminal recovery has no alternate presentation to supersede. */
+  public supersedeRecoveryPresentation(_requestedState: string | null): void {
+    // Retained for the serialized intent seam; terminal requests reject above.
   }
 
   public async settled(): Promise<void> {
@@ -169,10 +165,8 @@ export class IntegratedRecoveryCoordinator {
     await this.#operations.settled();
   }
 
-  async #recover(
-    failure: Readonly<RuntimeFailure>,
-    signal: AbortSignal
-  ): Promise<void> {
+  #recover(error: RuntimePlaybackError): Promise<void> {
+    const failure = error.failure;
     this.#reportFailure(failure);
     const candidate = this.#getActiveCandidate();
     const candidateRendition = this.#getSelectedRendition();
@@ -189,202 +183,58 @@ export class IntegratedRecoveryCoordinator {
         ));
       }
     }
-    throwIfIntegratedAborted(signal);
-
-    let requested: string;
-    try {
-      for (;;) {
-        const latest = this.#graph.snapshot().requestedState;
-        if (latest === null) {
-          throw new PlaybackFallbackError(
-            "animated recovery has no requested static state"
-          );
-        }
-        requested = latest;
-        const controller = new AbortController();
-        const forwardAbort = (): void => controller.abort(
-          integratedAbortReason(signal)
-        );
-        if (signal.aborted) forwardAbort();
-        else signal.addEventListener("abort", forwardAbort, { once: true });
-        const presentation = Object.freeze({ state: requested, controller });
-        this.#recoveryPresentation = presentation;
-        try {
-          await raceIntegratedAbort(
-            this.#fallbackStore.presentState(requested, {
-              signal: controller.signal,
-              cover: false
-            }),
-            controller.signal
-          );
-          if (this.#fallbackStore.currentState() !== requested) {
-            throw new IntegratedPlaybackInvariantError(
-              "recovery fallback store committed the wrong state"
-            );
-          }
-        } catch (error) {
-          if (signal.aborted) throw integratedAbortReason(signal);
-          if (controller.signal.aborted) continue;
-          throw error;
-        } finally {
-          signal.removeEventListener("abort", forwardAbort);
-          if (this.#recoveryPresentation === presentation) {
-            this.#recoveryPresentation = null;
-          }
-        }
-        throwIfIntegratedAborted(signal);
-        if (controller.signal.aborted) continue;
-        if (this.#graph.snapshot().requestedState === requested) break;
-      }
-    } catch (error) {
-      if (signal.aborted) throw integratedAbortReason(signal);
-      const staticFailure = normalizeRuntimeFailure(
-        "renderer-failure",
-        error,
-        { operation: "animated-static-recovery" }
-      );
-      this.#reportFailure(staticFailure);
-      const retainedVisualState = this.#effects.visualState;
-      let retainedStaticMatches = false;
-      try {
-        retainedStaticMatches = retainedVisualState !== null &&
-          this.#fallbackStore.currentState() === retainedVisualState;
-      } catch {
-        // The original static failure remains authoritative.
-      }
-      if (retainedStaticMatches) {
-        try {
-          this.#fallbackStore.coverCurrent();
-        } catch {
-          // Preserve the original static installation failure and candidate.
-        }
-      }
-      this.#stageReadyResult(null);
-      const failed = this.#graph.failStatic(
-        staticFailure.message,
-        retainedVisualState === null ? {} : { retainedVisualState }
-      );
-      const failedForHost = this.#effects.applyFailure(failed);
-      if (traceState !== null) {
-        this.#trace.recordOperation({
-          result: failedForHost,
-          playback: traceState,
-          readiness: this.#effects.readiness
-        });
-      }
-      // Error readiness is terminal but player disposal remains explicit. The
-      // candidate is retained because motion policy still owns animated mode,
-      // and an unverified/stale static must never replace its state identity.
-      throw new PlaybackFallbackError(staticFailure.message);
-    }
-
-    const previousCandidates = this.#getReadyResult()?.report.candidates ?? [];
-    const candidates = previousCandidates.map((candidateReport) =>
-      candidateReport.outcome === "selected"
-        ? createRuntimeCandidateReport({
-            rendition: candidateReport.rendition,
-            rank: candidateReport.rank,
-            outcome: "rejected",
-            failure
-          })
-        : candidateReport
-    );
-    const ready = Object.freeze({
-      mode: "static" as const,
-      reason: "animation-failure" as const,
-      report: createRuntimeReadinessReport({
-        readiness: "staticReady",
-        selectedRendition: null,
-        candidates
-      })
-    });
-    this.#stageReadyResult(ready);
     const retainedVisualState = this.#effects.visualState;
-    const recovered = this.#graph.recoverStatic(
-      "animation-failure",
-      this.#effects.interruptedBarrierSuperseded && retainedVisualState !== null
-        ? { retainedVisualState }
-        : {}
+    this.#stageReadyResult(null);
+    const failed = this.#graph.failPlayback(
+      failure.message,
+      retainedVisualState === null ? {} : { retainedVisualState }
     );
-    let recoveredForHost: Readonly<ReturnType<EffectHost["applyRecovery"]>>;
+    let failedForHost: Readonly<ReturnType<EffectHost["applyFailure"]>>;
     try {
-      recoveredForHost = this.#effects.applyRecovery(
-        recovered,
-        (presentation) => {
-          assertIntegratedStaticPresentation(presentation, requested);
-          try {
-            this.#fallbackStore.coverCurrent();
-          } catch {
-            // A visibility host can fail before applying its side effect. One
-            // bounded retry handles that transient without replaying graph
-            // effects or replacing the already-staged fallback state.
-            this.#fallbackStore.coverCurrent();
-          }
-        }
-      );
-    } catch (error) {
-      const coverFailure = normalizeRuntimeFailure(
-        "renderer-failure",
-        error,
-        { operation: "animated-recovery-cover" }
-      );
-      this.#reportFailure(coverFailure);
-      this.#stageReadyResult(null);
-      const failedVisualState = this.#effects.visualState;
-      const failed = this.#graph.failStatic(
-        coverFailure.message,
-        failedVisualState === null ? {} : {
-          retainedVisualState: failedVisualState
-        }
-      );
-      const failedForHost = this.#effects.applyFailure(failed);
-      if (traceState !== null) {
-        this.#trace.recordOperation({
-          result: failedForHost,
-          playback: traceState,
-          readiness: this.#effects.readiness
-        });
-      }
-      throw new PlaybackFallbackError(coverFailure.message);
+      failedForHost = this.#effects.applyFailure(failed, error);
+    } catch (terminalizationError) {
+      this.#reportFailure(normalizeRuntimeFailure(
+        "readiness-failure",
+        terminalizationError,
+        { operation: "playback-failure-publication" }
+      ));
+      failedForHost = failed;
     }
     if (traceState !== null) {
       this.#trace.recordOperation({
-        result: recoveredForHost,
+        result: failedForHost,
         playback: traceState,
         readiness: this.#effects.readiness
       });
     }
-
-    // The candidate owns the last usable animated pixels and its presentation
-    // backend. Retire it only after the newest fallback state has crossed the
-    // effect host's draw barrier and is visibly covering that backend.
-    if (candidate !== null) {
-      await this.#retireCandidate(
-        candidate,
-        "animated-recovery-cleanup",
-        candidateRendition
-      );
-    }
+    return this.#operations.enqueue(async () => {
+      if (candidate !== null) {
+        await this.#retireCandidate(
+          candidate,
+          "terminal-playback-cleanup",
+          candidateRendition
+        );
+      }
+      throw error;
+    });
   }
 
   async #requestStatic(target: string, signal: AbortSignal): Promise<void> {
     throwIfIntegratedAborted(signal);
-    const prePresent = this.#canPrePresent(target);
-    let hostFallbackCovered = false;
-    if (prePresent) {
+    const preStage = this.#canPreStage(target);
+    let stateStaged = false;
+    if (preStage) {
       try {
         await raceIntegratedAbort(
-          this.#fallbackStore.presentState(target, { signal }),
+          this.#stateStore.presentState(target, { signal }),
           signal
         );
-        if (this.#fallbackStore.currentState() !== target) {
+        if (this.#stateStore.currentState() !== target) {
           throw new IntegratedPlaybackInvariantError(
             "static request store committed the wrong state"
           );
         }
-        // The fallback store owns an atomic host cover unless cover:false is
-        // explicitly requested.
-        hostFallbackCovered = true;
+        stateStaged = true;
       } catch (error) {
         if (signal.aborted) throw integratedAbortReason(signal);
         const failure = normalizeRuntimeFailure(
@@ -392,10 +242,7 @@ export class IntegratedRecoveryCoordinator {
           error,
           { state: target, operation: "static-request" }
         );
-        this.#reportFailure(failure);
-        const failed = this.#graph.failStatic(failure.message);
-        this.#effects.apply(failed);
-        throw new PlaybackFallbackError(failure.message);
+        throw this.start(failure);
       }
     }
 
@@ -412,22 +259,21 @@ export class IntegratedRecoveryCoordinator {
       )
     ) {
       const staticState = result.presentation.state;
-      if (!prePresent || staticState !== target) {
+      if (!preStage || staticState !== target) {
         throw new IntegratedPlaybackInvariantError(
           "static graph commit was not pre-presented"
         );
       }
       this.#effects.apply(result, (presentation) => {
         assertIntegratedStaticPresentation(presentation, staticState);
-        // The host fallback already completed its atomic cover before graph
-        // commit. This callback is the graph's ordering barrier only;
-        // re-running a fallible visibility host would create a partial commit.
-        hostFallbackCovered = true;
+        // The logical state was staged before graph commit. This callback is
+        // the graph's ordering barrier only and owns no presentation UI.
+        stateStaged = true;
       });
     } else {
       this.#effects.apply(result);
     }
-    if (hostFallbackCovered) {
+    if (stateStaged) {
       await this.#retireCandidateAfterStaticCover();
     }
     return request;
@@ -491,7 +337,7 @@ export class IntegratedRecoveryCoordinator {
     }
   }
 
-  #canPrePresent(target: string): boolean {
+  #canPreStage(target: string): boolean {
     const snapshot = this.#graph.snapshot();
     if (
       snapshot.readiness !== "static" ||

@@ -9,6 +9,16 @@ encoded length metadata, bounds the decoded stream, and validates the complete
 decoded asset. Compression is usually low-value because AVAL media payloads are
 already compressed.
 
+The element requires a secure context and callable
+`window.crypto.subtle.digest` before it opens any source. HTTPS satisfies that
+origin requirement. Browsers also treat HTTP loopback addresses such as
+`localhost` and `127.0.0.1` as potentially trustworthy, but a private-network
+URL such as `http://192.168.x.x` does not become trustworthy merely because it
+is local. Opening that URL from a phone therefore fails once as
+`unsupported-browser` during `configure`, before codec qualification. Use an
+HTTPS tunnel or a locally trusted HTTPS certificate for physical-device
+testing; adding or preferring an H.264 source cannot repair an insecure origin.
+
 `crossorigin="anonymous"` uses Fetch `credentials: same-origin`: cross-origin
 cookies are not sent. `use-credentials` uses `credentials: include` and
 requires an explicit credentialed CORS response. Never use wildcard origin
@@ -29,7 +39,7 @@ img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 ```
 
 Replace the asset origin and tighten unrelated directives for the host
-application. Serve application scripts and author fallback images as files
+application. Serve application scripts and any consumer-owned alternate images as files
 allowed by those directives; an inline `<script>`, inline `<style>`, style
 attribute, `data:` resource, or blob worker is not needed. No remote origin is
 needed when modules and assets are same-origin.

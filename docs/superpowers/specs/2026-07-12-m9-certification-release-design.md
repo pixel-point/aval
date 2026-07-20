@@ -12,7 +12,7 @@ slice
 - [M5.5 Integrated Scheduler and Readiness Design](2026-07-12-m55-integrated-scheduler-readiness-design.md)
 - [M6 Transparency and Static Fallback Design](2026-07-12-m6-transparency-static-fallback-design.md)
 - [M7 Loader, Integrity, and Resource Manager Design](2026-07-12-m7-loader-integrity-resource-manager-design.md)
-- [M8 Public Element and Authoring Experience Design](2026-07-12-m8-public-element-authoring-experience-design.md)
+- [Public element contract](../../element-api.md)
 
 ## 1. Outcome and Claim Boundary
 
@@ -192,6 +192,11 @@ path, ETag, device serial number, user name, or unredacted browser profile. Both
 use canonical JSON with stable key ordering and newline behavior. The candidate
 digest appears in every certification report; both digests appear in the final
 release notes.
+
+The exact `certification.html` harness digest becomes certification authority
+only after a descriptor-backed stable read verifies the manifest length and
+digest. The artifact must use the `browser-harness` role and `text/html` media
+type; a manifest-only digest claim is insufficient.
 
 ## 5. Continuous-Integration Architecture
 
@@ -447,10 +452,13 @@ The initial desktop matrix follows the master design and adds branded Edge:
   Chrome, Edge, and Firefox; Safari is recorded as unavailable; and
 - 60 Hz and 120 Hz modes where the named display/platform exposes each mode.
 
-"Current stable" is resolved only at run time and replaced in the report by an
-exact full version/build/channel. Every exact production AVC configuration is
+Rolling support labels are resolved into exact matrix-policy versions before a
+run starts; moving aliases are not policy authority. The report records an
+exact numeric dotted build and channel. Chrome, Microsoft Edge, and Firefox
+build majors must match their product-version major, while Safari/WebKit build
+identifiers remain independently numeric. Every exact production AVC configuration is
 probed. A browser that lacks it receives an `unsupported` animated result plus
-the required static-fallback conformance result. It is never silently tested
+the required fatal-error-boundary result. It is never silently tested
 with VP8, a different H.264 profile, Playwright's engine, or another browser.
 
 The 1.0 release requires at least one supported animated runtime scheduling

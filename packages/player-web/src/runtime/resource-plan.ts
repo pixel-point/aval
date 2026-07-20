@@ -1,5 +1,5 @@
 import {
-  maximumH264DecodedRgbaBytes,
+  maximumDecodedRgbaBytes,
   type CompiledManifest,
   type ProductionRendition
 } from "@pixel-point/aval-format";
@@ -147,8 +147,9 @@ export function createRuntimeResourcePlan(
     RESOURCE_DECODE_SURFACE_COUNT
   ));
   const decodedPerSurface = BigInt(maximumDecodedRgbaBytes(
-    manifest,
-    rendition
+    manifest.codec,
+    rendition.codedWidth,
+    rendition.codedHeight
   ));
   const decodedSurfaces = decodedPerSurface *
     BigInt(RESOURCE_DECODE_SURFACE_COUNT);
@@ -349,27 +350,6 @@ function requireProductionVideoRendition(
     throw new RangeError("selected resource rendition is unavailable");
   }
   return selected;
-}
-
-function maximumDecodedRgbaBytes(
-  manifest: Readonly<CompiledManifest>,
-  rendition: Readonly<ProductionRendition>
-): number {
-  if (manifest.codec === "h264") {
-    return maximumH264DecodedRgbaBytes(
-      rendition.codedWidth,
-      rendition.codedHeight
-    );
-  }
-  return checkedByteNumber(
-    checkedRgbaBytes(
-      rendition.codedWidth,
-      rendition.codedHeight,
-      1,
-      "decoded surface bytes"
-    ),
-    "decoded surface bytes"
-  );
 }
 
 function validateNonNegativeSafeInteger(value: number, label: string): void {

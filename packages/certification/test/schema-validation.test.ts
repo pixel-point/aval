@@ -1,14 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { validateDisplayReport, validateRuntimeReport } from "../src/schema-validation.js";
 import { loadCertificationSchema } from "../src/schema-loader.js";
-import { REQUIRED_DISPLAY_CRITERION_IDS } from "../src/scenario-contract.js";
+import { EXACT_BROWSER_BUILD_PATTERN_SOURCE, EXACT_PRODUCT_VERSION_PATTERN_SOURCE } from "../src/exact-version.js";
+import { FATAL_ERROR_BOUNDARY_ATTACHMENT_ID, REQUIRED_DISPLAY_CRITERION_IDS, REQUIRED_RUNTIME_CRITERION_IDS } from "../src/scenario-contract.js";
 import { validRuntimeReport } from "./test-report.js";
 
 const digest = "b".repeat(64);
 
 describe("certification report validation", () => {
   it("loads only named checked schemas from the repository schema authority", async () => {
-    await expect(loadCertificationSchema("certification-runtime.schema.json")).resolves.toMatchObject({ title: expect.any(String) });
+    const schema = await loadCertificationSchema("certification-runtime.schema.json") as any;
+    expect(schema).toMatchObject({ title: expect.any(String) });
+    expect(schema.$defs.environment.properties.browser.properties.version.pattern).toBe(EXACT_PRODUCT_VERSION_PATTERN_SOURCE);
+    expect(schema.$defs.environment.properties.browser.properties.build.pattern).toBe(EXACT_BROWSER_BUILD_PATTERN_SOURCE);
+    expect(schema.$defs.environment.properties.os.properties.version.pattern).toBe(EXACT_PRODUCT_VERSION_PATTERN_SOURCE);
+    const browserVersion = new RegExp(EXACT_PRODUCT_VERSION_PATTERN_SOURCE, "u");
+    expect(browserVersion.test("26.5")).toBe(true);
+    for (const alias of ["latest", "latest-1", ">=149", "149.x", "149 or newer"]) expect(browserVersion.test(alias)).toBe(false);
     await expect(loadCertificationSchema("../package.json")).rejects.toThrow(/invalid/u);
   });
   it("accepts a complete path-free runtime report", () => {
@@ -45,6 +53,20 @@ describe("certification report validation", () => {
     ["floating version", (report: Record<string, unknown>) => {
       const environment = report.environment as { browser: Record<string, unknown> };
       environment.browser.version = "stable";
+    }, /exact version/u],
+    ["floating browser build", (report: Record<string, unknown>) => {
+      const environment = report.environment as { browser: Record<string, unknown> };
+      environment.browser.build = "latest";
+    }, /exact browser build/u],
+    ["browser build from another major", (report: Record<string, unknown>) => {
+      const environment = report.environment as { browser: Record<string, unknown> };
+      environment.browser.product = "Chrome";
+      environment.browser.version = "150";
+      environment.browser.build = "149.0.7827.55";
+    }, /browser build.*version/u],
+    ["range OS version", (report: Record<string, unknown>) => {
+      const environment = report.environment as { os: Record<string, unknown> };
+      environment.os.version = "26.x";
     }, /exact version/u]
   ])("rejects %s", (_name, mutate, expected) => {
     const report = structuredClone(validRuntimeReport()) as unknown as Record<string, unknown>;
@@ -107,5 +129,33 @@ describe("certification report validation", () => {
     expect(loop.map(({ repetition }) => repetition)).toEqual([1, 2, 3]);
     expect(validateRuntimeReport(report).status).toBe("passed");
     expect(() => validateRuntimeReport({ ...report, scenarios: [...report.scenarios, report.scenarios[0]!] })).toThrow(/duplicate scenario\/repetition pair/u);
+  });
+
+  it("requires fatal error-boundary evidence in every passed runtime report", () => {
+    expect(REQUIRED_RUNTIME_CRITERION_IDS).toContain("runtime-fatal-error-boundary");
+    const report = validRuntimeReport();
+    const withoutErrorBoundary = {
+      ...report,
+      criteria: report.criteria.filter(({ id }) => id !== "runtime-fatal-error-boundary")
+    };
+    expect(() => validateRuntimeReport(withoutErrorBoundary)).toThrow(/runtime-fatal-error-boundary/u);
+
+    const unrelatedEvidence = report.attachments.find(({ id }) => id.startsWith("scenario-"))!.id;
+    const withoutLedger = {
+      ...report,
+      criteria: report.criteria.map((criterion) => criterion.id === "runtime-fatal-error-boundary"
+        ? { ...criterion, evidence: [unrelatedEvidence] }
+        : criterion),
+      attachments: report.attachments.filter(({ id }) => id !== FATAL_ERROR_BOUNDARY_ATTACHMENT_ID)
+    };
+    expect(() => validateRuntimeReport(withoutLedger)).toThrow(/fatal error-boundary attachment is missing/u);
+
+    const unbound = {
+      ...report,
+      criteria: report.criteria.map((criterion) => criterion.id === "runtime-fatal-error-boundary"
+        ? { ...criterion, evidence: [unrelatedEvidence] }
+        : criterion)
+    };
+    expect(() => validateRuntimeReport(unbound)).toThrow(/fatal error-boundary criterion is not bound/u);
   });
 });

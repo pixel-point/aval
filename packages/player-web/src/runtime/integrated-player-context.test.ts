@@ -4,6 +4,7 @@ import type {
   BrowserContextRecoveryEvent,
   BrowserContextRecoveryEventTarget
 } from "./browser-context-recovery.js";
+import { RuntimePlaybackError } from "./errors.js";
 import { IntegratedPlayerContext } from "./integrated-player-context.js";
 import {
   Deferred,
@@ -156,7 +157,7 @@ describe("IntegratedPlayerContext", () => {
 });
 
 describe("IntegratedPlayer context binding", () => {
-  it("covers and freezes synchronously, then restarts an unfinished intro", async () => {
+  it("freezes synchronously, then restarts an unfinished intro", async () => {
     const target = new FakeTarget();
     const harness = createHarness({
       contextTarget: target,
@@ -166,7 +167,7 @@ describe("IntegratedPlayer context binding", () => {
 
     const loss = target.loss();
     expect(loss.prevented).toBe(true);
-    expect(harness.fallbackStore.calls.at(-1)).toBe("cover-current");
+    expect(harness.stateStore.currentState()).toBe("idle");
     expect(harness.player.contextSnapshot()).toMatchObject({
       state: "lost",
       lossCount: 1
@@ -238,7 +239,7 @@ describe("IntegratedPlayer context binding", () => {
     expect(harness.player.contextSnapshot()?.state).toBe("ready");
   });
 
-  it("turns a repeated loss during rebuild sticky and rejects late media", async () => {
+  it("terminalizes a repeated loss during rebuild and rejects late media", async () => {
     const gate = new Deferred<void>();
     const target = new FakeTarget();
     const harness = createHarness({
@@ -255,17 +256,18 @@ describe("IntegratedPlayer context binding", () => {
 
     target.loss();
     gate.resolve(undefined);
-    await harness.player.settled();
+    const terminal = await harness.player.settled().catch(
+      (error: unknown) => error
+    );
 
+    expect(terminal).toBeInstanceOf(RuntimePlaybackError);
     expect(harness.player.contextSnapshot()).toMatchObject({
       state: "static",
       sticky: true,
       repeatedLosses: 1
     });
-    expect(harness.player.motionSnapshot()).toMatchObject({
-      actualMode: "static",
-      stickyFailure: true
-    });
+    expect(harness.player.motionSnapshot().actualMode).toBe("static");
+    await expect(harness.player.prepare()).rejects.toBe(terminal);
     expect(harness.factory.activeAttempts).toBe(0);
   });
 
@@ -336,30 +338,25 @@ describe("IntegratedPlayer context binding", () => {
     });
   });
 
-  it("keeps host-fallback cover failure fatal and never claims static ready", async () => {
+  it("retires a lost context through logical state only", async () => {
     const target = new FakeTarget();
-    const harness = createHarness({
-      contextTarget: target,
-      staticBehavior: "fail-stage-and-cover"
-    });
+    const harness = createHarness({ contextTarget: target });
     await harness.player.prepare();
 
     target.loss();
     await harness.player.settled();
 
     expect(harness.player.contextSnapshot()).toMatchObject({
-      state: "static",
-      sticky: true,
-      failures: 1
+      state: "lost",
+      sticky: false,
+      failures: 0
     });
-    expect(harness.player.snapshot().readiness).toBe("error");
+    expect(harness.player.snapshot().readiness).toBe("staticReady");
+    expect(harness.stateStore.currentState()).toBe("idle");
     expect(harness.factory.activeAttempts).toBe(0);
-    expect(harness.failures).toContainEqual(expect.objectContaining({
-      code: "context-loss"
-    }));
   });
 
-  it("makes an exhausted rebuild sticky without a restore retry loop", async () => {
+  it("terminalizes an exhausted rebuild without a restore retry loop", async () => {
     const target = new FakeTarget();
     const harness = createHarness({
       contextTarget: target,
@@ -372,13 +369,16 @@ describe("IntegratedPlayer context binding", () => {
     await harness.player.prepare();
     target.loss();
     target.restore();
-    await harness.player.settled();
+    const terminal = await harness.player.settled().catch(
+      (error: unknown) => error
+    );
+    expect(terminal).toBeInstanceOf(RuntimePlaybackError);
     const creates = harness.factory.calls.filter((call) =>
       call.startsWith("create:")
     ).length;
 
     target.restore();
-    await harness.player.settled();
+    await expect(harness.player.settled()).rejects.toBe(terminal);
 
     expect(harness.player.contextSnapshot()).toMatchObject({
       state: "static",

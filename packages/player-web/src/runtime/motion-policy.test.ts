@@ -17,7 +17,6 @@ describe("MotionPolicyCoordinator", () => {
       generation: 0,
       transition: null,
       staticOrigin: null,
-      stickyFailure: false,
       disposed: false
     });
 
@@ -54,8 +53,7 @@ describe("MotionPolicyCoordinator", () => {
     coordinator.installStatic("reduced-motion");
     expect(coordinator.snapshot()).toMatchObject({
       actualMode: "static",
-      staticOrigin: "reduced-motion",
-      stickyFailure: false
+      staticOrigin: "reduced-motion"
     });
 
     coordinator.setPolicy("full");
@@ -69,8 +67,7 @@ describe("MotionPolicyCoordinator", () => {
     expect(coordinator.snapshot()).toMatchObject({
       actualMode: "animated",
       staticOrigin: null,
-      transition: null,
-      stickyFailure: false
+      transition: null
     });
   });
 
@@ -113,42 +110,17 @@ describe("MotionPolicyCoordinator", () => {
     expect(coordinator.snapshot().actualMode).toBe("animated");
   });
 
-  it("keeps codec, resource, readiness, animation, and fallback failures sticky", () => {
-    for (const origin of [
-      "no-video-rendition",
-      "codec-unsupported",
-      "resource-budget",
-      "readiness-failed",
-      "animation-failure",
-      "fallback-failure"
-    ] as const) {
-      const coordinator = new MotionPolicyCoordinator({ policy: "full" });
-      coordinator.installStatic(origin);
-      expect(coordinator.snapshot()).toMatchObject({
-        actualMode: "static",
-        staticOrigin: origin,
-        stickyFailure: true
-      });
-      expect(coordinator.nextTransition()).toBeNull();
-      coordinator.setPolicy("reduce");
-      coordinator.setPolicy("full");
-      expect(coordinator.nextTransition()).toBeNull();
-    }
-  });
-
   it.each(["visibility-suspended", "decoder-queued"] as const)(
     "re-enters full motion from transient %s static mode",
     (origin) => {
       const coordinator = new MotionPolicyCoordinator({ policy: "full" });
       coordinator.installStatic(origin);
-      expect(coordinator.snapshot().stickyFailure).toBe(false);
       const transition = requireTransition(coordinator.nextTransition());
       expect(transition.kind).toBe("enter-full");
       expect(coordinator.commitAnimated(transition)).toBe(true);
       expect(coordinator.snapshot()).toMatchObject({
         actualMode: "animated",
-        staticOrigin: null,
-        stickyFailure: false
+        staticOrigin: null
       });
     }
   );
@@ -156,11 +128,10 @@ describe("MotionPolicyCoordinator", () => {
   it("treats a context-loss interruption as reenterable until recovery fails", () => {
     const coordinator = new MotionPolicyCoordinator({ policy: "full" });
     coordinator.installAnimated();
-    coordinator.failToStatic("context-loss");
+    coordinator.suspendStatic("context-loss");
     const transition = requireTransition(coordinator.nextTransition());
     expect(coordinator.snapshot()).toMatchObject({
-      staticOrigin: "context-loss",
-      stickyFailure: false
+      staticOrigin: "context-loss"
     });
     expect(coordinator.commitAnimated(transition)).toBe(true);
   });
@@ -195,19 +166,18 @@ describe("MotionPolicyCoordinator", () => {
     expect(coordinator.snapshot().staticOrigin).toBe("reduced-motion");
   });
 
-  it("turns a runtime failure static and aborts any policy transition", () => {
+  it("suspends animation and aborts any policy transition", () => {
     const coordinator = new MotionPolicyCoordinator();
     coordinator.installAnimated();
     coordinator.setPolicy("reduce");
     const transition = requireTransition(coordinator.nextTransition());
 
-    coordinator.failToStatic("animation-failure");
+    coordinator.suspendStatic("visibility-suspended");
     expect(transition.signal.aborted).toBe(true);
     expect(coordinator.commitStatic(transition)).toBe(false);
     expect(coordinator.snapshot()).toMatchObject({
       actualMode: "static",
-      staticOrigin: "animation-failure",
-      stickyFailure: true,
+      staticOrigin: "visibility-suspended",
       transition: null
     });
   });
@@ -249,9 +219,9 @@ describe("MotionPolicyCoordinator", () => {
     expect(() => coordinator.installAnimated()).toThrow("unprepared");
     expect(() => coordinator.installStatic("reduced-motion"))
       .toThrow("unprepared");
-    expect(() => coordinator.failToStatic(
-      "reduced-motion" as unknown as "animation-failure"
-    )).toThrow("failure origin");
+    expect(() => coordinator.suspendStatic(
+      "reduced-motion" as unknown as "visibility-suspended"
+    )).toThrow("must not be reduced-motion");
   });
 });
 

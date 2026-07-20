@@ -1,5 +1,4 @@
 import {
-  h264CodecForLevel,
   inspectH264AnnexBRendition
 } from "@pixel-point/aval-format";
 
@@ -46,7 +45,7 @@ export const H264_BITSTREAM_ADAPTER: VideoBitstreamAdapter = Object.freeze({
       "H.264 SPS"
     );
     return Object.freeze({
-      codec: h264CodecForLevel(inspection.parameterSet.levelIdc),
+      codec: inspection.parameterSet.codec,
       bitDepth: 8 as const,
       units: Object.freeze(inspection.units.map((unit) => Object.freeze({
         id: unit.id,

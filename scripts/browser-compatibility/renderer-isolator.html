@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>AVAL renderer construction isolator</title>
+    <style>
+      :root { font: 16px/1.45 system-ui, sans-serif; color: #f4f4f5; background: #09090b; }
+      body { margin: 0; }
+      main { width: min(80rem, calc(100% - 2rem)); margin: 0 auto; padding: 2rem 0; }
+      h1 { margin: 0; font-size: clamp(1.5rem, 4vw, 2.5rem); }
+      #renderer-status { margin: 1rem 0; padding: .75rem 1rem; border: 1px solid #3f3f46; border-radius: .5rem; }
+      #renderer-status[data-state="complete"] { border-color: #22c55e; }
+      #renderer-status[data-state="error"] { border-color: #ef4444; color: #fecaca; }
+      #renderer-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; }
+      article { padding: 1rem; border: 1px solid #3f3f46; border-radius: .75rem; background: #18181b; }
+      article[data-status="success"] { border-color: #22c55e; }
+      article[data-status="failure"] { border-color: #ef4444; }
+      article h2 { margin: 0 0 .5rem; font-size: 1rem; }
+      article p { margin: 0; color: #a1a1aa; }
+      pre { overflow: auto; max-height: 36rem; margin-top: 1rem; padding: 1rem; border-radius: .5rem; background: #18181b; font: 12px/1.45 ui-monospace, monospace; }
+      #renderer-canvases { position: fixed; inset: auto auto 0 0; width: 1px; height: 1px; overflow: hidden; opacity: .001; pointer-events: none; }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "@pixel-point/aval-format": "/probe/modules/format/index.js",
+          "@pixel-point/aval-graph": "/probe/modules/graph/index.js"
+        }
+      }
+    </script>
+    <script type="module" src="/isolators/renderer/renderer-isolator.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>AVAL renderer construction isolator</h1>
+      <p id="renderer-status" role="status" aria-live="polite" data-state="running">
+        Running three fresh-canvas production renderer probes…
+      </p>
+      <section id="renderer-results" aria-label="Renderer mode results"></section>
+      <pre id="renderer-json" aria-label="Renderer isolator JSON"></pre>
+      <div id="renderer-canvases" aria-hidden="true"></div>
+    </main>
+  </body>
+</html>

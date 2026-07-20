@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { AvalElement } from "@pixel-point/aval-element";
 import { parseFrontIndex } from "@pixel-point/aval-format";
 
@@ -156,7 +156,7 @@ test("preserves the authored 1280x720 graph and exact frame ranges", async () =>
   ]);
   expect(rendition).toMatchObject({
     id: "video.1x",
-    codec: "avc1.64001E",
+    codec: "avc1.42E01E",
     bitDepth: 8,
     codedWidth: 640,
     codedHeight: 368,
@@ -219,6 +219,13 @@ test("preserves the authored 1280x720 graph and exact frame ranges", async () =>
       from: "entering",
       to: "hover",
       trigger: { type: "completion" },
+      start: "finish"
+    },
+    {
+      id: "exiting.entering",
+      from: "exiting",
+      to: "entering",
+      trigger: { type: "event", name: "hover.enter" },
       start: "finish"
     },
     {
@@ -336,6 +343,51 @@ test("keeps the interaction hotspot hidden until the video is rendered", async (
   await expect(hotspot).toHaveCSS("opacity", "1");
 });
 
+test("does not label nonfatal static policy as rendered motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  const motion = page.locator("#grass-rabbit");
+  const hotspot = page.locator(".interaction-hotspot");
+  await expect.poll(() => motion.evaluate((node) => ({
+    readiness: (node as AvalElement).readiness,
+    staticReason: (node as AvalElement).staticReason
+  }))).toEqual({
+    readiness: "staticReady",
+    staticReason: "reduced-motion"
+  });
+  await expect(motion).not.toHaveAttribute("data-rendered", "");
+  await expect(hotspot).not.toHaveClass(/is-rendered/u);
+  await expect(hotspot).toHaveCSS("opacity", "0");
+});
+
+test("reflects live interactive and static policy transitions", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+
+  const motion = page.locator("#grass-rabbit");
+  const hotspot = page.locator(".interaction-hotspot");
+  await expect.poll(() => motion.evaluate((node) => (
+    node as AvalElement
+  ).readiness)).toBe("interactiveReady");
+  await expect(motion).toHaveAttribute("data-rendered", "");
+  await expect(hotspot).toHaveClass(/is-rendered/u);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => motion.evaluate((node) => (
+    node as AvalElement
+  ).readiness)).toBe("staticReady");
+  await expect(motion).not.toHaveAttribute("data-rendered", "");
+  await expect(hotspot).not.toHaveClass(/is-rendered/u);
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(() => motion.evaluate((node) => (
+    node as AvalElement
+  ).readiness)).toBe("interactiveReady");
+  await expect(motion).toHaveAttribute("data-rendered", "");
+  await expect(hotspot).toHaveClass(/is-rendered/u);
+});
+
 test("plays the intro once in the responsive product page", async ({
   page
 }) => {
@@ -398,21 +450,19 @@ test("plays the intro once in the responsive product page", async ({
       hasStaticLayer: node.shadowRoot?.querySelector(
         '[data-aval-layer="static"]'
       ) !== null,
-      fallbackCount: node.querySelectorAll("[slot=fallback]").length
+      fallbackSlotCount: node.shadowRoot?.querySelectorAll('slot[name="fallback"]')
+        .length ?? 0
     };
   });
   expect(initialLayers).toEqual({
     canvasCount: 1,
     hasStaticLayer: false,
-    fallbackCount: 0
+    fallbackSlotCount: 0
   });
 
   const interactiveSurface = await motion.evaluate((node) => {
     const animated = node.shadowRoot!.querySelector<HTMLCanvasElement>(
       'canvas[data-aval-layer="animated"]'
-    );
-    const fallbackSlot = node.shadowRoot!.querySelector<HTMLSlotElement>(
-      'slot[data-aval-layer="fallback"]'
     );
     const diagnostics = (node as HTMLElement & {
       getDiagnostics(): {
@@ -431,7 +481,8 @@ test("plays the intro once in the responsive product page", async ({
       height: animated.height,
       display: getComputedStyle(animated).display,
       canvasCount: node.shadowRoot!.querySelectorAll("canvas").length,
-      fallbackHidden: fallbackSlot?.hidden ?? false,
+      fallbackSlotCount: node.shadowRoot!.querySelectorAll('slot[name="fallback"]')
+        .length,
       presentation: diagnostics.presentation
     };
   });
@@ -440,7 +491,7 @@ test("plays the intro once in the responsive product page", async ({
     height: 720,
     display: "block",
     canvasCount: 1,
-    fallbackHidden: true,
+    fallbackSlotCount: 0,
     presentation: expect.objectContaining({
       cssWidth: 640,
       cssHeight: 360,
@@ -649,8 +700,7 @@ test("plays the intro once in the responsive product page", async ({
   }, firstIdleTraceIndex);
   expect(finalDiagnostics).toMatchObject({
     counters: {
-      underflow: 0,
-      fallback: introLedger.counters.fallback
+      underflow: 0
     },
     lastFailure: null,
     replayedIntro: false
@@ -771,6 +821,144 @@ test("plays hover-out directly after hover-in when the pointer leaves early", as
   );
 });
 
+test("routes touch taps outside and during entering or exiting", async ({
+  browser
+}, testInfo) => {
+  test.setTimeout(2 * 60_000);
+  const configuredBaseUrl = testInfo.project.use.baseURL;
+  if (typeof configuredBaseUrl !== "string") {
+    throw new Error("grass-rabbit touch test requires a configured base URL");
+  }
+  const context = await browser.newContext({
+    baseURL: configuredBaseUrl,
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 }
+  });
+  const page = await context.newPage();
+  const failures = { consoleErrors: [] as string[], pageErrors: [] as string[] };
+  page.on("console", (message) => {
+    if (message.type() === "error") failures.consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => failures.pageErrors.push(error.message));
+  try {
+    await page.goto("/");
+    const motion = page.locator("#grass-rabbit");
+    await expect.poll(() => motion.evaluate((node) => (
+      node as AvalElement
+    ).readiness), { timeout: 20_000 }).toBe("interactiveReady");
+    await expect.poll(() => motion.evaluate((node) => {
+      const trace = (node as AvalElement)
+        .getDiagnostics({ trace: true }).runtimeTrace ?? [];
+      return trace.at(-1)?.graph?.presentation?.unitId ?? null;
+    }), { timeout: 15_000 }).toBe("idle-loop");
+    const bounds = await motion.boundingBox();
+    if (bounds === null) throw new Error("grass-rabbit touch bounds are unavailable");
+    const tapPlayer = () => page.touchscreen.tap(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2
+    );
+    const tapOutside = () => page.touchscreen.tap(4, 4);
+
+    await tapPlayer();
+    await expect.poll(() => rabbitState(motion)).toMatchObject({
+      visualState: "entering"
+    });
+    await tapOutside();
+    await expect.poll(() => rabbitState(motion), { timeout: 15_000 }).toEqual({
+      requestedState: "idle",
+      visualState: "idle",
+      isTransitioning: false
+    });
+
+    await tapPlayer();
+    await expect.poll(() => rabbitState(motion), { timeout: 15_000 })
+      .toMatchObject({ visualState: "hover" });
+    await tapOutside();
+    await expect.poll(() => rabbitState(motion)).toMatchObject({
+      visualState: "exiting"
+    });
+    await tapPlayer();
+    await expect.poll(() => rabbitState(motion), { timeout: 15_000 }).toEqual({
+      requestedState: "hover",
+      visualState: "hover",
+      isTransitioning: false
+    });
+    expect(failures).toEqual({ consoleErrors: [], pageErrors: [] });
+  } finally {
+    await context.close();
+  }
+});
+
+test("re-enters finite hover-out at early and late pointer or focus frames", async ({
+  page
+}) => {
+  test.setTimeout(4 * 60_000);
+  const failures = { consoleErrors: [] as string[], pageErrors: [] as string[] };
+  page.on("console", (message) => {
+    if (message.type() === "error") failures.consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => failures.pageErrors.push(error.message));
+  await page.mouse.move(0, 0);
+  await page.goto("/");
+  const motion = page.locator("#grass-rabbit");
+  await expect.poll(() => motion.evaluate((node) => (
+    node as AvalElement
+  ).readiness), { timeout: 20_000 }).toBe("interactiveReady");
+  await normalizeRabbitIdle(page, motion);
+
+  for (const mode of ["pointer", "focus"] as const) {
+    for (const targetFrame of [2, 46] as const) {
+      const witness = await exerciseRabbitReentry(
+        page,
+        motion,
+        mode,
+        targetFrame
+      );
+      expect(witness.observedFrame).toBe(targetFrame);
+      expect(witness.inputEvents).toEqual(
+        mode === "pointer"
+          ? ["pointerenter", "pointerleave", "pointerenter"]
+          : ["focusin", "focusout", "focusin"]
+      );
+      expect(witness.transitionEdges).toEqual([
+        "idle.entering",
+        "entering.hover",
+        "hover.exiting",
+        "exiting.entering",
+        "entering.hover"
+      ]);
+      expect(witness.visualStates).toEqual([
+        "entering",
+        "hover",
+        "exiting",
+        "entering",
+        "hover"
+      ]);
+      expect(witness.transitionEventTypes).toEqual(
+        Array.from({ length: 5 }, () => [
+          "transitionstart",
+          "visualstatechange",
+          "transitionend"
+        ]).flat()
+      );
+      expect(witness.settled).toEqual({
+        requestedState: "hover",
+        visualState: "hover",
+        isTransitioning: false
+      });
+      await disengageRabbit(motion, mode);
+      await expect.poll(() => rabbitState(motion), { timeout: 15_000 }).toEqual({
+        requestedState: "idle",
+        visualState: "idle",
+        isTransitioning: false
+      });
+    }
+  }
+
+  expect(failures).toEqual({ consoleErrors: [], pageErrors: [] });
+});
+
 test("keeps finite hover bodies on one forward decoder generation", async ({
   page
 }) => {
@@ -827,13 +1015,10 @@ test("keeps finite hover bodies on one forward decoder generation", async ({
         ? [record.scheduler.generation]
         : []
     ))];
-    const decodeOrdinals = frames.flatMap((record) => {
-      const media = record.media as Readonly<{
-        kind?: string;
-        decodeOrdinal?: number;
-      }> | null;
-      return media?.kind === "frame" && typeof media.decodeOrdinal === "number"
-        ? [media.decodeOrdinal]
+    const displayedFrames = frames.flatMap((record) => {
+      const frame = record.scheduler.displayedCursor?.localFrame;
+      return typeof frame === "number"
+        ? [frame]
         : [];
     });
     return {
@@ -844,7 +1029,7 @@ test("keeps finite hover bodies on one forward decoder generation", async ({
       minimumRingSize: Math.min(...frames.map((record) =>
         record.scheduler.ringSize
       )),
-      decodeOrdinals,
+      displayedFrames,
       canvasHidden: canvas?.hidden ?? true
     };
   }, baseline.traceIndex);
@@ -857,7 +1042,214 @@ test("keeps finite hover bodies on one forward decoder generation", async ({
     canvasHidden: false
   });
   expect(evidence.minimumRingSize).toBeGreaterThan(0);
-  expect(evidence.decodeOrdinals).toHaveLength(31);
-  expect(evidence.decodeOrdinals.at(-1)! - evidence.decodeOrdinals[0]!)
-    .toBe(evidence.decodeOrdinals.length - 1);
+  expect(evidence.displayedFrames).toEqual(
+    Array.from({ length: 31 }, (_, frame) => frame)
+  );
 });
+
+type RabbitReentryMode = "pointer" | "focus";
+
+interface RabbitReentryEvent {
+  readonly type: string;
+  readonly edge: string | null;
+  readonly to: string | null;
+}
+
+type RabbitReentryElement = AvalElement & {
+  __rabbitReentryEvents?: RabbitReentryEvent[];
+  __rabbitReentryInputs?: string[];
+  __rabbitReentryInstalled?: boolean;
+};
+
+async function normalizeRabbitIdle(page: Page, motion: Locator): Promise<void> {
+  await page.mouse.move(0, 0);
+  await motion.evaluate((node) => {
+    const element = node as HTMLElement;
+    element.blur();
+    element.dispatchEvent(new PointerEvent("pointerleave", {
+      pointerType: "mouse"
+    }));
+  });
+  await expect.poll(() => rabbitState(motion), { timeout: 15_000 }).toEqual({
+    requestedState: "idle",
+    visualState: "idle",
+    isTransitioning: false
+  });
+}
+
+async function exerciseRabbitReentry(
+  page: Page,
+  motion: Locator,
+  mode: RabbitReentryMode,
+  targetFrame: number
+) {
+  await normalizeRabbitIdle(page, motion);
+  await motion.evaluate((node) => {
+    const element = node as RabbitReentryElement;
+    if (element.__rabbitReentryInstalled !== true) {
+      for (const type of [
+        "transitionstart",
+        "visualstatechange",
+        "transitionend"
+      ]) {
+        element.addEventListener(type, (event) => {
+          if (!(event instanceof CustomEvent) || event.target !== element) return;
+          const detail = (event as CustomEvent<{
+            edge?: string;
+            to?: string;
+          }>).detail;
+          if (detail === null || typeof detail !== "object") return;
+          element.__rabbitReentryEvents?.push({
+            type,
+            edge: detail.edge ?? null,
+            to: detail.to ?? null
+          });
+        });
+      }
+      for (const type of [
+        "pointerenter",
+        "pointerleave",
+        "focusin",
+        "focusout"
+      ]) {
+        element.addEventListener(type, () => {
+          element.__rabbitReentryInputs?.push(type);
+        });
+      }
+      element.__rabbitReentryInstalled = true;
+    }
+    element.__rabbitReentryEvents = [];
+    element.__rabbitReentryInputs = [];
+  });
+  await engageRabbit(motion, mode);
+  await expect.poll(() => rabbitState(motion), { timeout: 15_000 }).toEqual({
+    requestedState: "hover",
+    visualState: "hover",
+    isTransitioning: false
+  });
+
+  const observedFrame = await motion.evaluate(async (
+    node,
+    input: Readonly<{ mode: RabbitReentryMode; targetFrame: number }>
+  ) => {
+    const element = node as AvalElement;
+    const deadline = performance.now() + 15_000;
+    return new Promise<number>((resolveFrame, rejectFrame) => {
+      const observe = (): void => {
+        const trace = element.getDiagnostics({ trace: true }).runtimeTrace ?? [];
+        const presentation = trace.at(-1)?.graph?.presentation as Readonly<{
+          unitId?: string;
+          frameIndex?: number;
+        }> | null | undefined;
+        if (
+          presentation?.unitId === "hover-out" &&
+          presentation.frameIndex === input.targetFrame
+        ) {
+          if (input.mode === "pointer") {
+            node.dispatchEvent(new PointerEvent("pointerenter", {
+              pointerType: "mouse"
+            }));
+          } else {
+            (node as HTMLElement).focus();
+          }
+          resolveFrame(presentation.frameIndex);
+          return;
+        }
+        if (
+          presentation?.unitId === "hover-out" &&
+          typeof presentation.frameIndex === "number" &&
+          presentation.frameIndex > input.targetFrame
+        ) {
+          rejectFrame(new Error(
+            `hover-out advanced past frame ${input.targetFrame}`
+          ));
+          return;
+        }
+        if (performance.now() >= deadline) {
+          rejectFrame(new Error(
+            `hover-out frame ${input.targetFrame} was not presented`
+          ));
+          return;
+        }
+        requestAnimationFrame(observe);
+      };
+      if (input.mode === "pointer") {
+        node.dispatchEvent(new PointerEvent("pointerleave", {
+          pointerType: "mouse"
+        }));
+      } else {
+        (node as HTMLElement).blur();
+      }
+      observe();
+    });
+  }, { mode, targetFrame });
+
+  await expect.poll(() => rabbitState(motion), { timeout: 15_000 }).toEqual({
+    requestedState: "hover",
+    visualState: "hover",
+    isTransitioning: false
+  });
+  return motion.evaluate((node, frame) => {
+    const element = node as RabbitReentryElement;
+    const events = element.__rabbitReentryEvents ?? [];
+    return {
+      observedFrame: frame,
+      inputEvents: [...(element.__rabbitReentryInputs ?? [])],
+      transitionEdges: events.flatMap((event) =>
+        event.type === "transitionstart" && event.edge !== null
+          ? [event.edge]
+          : []
+      ),
+      visualStates: events.flatMap((event) =>
+        event.type === "visualstatechange" && event.to !== null
+          ? [event.to]
+          : []
+      ),
+      transitionEventTypes: events.map((event) => event.type),
+      settled: {
+        requestedState: element.requestedState,
+        visualState: element.visualState,
+        isTransitioning: element.isTransitioning
+      }
+    };
+  }, observedFrame);
+}
+
+function engageRabbit(motion: Locator, mode: RabbitReentryMode): Promise<void> {
+  return motion.evaluate((node, requestedMode) => {
+    if (requestedMode === "pointer") {
+      node.dispatchEvent(new PointerEvent("pointerenter", {
+        pointerType: "mouse"
+      }));
+    } else {
+      (node as HTMLElement).focus();
+    }
+  }, mode);
+}
+
+function disengageRabbit(motion: Locator, mode: RabbitReentryMode): Promise<void> {
+  return motion.evaluate((node, requestedMode) => {
+    if (requestedMode === "pointer") {
+      node.dispatchEvent(new PointerEvent("pointerleave", {
+        pointerType: "mouse"
+      }));
+    } else {
+      (node as HTMLElement).blur();
+    }
+  }, mode);
+}
+
+function rabbitState(motion: Locator): Promise<Readonly<{
+  requestedState: string | null;
+  visualState: string | null;
+  isTransitioning: boolean;
+}>> {
+  return motion.evaluate((node) => {
+    const element = node as AvalElement;
+    return {
+      requestedState: element.requestedState,
+      visualState: element.visualState,
+      isTransitioning: element.isTransitioning
+    };
+  });
+}

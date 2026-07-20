@@ -8,13 +8,18 @@ import type {
 } from "./types.js";
 
 const HIGH_PROFILE_IDC = 100;
+const BASELINE_PROFILE_IDC = 66;
 const MAX_HRD_BITS = BigInt(Number.MAX_SAFE_INTEGER);
+
+export type H264SpsCompatibilityPolicy = "strict" | "encoder-candidate";
 
 export interface ParsedSps {
   readonly id: number;
   /** Exact, immutable payload identity without retaining caller byte views. */
   readonly payloadSignature: string;
-  readonly profileIdc: 100;
+  readonly profile: "constrained-baseline" | "high";
+  readonly profileIdc: 66 | 100;
+  readonly constraintSet2: boolean;
   readonly levelIdc: H264LevelIdc;
   readonly frameNumBits: number;
   readonly picOrderCount: PicOrderCountSyntax;
@@ -63,7 +68,7 @@ export interface ParsedPps {
   readonly weightedBipredIdc: number;
   readonly deblockingFilterControlPresent: boolean;
   readonly picInitQpMinus26: number;
-  readonly transform8x8Mode: true;
+  readonly transform8x8Mode: boolean;
 }
 
 interface HrdSummary {
@@ -88,24 +93,38 @@ interface VuiSummary {
 
 export function parseSps(
   nal: AnnexBNalUnit,
-  path: string
+  path: string,
+  compatibilityPolicy: H264SpsCompatibilityPolicy = "strict"
 ): ParsedSps {
   const reader = new RbspBitReader(nal.rbsp, path, nal.offset + 1);
   const profileIdc = reader.readBits(8, "profile_idc");
   requireH264(
-    profileIdc === HIGH_PROFILE_IDC,
+    profileIdc === HIGH_PROFILE_IDC || profileIdc === BASELINE_PROFILE_IDC,
     path,
-    "profile_idc must be High (100)",
+    "profile_idc must be Constrained Baseline (66) or High (100)",
     nal.offset + 1
   );
 
   const compatibility = reader.readBits(8, "constraint flags");
-  requireH264(
-    compatibility === 0,
-    path,
-    "High-profile constraint and reserved flags must be zero",
-    nal.offset + 2
-  );
+  const high = profileIdc === HIGH_PROFILE_IDC;
+  if (high) {
+    requireH264(
+      compatibility === 0,
+      path,
+      "High-profile constraint and reserved flags must be zero",
+      nal.offset + 2
+    );
+  } else {
+    requireH264(
+      compatibility === 0xe0 ||
+        (compatibilityPolicy === "encoder-candidate" && compatibility === 0xc0),
+      path,
+      compatibilityPolicy === "strict"
+        ? "Constrained Baseline compatibility byte must equal E0"
+        : "encoder Baseline compatibility byte must equal C0 or E0",
+      nal.offset + 2
+    );
+  }
   const levelIdc = reader.readBits(8, "level_idc");
   requireH264(
     isH264LevelIdc(levelIdc),
@@ -114,28 +133,30 @@ export function parseSps(
     nal.offset + 3
   );
   const id = reader.readUnsignedExpGolomb("seq_parameter_set_id", 31);
-  const chromaFormatIdc = reader.readUnsignedExpGolomb("chroma_format_idc", 3);
-  requireH264(
-    chromaFormatIdc === 1,
-    path,
-    "High-profile streams must use 4:2:0 chroma",
-    nal.offset + 1 + Math.floor(reader.bitOffset / 8)
-  );
-  requireH264(
-    reader.readUnsignedExpGolomb("bit_depth_luma_minus8", 6) === 0 &&
-      reader.readUnsignedExpGolomb("bit_depth_chroma_minus8", 6) === 0,
-    path,
-    "High-profile streams must use 8-bit luma and chroma",
-    nal.offset + 1 + Math.floor(reader.bitOffset / 8)
-  );
-  requireH264(
-    !reader.readBit("qpprime_y_zero_transform_bypass_flag"),
-    path,
-    "lossless transform bypass is forbidden",
-    nal.offset + 1 + Math.floor(reader.bitOffset / 8)
-  );
-  if (reader.readBit("seq_scaling_matrix_present_flag")) {
-    parseScalingMatrices(reader, 8);
+  if (high) {
+    const chromaFormatIdc = reader.readUnsignedExpGolomb("chroma_format_idc", 3);
+    requireH264(
+      chromaFormatIdc === 1,
+      path,
+      "High-profile streams must use 4:2:0 chroma",
+      nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+    );
+    requireH264(
+      reader.readUnsignedExpGolomb("bit_depth_luma_minus8", 6) === 0 &&
+        reader.readUnsignedExpGolomb("bit_depth_chroma_minus8", 6) === 0,
+      path,
+      "High-profile streams must use 8-bit luma and chroma",
+      nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+    );
+    requireH264(
+      !reader.readBit("qpprime_y_zero_transform_bypass_flag"),
+      path,
+      "lossless transform bypass is forbidden",
+      nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+    );
+    if (reader.readBit("seq_scaling_matrix_present_flag")) {
+      parseScalingMatrices(reader, 8);
+    }
   }
   const log2MaxFrameNumMinus4 = reader.readUnsignedExpGolomb(
     "log2_max_frame_num_minus4",
@@ -178,7 +199,7 @@ export function parseSps(
     cropBottomOffset = reader.readUnsignedExpGolomb("frame_crop_bottom_offset");
   }
 
-  // Progressive High profile with chroma_format_idc 1 uses 2x2 crop units.
+  // Both accepted progressive 4:2:0 profiles use 2x2 crop units.
   const left = cropLeftOffset * 2;
   const right = cropRightOffset * 2;
   const top = cropTopOffset * 2;
@@ -210,7 +231,9 @@ export function parseSps(
   return Object.freeze({
     id,
     payloadSignature: createPayloadSignature(nal.payload),
-    profileIdc: 100,
+    profile: high ? "high" : "constrained-baseline",
+    profileIdc,
+    constraintSet2: !high && (compatibility & 0x20) !== 0,
     levelIdc,
     frameNumBits,
     picOrderCount,
@@ -231,12 +254,19 @@ export function parseSps(
 
 export function parsePps(
   nal: AnnexBNalUnit,
-  path: string
+  path: string,
+  sps: ParsedSps
 ): ParsedPps {
   const reader = new RbspBitReader(nal.rbsp, path, nal.offset + 1);
   const id = reader.readUnsignedExpGolomb("pic_parameter_set_id", 255);
   const spsId = reader.readUnsignedExpGolomb("seq_parameter_set_id", 31);
   const entropyCoding = reader.readBit("entropy_coding_mode_flag");
+  requireH264(
+    sps.profile === "high" || !entropyCoding,
+    path,
+    "CABAC is forbidden by Constrained Baseline",
+    nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+  );
   const bottomFieldPicOrderInFramePresent = reader.readBit(
     "bottom_field_pic_order_in_frame_present_flag"
   );
@@ -268,6 +298,21 @@ export function parsePps(
     "weighted_bipred_idc is reserved",
     nal.offset + 1 + Math.floor(reader.bitOffset / 8)
   );
+  if (sps.profile === "constrained-baseline") {
+    requireH264(
+      numRefIdxL0DefaultActiveMinus1 === 0 &&
+        numRefIdxL1DefaultActiveMinus1 === 0,
+      path,
+      "Constrained Baseline default reference counts must equal one",
+      nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+    );
+    requireH264(
+      !weightedPrediction && weightedBipredIdc === 0,
+      path,
+      "weighted prediction is forbidden by Constrained Baseline",
+      nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+    );
+  }
   const picInitQpMinus26 = reader.readSignedExpGolomb(
     "pic_init_qp_minus26",
     -26,
@@ -305,23 +350,33 @@ export function parsePps(
     "redundant pictures are forbidden",
     nal.offset + 1 + Math.floor(reader.bitOffset / 8)
   );
-  requireH264(
-    reader.moreRbspData(),
-    path,
-    "High-profile PPS extension is required",
-    nal.offset + 1 + Math.floor(reader.bitOffset / 8)
-  );
-  const transform8x8Mode = reader.readBit("transform_8x8_mode_flag");
-  requireH264(
-    transform8x8Mode,
-    path,
-    "the production H264 profile requires transform_8x8_mode_flag",
-    nal.offset + 1 + Math.floor(reader.bitOffset / 8)
-  );
-  if (reader.readBit("pic_scaling_matrix_present_flag")) {
-    parseScalingMatrices(reader, 8);
+  let transform8x8Mode = false;
+  if (sps.profile === "high") {
+    requireH264(
+      reader.moreRbspData(),
+      path,
+      "High-profile PPS extension is required",
+      nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+    );
+    transform8x8Mode = reader.readBit("transform_8x8_mode_flag");
+    requireH264(
+      transform8x8Mode,
+      path,
+      "the production High profile requires transform_8x8_mode_flag",
+      nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+    );
+    if (reader.readBit("pic_scaling_matrix_present_flag")) {
+      parseScalingMatrices(reader, 8);
+    }
+    reader.readSignedExpGolomb("second_chroma_qp_index_offset", -12, 12);
+  } else {
+    requireH264(
+      !reader.moreRbspData(),
+      path,
+      "PPS extension syntax is forbidden by Constrained Baseline",
+      nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+    );
   }
-  reader.readSignedExpGolomb("second_chroma_qp_index_offset", -12, 12);
   reader.readTrailingBits();
 
   return Object.freeze({
@@ -336,7 +391,7 @@ export function parsePps(
     weightedBipredIdc,
     deblockingFilterControlPresent,
     picInitQpMinus26,
-    transform8x8Mode: true
+    transform8x8Mode
   });
 }
 

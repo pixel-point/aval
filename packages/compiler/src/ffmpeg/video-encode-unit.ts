@@ -3,6 +3,11 @@ import { dirname } from "node:path";
 import type {
   VideoRenditionGeometry
 } from "@pixel-point/aval-format";
+import {
+  h264LevelLimits,
+  h264LevelName,
+  minimumH264CompatibilityLevel
+} from "@pixel-point/aval-format";
 import type {
   NormalizedSourceRenditionTarget,
   NormalizedVideoEncoding,
@@ -186,7 +191,12 @@ export function createEncodeVideoUnitInvocation(
     "-g", String(frameCount),
     "-keyint_min", String(frameCount),
     "-sc_threshold", "0",
-    ...codecArguments(input.encoding.codec, frameCount, input.geometry),
+    ...codecArguments(
+      input.encoding.codec,
+      frameCount,
+      input.geometry,
+      input.source.frameRate
+    ),
     "-f", outputFormat(input.encoding.codec),
     "pipe:1"
   ]);
@@ -295,18 +305,35 @@ function outputFormat(codec: VideoCodec): "h264" | "hevc" | "ivf" {
 function codecArguments(
   codec: VideoCodec,
   frameCount: number,
-  geometry: Readonly<VideoRenditionGeometry>
+  geometry: Readonly<VideoRenditionGeometry>,
+  frameRate: Readonly<Rational>
 ): readonly string[] {
   switch (codec) {
     case "h264": {
       const cropRect = h264CropRect(geometry);
+      const levelIdc = minimumH264CompatibilityLevel({
+        codedWidth: geometry.codedWidth,
+        codedHeight: geometry.codedHeight,
+        frameRate,
+        // Level 1.0 cannot admit the quality-preserving production floor used
+        // by independently encoded interactive units.
+        maximumBitrate: 192_000,
+        maximumCpbBits: 500_000
+      });
+      const level = h264LevelLimits(levelIdc);
       return [
-        "-profile:v", "high",
+        "-profile:v", "baseline",
+        "-level:v", h264LevelName(levelIdc),
+        "-bf", "0",
+        "-refs", "1",
+        "-maxrate", String(level.maximumBitrate),
+        "-bufsize", String(level.maximumCpbBits),
         "-x264-params",
         [
-          "8x8dct=1",
+          "8x8dct=0",
           "aud=1",
-          "cabac=1",
+          "bframes=0",
+          "cabac=0",
           "colorprim=bt709",
           "colormatrix=bt709",
           `crop-rect=${cropRect.join(",")}`,
@@ -315,9 +342,11 @@ function codecArguments(
           `min-keyint=${String(frameCount)}`,
           "open-gop=0",
           "range=tv",
+          "ref=1",
           "repeat-headers=1",
           "scenecut=0",
-          "transfer=bt709"
+          "transfer=bt709",
+          "weightp=0"
         ].join(":")
       ];
     }

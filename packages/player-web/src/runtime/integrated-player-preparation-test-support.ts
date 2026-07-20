@@ -1,5 +1,6 @@
 import type {
   GraphPresentation,
+  MotionGraphResult,
   MotionGraphSnapshot
 } from "@pixel-point/aval-graph";
 
@@ -18,12 +19,19 @@ import {
   type IntegratedPlaybackSession,
   type IntegratedPlayerSnapshot,
   type IntegratedRealtimeDriverOptions,
-  type IntegratedFallbackStore,
   type IntegratedTimerHost,
   type RuntimeVisibilityState
 } from "./integrated-player.js";
 import type { MotionPolicy } from "./motion-policy.js";
 import type { BrowserContextRecoveryEventTarget } from "./browser-context-recovery.js";
+import {
+  INTEGRATED_STATE_STORE_FACTORY,
+  type IntegratedStateStore
+} from "./state-store.js";
+import {
+  BROWSER_PLAYBACK_TERMINAL_LISTENER,
+  type BrowserPlaybackTerminalListener
+} from "./browser-playback-terminal-listener.js";
 
 export type CandidateBehavior =
   | { readonly kind: "success"; readonly cleanupFailure?: boolean }
@@ -35,6 +43,10 @@ export type CandidateBehavior =
     }
   | { readonly kind: "gated"; readonly gate: Deferred<void> }
   | { readonly kind: "activation-gated"; readonly gate: Deferred<void> }
+  | {
+      readonly kind: "browser-terminal";
+      readonly error: RuntimePlaybackError;
+    }
   | { readonly kind: "pending" };
 
 export interface PreparationHarnessOptions {
@@ -58,7 +70,7 @@ export function createPreparationHarness(
   options: PreparationHarnessOptions = {}
 ) {
   const order: string[] = [];
-  const fallbackStore = new FakeStaticStore(
+  const stateStore = new FakeStateStore(
     options.staticBehavior ?? "immediate",
     order
   );
@@ -74,16 +86,16 @@ export function createPreparationHarness(
   const timers = options.timers ?? new ManualTimers();
   const bytes = options.bytes ?? createIntegratedTestAsset();
   let player: IntegratedPlayer | null = null;
-  player = new IntegratedPlayer({
+  const playerOptions = {
     bytes,
     selectedRenditionIndex: options.selectedRenditionIndex ?? 0,
-    createFallbackStore: () => fallbackStore,
+    [INTEGRATED_STATE_STORE_FACTORY]: () => stateStore,
     candidateFactory: factory,
-    eventSink: (event) => {
+    eventSink: (event: { readonly type: string }) => {
       events.push(event);
       if (player !== null) eventSnapshots.push(player.snapshot());
     },
-    diagnosticsSink: (failure) => failures.push(failure),
+    diagnosticsSink: (failure: Readonly<RuntimeFailure>) => failures.push(failure),
     timers,
     ...(options.realtime === undefined
       ? {}
@@ -97,10 +109,11 @@ export function createPreparationHarness(
     ...(options.initialVisibility === undefined
       ? {}
       : { initialVisibility: options.initialVisibility })
-  });
+  };
+  player = new IntegratedPlayer(playerOptions);
   return {
     player,
-    fallbackStore,
+    stateStore,
     factory,
     events,
     eventSnapshots,
@@ -113,9 +126,7 @@ export function createPreparationHarness(
 export type StaticBehavior =
   | "immediate"
   | "pending-initial"
-  | "fail-first-reveal"
   | "fail-stage"
-  | "fail-stage-and-cover"
   | "pending-present"
   | {
       readonly kind: "gate-first-present";
@@ -130,15 +141,13 @@ export type StaticBehavior =
       readonly gate: Deferred<void>;
     };
 
-export class FakeStaticStore implements IntegratedFallbackStore {
+export class FakeStateStore implements IntegratedStateStore {
   public readonly calls: string[] = [];
   public readonly committed: string[] = [];
   readonly #behavior: StaticBehavior;
   readonly #order: string[];
-  #revealFailed = false;
   #presentations = 0;
   #validations = 0;
-  #coverAttempts = 0;
   #nextPresentGate: Deferred<void> | null = null;
 
   public constructor(behavior: StaticBehavior, order: string[] = []) {
@@ -180,17 +189,15 @@ export class FakeStaticStore implements IntegratedFallbackStore {
 
   public async presentState(
     state: string,
-    options: { readonly signal: AbortSignal; readonly cover?: boolean }
+    options: { readonly signal: AbortSignal }
   ): Promise<void> {
-    this.calls.push(`${options.cover === false ? "stage" : "present"}:${state}`);
+    this.calls.push(`present:${state}`);
     this.#presentations += 1;
     const nextPresentGate = this.#nextPresentGate;
     this.#nextPresentGate = null;
     if (nextPresentGate !== null) await nextPresentGate.promise;
     if (
-      (this.#behavior === "fail-stage" ||
-        this.#behavior === "fail-stage-and-cover") &&
-      options.cover === false
+      this.#behavior === "fail-stage"
     ) {
       throw new Error("injected strict PNG surface failure");
     }
@@ -206,18 +213,7 @@ export class FakeStaticStore implements IntegratedFallbackStore {
     }
     throwIfAborted(options.signal);
     this.committed.push(state);
-    this.#order.push(`${options.cover === false
-      ? "static:staged"
-      : "static:presented"}:${state}`);
-  }
-
-  public revealAnimated(): void {
-    this.calls.push("reveal-animated");
-    this.#order.push("static:reveal-animated");
-    if (this.#behavior === "fail-first-reveal" && !this.#revealFailed) {
-      this.#revealFailed = true;
-      throw new Error("injected reveal failure");
-    }
+    this.#order.push(`state:presented:${state}`);
   }
 
   public gateNextPresent(gate: Deferred<void>): void {
@@ -226,18 +222,6 @@ export class FakeStaticStore implements IntegratedFallbackStore {
 
   public currentState(): string | null {
     return this.committed.at(-1) ?? "idle";
-  }
-
-  public coverCurrent(): void {
-    this.calls.push("cover-current");
-    this.#order.push("static:cover-current");
-    this.#coverAttempts += 1;
-    if (
-      this.#behavior === "fail-stage-and-cover" &&
-      this.#coverAttempts <= 2
-    ) {
-      throw new Error("injected strict PNG cover failure");
-    }
   }
 
   public async settled(): Promise<void> {}
@@ -289,9 +273,31 @@ export class FakeCandidateFactory implements IntegratedCandidateFactory {
       this.activeAttempts
     );
     let disposed = false;
+    let terminalListener: BrowserPlaybackTerminalListener | null = null;
+    let terminalScheduled = false;
     return {
       playback: Object.freeze({
         ...PREPARATION_PLAYBACK,
+        [BROWSER_PLAYBACK_TERMINAL_LISTENER]: (
+          listener: BrowserPlaybackTerminalListener
+        ) => {
+          terminalListener = listener;
+          return () => {
+            if (terminalListener === listener) terminalListener = null;
+          };
+        },
+        synchronizeGraph: (result: Readonly<MotionGraphResult>) => {
+          if (
+            behavior.kind !== "browser-terminal" ||
+            terminalScheduled ||
+            (result.operation !== "begin-animated" &&
+              result.operation !== "resume-animated")
+          ) return;
+          terminalScheduled = true;
+          void Promise.resolve().then(() => {
+            terminalListener?.(behavior.error);
+          });
+        },
         traceState: () => {
           if (this.failTrace) throw new Error("injected trace failure");
           return PREPARATION_PLAYBACK.traceState();
@@ -327,6 +333,7 @@ export class FakeCandidateFactory implements IntegratedCandidateFactory {
       dispose: async () => {
         if (disposed) return;
         disposed = true;
+        terminalListener = null;
         this.calls.push(`dispose:${rendition}`);
         this.#order.push(`candidate:dispose:${rendition}`);
         this.activeAttempts -= 1;

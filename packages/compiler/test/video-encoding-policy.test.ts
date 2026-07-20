@@ -24,6 +24,14 @@ function rendition(crf = 20): any {
 }
 
 describe("video encoding policy", () => {
+  it("rejects lossless CRF zero for constrained-baseline H.264", () => {
+    expect(() => cloneVideoEncodings([{
+      codec: "h264",
+      preset: "medium",
+      renditions: [rendition(0)]
+    }], canvas)).toThrow(/crf/u);
+  });
+
   it("snapshots normalized policies through the same codec validator", () => {
     const normalized = cloneVideoEncodings([{
       codec: "h264",
@@ -104,13 +112,14 @@ describe("video encoding policy", () => {
 
   it("enforces codec-specific CRF bounds", () => {
     for (const codec of ["h264", "h265"] as const) {
+      const minimum = codec === "h264" ? 1 : 0;
       const base = codec === "h264"
-        ? { codec, preset: "medium", renditions: [rendition(0)] }
-        : { codec, preset: "medium", threads: 1, renditions: [rendition(0)] };
+        ? { codec, preset: "medium", renditions: [rendition(minimum)] }
+        : { codec, preset: "medium", threads: 1, renditions: [rendition(minimum)] };
       expect(cloneVideoEncodings([base], canvas)).toHaveLength(1);
       base.renditions[0].crf = 51;
       expect(cloneVideoEncodings([base], canvas)).toHaveLength(1);
-      for (const crf of [-1, 52]) {
+      for (const crf of [minimum - 1, 52]) {
         base.renditions[0].crf = crf;
         expect(() => cloneVideoEncodings([base], canvas)).toThrow(CompilerError);
       }

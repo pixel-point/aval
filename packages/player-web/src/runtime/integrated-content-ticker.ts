@@ -2,7 +2,11 @@ import { MotionGraphEngine, type MotionGraphTickOptions } from
   "@pixel-point/aval-graph";
 
 import { EffectHost } from "./effect-host.js";
-import type { RuntimeFailure, RuntimeFailureCode } from "./errors.js";
+import type {
+  RuntimeFailure,
+  RuntimeFailureCode,
+  RuntimePlaybackError
+} from "./errors.js";
 import {
   IntegratedPlaybackInvariantError,
   type IntegratedCandidateAttempt,
@@ -34,7 +38,9 @@ interface IntegratedContentTickerOptions {
   readonly setPresentationOrdinal: (value: bigint) => void;
   readonly getActiveCandidate: () => IntegratedCandidateAttempt | null;
   readonly touch: () => void;
-  readonly startRecovery: (failure: Readonly<RuntimeFailure>) => void;
+  readonly startRecovery: (
+    failure: Readonly<RuntimeFailure>
+  ) => RuntimePlaybackError;
   readonly now: () => number;
 }
 
@@ -185,12 +191,11 @@ export class IntegratedContentTicker {
       });
       return Object.freeze({ status: "advanced" });
     } catch (error) {
-      options.startRecovery(normalizeIntegratedAnimatedFailure(
+      throw options.startRecovery(normalizeIntegratedAnimatedFailure(
         error,
         failureCode,
         context
       ));
-      return Object.freeze({ status: "stopped" });
     }
   }
 }

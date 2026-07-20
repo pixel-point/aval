@@ -21,7 +21,7 @@ no host `src` or host `integrity` attribute.
 `npm run dev` runs the compiler's watch/browser workflow. The included
 `index.html` is the package-aware Vite entry used by `npm run preview`. It
 demonstrates a native button as the semantic interaction target and a light-DOM
-fallback.
+alternate image that the starter itself reveals after a fatal playback error.
 
 The generated RGBA frames are CC0-1.0 and their exact provenance is recorded
 in `provenance.json`. No upload, account, framework, or remote asset is

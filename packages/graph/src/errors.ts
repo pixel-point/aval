@@ -4,7 +4,7 @@ export type MotionGraphErrorCode =
   | "ROUTE_NOT_FOUND"
   | "INPUT_OVERFLOW"
   | "NON_CONSECUTIVE_TICK"
-  | "PLAYBACK_FALLBACK"
+  | "PLAYBACK_ERROR"
   | "DISPOSED";
 
 export class MotionGraphError extends Error {

@@ -13,6 +13,7 @@ export type VideoCodec = "h264" | "h265" | "vp9" | "av1";
 export type VideoBitstream = "annex-b" | "frame" | "low-overhead";
 export type VideoLayout = "opaque" | "packed-alpha";
 export type VideoBitDepth = 8 | 10;
+export type FormatVersion = "1.0" | "1.1";
 
 export interface FormatBudgets {
   readonly maxFileBytes: number;
@@ -68,16 +69,51 @@ export type AlphaLayout =
       readonly alphaRect: Rect;
     };
 
-/** One quality rung in a single-codec asset. Array order is author preference. */
-export interface ProductionRendition {
+export interface PackedAlphaWitnessSampleV1 {
+  readonly x: number;
+  readonly y: number;
+  readonly expectedRange: readonly [minimum: number, maximum: number];
+}
+
+export interface PackedAlphaWitnessV1 {
+  readonly kind: "packed-alpha-v1";
+  readonly unit: Id;
+  /** Zero-based local presentation index inside `unit`. */
+  readonly frame: number;
+  readonly samples: readonly Readonly<PackedAlphaWitnessSampleV1>[];
+}
+
+export interface ProductionRenditionBase {
   readonly id: Id;
   readonly codec: string;
   readonly bitDepth: VideoBitDepth;
   readonly codedWidth: number;
   readonly codedHeight: number;
-  readonly alphaLayout: AlphaLayout;
   readonly bitrate: Bitrate;
 }
+
+/** One quality rung in a single-codec asset. Array order is author preference. */
+export interface ProductionRenditionV1_0 extends ProductionRenditionBase {
+  readonly alphaLayout: AlphaLayout;
+  readonly outputQualification?: never;
+}
+
+export interface OpaqueProductionRenditionV1_1
+  extends ProductionRenditionBase {
+  readonly alphaLayout: Extract<AlphaLayout, { readonly type: "opaque" }>;
+  readonly outputQualification?: never;
+}
+
+export interface PackedAlphaProductionRenditionV1_1
+  extends ProductionRenditionBase {
+  readonly alphaLayout: Extract<AlphaLayout, { readonly type: "stacked" }>;
+  readonly outputQualification: PackedAlphaWitnessV1;
+}
+
+export type ProductionRendition =
+  | ProductionRenditionV1_0
+  | OpaqueProductionRenditionV1_1
+  | PackedAlphaProductionRenditionV1_1;
 
 /** One unit/rendition blob in the global decode-order chunk array. */
 export interface UnitChunkSpan {
@@ -212,15 +248,12 @@ export interface DeclaredLimits {
   readonly runtimeWorkingSetBytes: number;
 }
 
-export interface CompiledManifest {
-  readonly formatVersion: "1.0";
+export interface CompiledManifestBase {
   readonly generator: string;
   readonly codec: VideoCodec;
   readonly bitstream: VideoBitstream;
-  readonly layout: VideoLayout;
   readonly canvas: Canvas;
   readonly frameRate: Rational;
-  readonly renditions: readonly ProductionRendition[];
   readonly units: readonly Unit[];
   readonly initialState: Id;
   readonly states: readonly State[];
@@ -230,9 +263,30 @@ export interface CompiledManifest {
   readonly limits: DeclaredLimits;
 }
 
-export interface FormatHeader {
-  readonly major: 1;
-  readonly minor: 0;
+export interface CompiledManifestV1_0 extends CompiledManifestBase {
+  readonly formatVersion: "1.0";
+  readonly layout: VideoLayout;
+  readonly renditions: readonly ProductionRenditionV1_0[];
+}
+
+export interface OpaqueCompiledManifestV1_1 extends CompiledManifestBase {
+  readonly formatVersion: "1.1";
+  readonly layout: "opaque";
+  readonly renditions: readonly OpaqueProductionRenditionV1_1[];
+}
+
+export interface PackedAlphaCompiledManifestV1_1 extends CompiledManifestBase {
+  readonly formatVersion: "1.1";
+  readonly layout: "packed-alpha";
+  readonly renditions: readonly PackedAlphaProductionRenditionV1_1[];
+}
+
+export type CompiledManifest =
+  | CompiledManifestV1_0
+  | OpaqueCompiledManifestV1_1
+  | PackedAlphaCompiledManifestV1_1;
+
+export interface FormatHeaderBase {
   readonly headerLength: 64;
   readonly requiredFeatureFlags: 0;
   readonly declaredFileLength: number;
@@ -241,6 +295,11 @@ export interface FormatHeader {
   readonly indexOffset: number;
   readonly indexLength: number;
 }
+
+export type FormatHeader = FormatHeaderBase & (
+  | { readonly major: 1; readonly minor: 0 }
+  | { readonly major: 1; readonly minor: 1 }
+);
 
 /** Fixed-width decode-order metadata for one elementary encoded chunk. */
 export interface EncodedChunkRecord {
@@ -298,9 +357,25 @@ export type UnitInput =
   | UnitInputOf<"reversible">
   | UnitInputOf<"one-shot">;
 
-export type CompiledManifestInput = Omit<CompiledManifest, "units"> & {
-  readonly units: readonly UnitInput[];
-};
+export type CompiledManifestInputV1_0 = Omit<
+  CompiledManifestV1_0,
+  "units"
+> & { readonly units: readonly UnitInput[] };
+
+export type OpaqueCompiledManifestInputV1_1 = Omit<
+  OpaqueCompiledManifestV1_1,
+  "units"
+> & { readonly units: readonly UnitInput[] };
+
+export type PackedAlphaCompiledManifestInputV1_1 = Omit<
+  PackedAlphaCompiledManifestV1_1,
+  "units"
+> & { readonly units: readonly UnitInput[] };
+
+export type CompiledManifestInput =
+  | CompiledManifestInputV1_0
+  | OpaqueCompiledManifestInputV1_1
+  | PackedAlphaCompiledManifestInputV1_1;
 
 /** Caller-owned payload plus timeline metadata, identified within one unit. */
 export interface EncodedChunkInput {

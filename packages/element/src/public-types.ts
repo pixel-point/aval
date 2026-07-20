@@ -1,12 +1,3 @@
-import type {
-  Binding,
-  MotionPolicy,
-  RuntimeFailureCode,
-  RuntimeReadiness,
-  RuntimeReadinessResult,
-  StaticReason
-} from "@pixel-point/aval-player-web";
-
 export const AVAL_TAG_NAME = "aval-player" as const;
 export const AVAL_ELEMENT_API_MAJOR = 1 as const;
 
@@ -14,8 +5,117 @@ export type AvalAutoplay = "visible" | "manual";
 export type AvalBindings = "auto" | "none";
 export type AvalCrossOrigin = "anonymous" | "use-credentials";
 export type AvalFit = "contain" | "cover" | "fill" | "none";
-export type AvalMotion = MotionPolicy;
+export type AvalMotion = "auto" | "reduce" | "full";
 export type AvalMode = "animated" | "static" | null;
+
+export type BindingSource =
+  | "activate"
+  | "engagement.off"
+  | "engagement.on"
+  | "focus.in"
+  | "focus.out"
+  | "hidden"
+  | "pointer.enter"
+  | "pointer.leave"
+  | "visible";
+
+export interface Binding {
+  readonly source: BindingSource;
+  readonly event: string;
+}
+
+export type RuntimeReadiness =
+  | "unready"
+  | "metadataReady"
+  | "visualReady"
+  | "interactiveReady"
+  | "staticReady"
+  | "disposed"
+  | "error";
+
+export type StaticReason =
+  | "reduced-motion"
+  | "visibility-suspended"
+  | "decoder-queued";
+
+export type RuntimeFailureCode =
+  | "invalid-asset"
+  | "load-failure"
+  | "range-response-invalid"
+  | "entity-changed"
+  | "integrity-mismatch"
+  | "unsupported-profile"
+  | "resource-rejection"
+  | "readiness-failure"
+  | "worker-decode-failure"
+  | "renderer-failure"
+  | "context-loss"
+  | "watchdog-timeout"
+  | "underflow"
+  | "abort"
+  | "disposed";
+
+interface RuntimeFailureContext {
+  readonly rendition?: string;
+  readonly profile?: string;
+  readonly codec?: string;
+  readonly unit?: string;
+  readonly state?: string;
+  readonly edge?: string;
+  readonly path?: string;
+  readonly operation?: string;
+  readonly sourceCode?: string;
+  readonly sourcePath?: string;
+  readonly alphaStatistic?: string;
+  readonly policyPhase?: string;
+  readonly lifecyclePhase?: string;
+  readonly offset?: number;
+  readonly width?: number;
+  readonly height?: number;
+  readonly generation?: number;
+  readonly ordinal?: number;
+  readonly decodeIndex?: number;
+  readonly localFrame?: number;
+  readonly rank?: number;
+  readonly requestOrdinal?: number;
+  readonly httpStatus?: number;
+  readonly expectedBytes?: number;
+  readonly observedBytes?: number;
+  readonly declaredTotalBytes?: number;
+  readonly playerBytes?: number;
+  readonly pageBytes?: number;
+}
+
+interface RuntimeFailure {
+  readonly code: RuntimeFailureCode;
+  readonly message: string;
+  readonly context: Readonly<RuntimeFailureContext>;
+}
+
+interface RuntimeCandidateReport {
+  readonly rendition: string;
+  readonly rank: number;
+  readonly outcome: "eligible" | "selected" | "rejected";
+  readonly failure: Readonly<RuntimeFailure> | null;
+}
+
+interface RuntimeReadinessReport {
+  readonly readiness: "interactiveReady" | "staticReady";
+  readonly selectedRendition: string | null;
+  readonly candidates: readonly Readonly<RuntimeCandidateReport>[];
+}
+
+export type RuntimeReadinessResult =
+  | {
+      readonly mode: "animated";
+      readonly assurance: "best-effort";
+      readonly report: Readonly<RuntimeReadinessReport>;
+    }
+  | {
+      readonly mode: "static";
+      readonly reason: StaticReason;
+      readonly report: Readonly<RuntimeReadinessReport>;
+    };
 
 export interface AvalSourceCandidate {
   readonly src: string;
@@ -76,13 +176,6 @@ export interface AvalUnderflowDetail {
   readonly cumulativeCount: number;
 }
 
-export interface AvalFallbackDetail {
-  readonly generation: number;
-  readonly reason: StaticReason;
-  readonly requestedState: string | null;
-  readonly visualState: string | null;
-}
-
 export interface AvalErrorDetail {
   readonly generation: number;
   readonly failure: Readonly<AvalPublicFailure>;
@@ -96,7 +189,6 @@ export interface AvalElementEventMap {
   readonly transitionstart: CustomEvent<Readonly<AvalTransitionDetail>>;
   readonly transitionend: CustomEvent<Readonly<AvalTransitionDetail>>;
   readonly underflow: CustomEvent<Readonly<AvalUnderflowDetail>>;
-  readonly fallback: CustomEvent<Readonly<AvalFallbackDetail>>;
   readonly error: CustomEvent<Readonly<AvalErrorDetail>>;
 }
 
@@ -115,7 +207,7 @@ export interface AvalRuntimeMediaCursor {
 
 export interface AvalRuntimeTraceRecord {
   readonly index: number;
-  readonly kind: "operation" | "content-tick" | "readiness" | "fallback" | "cleanup";
+  readonly kind: "operation" | "content-tick" | "readiness" | "cleanup";
   readonly presentationOrdinal: string | null;
   readonly rationalDeadlineUs: number | null;
   readonly callbackStartMicroseconds: number | null;
@@ -148,7 +240,6 @@ export interface AvalRuntimeTraceRecord {
   readonly settledRequestIds: readonly number[];
   readonly counters: Readonly<{
     readonly underflows: number;
-    readonly fallbacks: number;
     readonly settledRequests: number;
     readonly cleanedFrames: number;
   }>;
@@ -160,9 +251,226 @@ export interface AvalDiagnosticsCounters {
   readonly pause: number;
   readonly resume: number;
   readonly underflow: number;
-  readonly fallback: number;
   readonly contextRecovery: number;
   readonly cleanup: number;
+}
+
+/** Monotonic, source-generation-scoped proof of successful playback work. */
+export interface AvalPlaybackLifecycleCounters {
+  readonly outputsAccepted: number;
+  readonly drawsCompleted: number;
+  readonly logicalRunsCreated: number;
+  readonly candidateCommits: number;
+  readonly runsClosed: number;
+  readonly transitionStarts: number;
+  readonly transitionEnds: number;
+  readonly loopCrossings: number;
+  readonly nativeDecoderCreatesByLane: readonly [lane0: number, lane1: number];
+  readonly nativeDecoderClosesByLane: readonly [lane0: number, lane1: number];
+}
+
+export type AvalDecoderColorSpaceDiagnostic = readonly [
+  primaries: string | null,
+  transfer: string | null,
+  matrix: string | null,
+  fullRange: boolean | null
+];
+
+export interface AvalDecoderVisibleRectDiagnostic {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface AvalDecoderFrameDiagnostic {
+  readonly timestamp: number;
+  readonly duration: number | null;
+  readonly codedWidth: number;
+  readonly codedHeight: number;
+  readonly displayWidth: number;
+  readonly displayHeight: number;
+  readonly visibleRect: Readonly<AvalDecoderVisibleRectDiagnostic> | null;
+  readonly colorSpace: AvalDecoderColorSpaceDiagnostic | null;
+}
+
+export interface AvalDecoderExpectedOutputDiagnostic {
+  readonly timestamp: number | null;
+  readonly duration: number | null;
+  readonly codedWidth: number;
+  readonly codedHeight: number;
+  readonly displayAspectWidth: number;
+  readonly displayAspectHeight: number;
+  readonly visibleRect: Readonly<AvalDecoderVisibleRectDiagnostic>;
+  readonly colorSpace: AvalDecoderColorSpaceDiagnostic | null;
+  readonly frameCount: number | null;
+}
+
+export interface AvalDecoderObservedOutputDiagnostic {
+  readonly timestamp: number | null;
+  readonly duration: number | null;
+  readonly codedWidth: number | null;
+  readonly codedHeight: number | null;
+  readonly displayWidth: number | null;
+  readonly displayHeight: number | null;
+  readonly visibleRect: Readonly<AvalDecoderVisibleRectDiagnostic> | null;
+  readonly colorSpace: AvalDecoderColorSpaceDiagnostic | null;
+  readonly receivedFrameCount: number | null;
+}
+
+export interface AvalDecoderOutputFailureDiagnostic {
+  readonly kind:
+    | "metadata-shape"
+    | "unknown-output"
+    | "timing"
+    | "display-aspect"
+    | "visible-rect"
+    | "color-space"
+    | "coded-allocation"
+    | "duplicate-output"
+    | "incomplete-output";
+  readonly validationLayer: "worker-shape" | "host-expectation";
+  readonly field:
+    | "timestamp"
+    | "duration"
+    | "coded-width"
+    | "coded-height"
+    | "display-aspect"
+    | "visible-rect"
+    | "color-space"
+    | "allocation"
+    | "ordinal"
+    | "frame-count"
+    | null;
+  readonly expected: Readonly<AvalDecoderExpectedOutputDiagnostic> | null;
+  readonly actual: Readonly<AvalDecoderObservedOutputDiagnostic> | null;
+}
+
+/** Bounded, byte-free latest terminal evidence for one source and decoder lane. */
+export interface AvalDecoderDiagnostic {
+  readonly sourceGeneration: number;
+  readonly sourceIndex: number;
+  readonly rendition: string;
+  readonly codec: string;
+  readonly unit: string | null;
+  readonly lane: 0 | 1;
+  readonly logicalRunId: number | null;
+  readonly role: "foreground" | "candidate" | null;
+  readonly graph: Readonly<{
+    readonly requestedState: string | null;
+    readonly visualState: string | null;
+    readonly activeUnit: string | null;
+    readonly pendingUnit: string | null;
+  }>;
+  readonly phase:
+    | "probe"
+    | "configure"
+    | "decode"
+    | "flush"
+    | "output-validation"
+    | "frame-transfer";
+  readonly code:
+    | "unsupported-config"
+    | "decoder-operation"
+    | "invalid-output"
+    | "transport"
+    | "watchdog-timeout";
+  readonly run: number | null;
+  readonly decodeOrdinal: number | null;
+  readonly exception: Readonly<{
+    readonly name: string;
+    readonly message: string;
+  }> | null;
+  readonly firstFrame: Readonly<AvalDecoderFrameDiagnostic> | null;
+  readonly lastGoodFrame: Readonly<AvalDecoderFrameDiagnostic> | null;
+  readonly outputFailure: Readonly<AvalDecoderOutputFailureDiagnostic> | null;
+}
+
+export interface AvalRendererDiagnosticLayout {
+  readonly codedWidth: number;
+  readonly codedHeight: number;
+  readonly storageWidth: number;
+  readonly storageHeight: number;
+  readonly logicalWidth: number;
+  readonly logicalHeight: number;
+}
+
+export interface AvalRendererDiagnosticBacking {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface AvalRendererDiagnosticBytes {
+  readonly stagingBytes: number;
+  readonly residentBytes: number;
+  readonly textureBytes: number;
+  readonly backingBytes: number;
+  readonly runtimeBytes: number;
+  readonly maxTextureBytes: number;
+  readonly maxBackingBytes: number;
+  readonly maxRuntimeBytes: number;
+}
+
+export interface AvalRendererDiagnosticLimits {
+  readonly maxTextureSize: number;
+  readonly maxViewportWidth: number;
+  readonly maxViewportHeight: number;
+  readonly maxResidentTextures: number;
+}
+
+export interface AvalRendererDiagnosticContextAttributes {
+  readonly alpha: boolean | null;
+  readonly antialias: boolean | null;
+  readonly depth: boolean | null;
+  readonly desynchronized: boolean | null;
+  readonly failIfMajorPerformanceCaveat: boolean | null;
+  readonly powerPreference: "default" | "high-performance" | "low-power" | null;
+  readonly premultipliedAlpha: boolean | null;
+  readonly preserveDrawingBuffer: boolean | null;
+  readonly stencil: boolean | null;
+  readonly xrCompatible: boolean | null;
+}
+
+/** Bounded, byte-free latest terminal renderer evidence for one source. */
+export interface AvalRendererDiagnostic {
+  readonly sourceGeneration: number;
+  readonly sourceIndex: number;
+  readonly rendition: string;
+  readonly codec: string;
+  readonly backend: "webgl2" | "canvas2d";
+  readonly phase:
+    | "backing-admission"
+    | "context-create"
+    | "capability-query"
+    | "device-limits"
+    | "program-create"
+    | "stream-texture-create"
+    | "resident-texture-create"
+    | "native-upload"
+    | "semantic-upload"
+    | "rgba-copy"
+    | "rgba-upload"
+    | "draw"
+    | "resize"
+    | "context-event";
+  readonly operation: "construct" | "runtime" | "restore";
+  readonly operationOrdinal: number;
+  readonly exception: Readonly<{
+    readonly name: string;
+    readonly message: string;
+  }> | null;
+  readonly glError: number | null;
+  readonly contextLost: boolean;
+  readonly uploadPath: "native" | "rgba-copy" | null;
+  readonly textureOrdinal: number | null;
+  readonly layout: Readonly<AvalRendererDiagnosticLayout>;
+  readonly backing: Readonly<AvalRendererDiagnosticBacking>;
+  readonly bytes: Readonly<AvalRendererDiagnosticBytes>;
+  readonly limits: Readonly<AvalRendererDiagnosticLimits>;
+  readonly contextAttributes:
+    Readonly<AvalRendererDiagnosticContextAttributes> | null;
+  readonly vendor: string | null;
+  readonly renderer: string | null;
 }
 
 /**
@@ -199,7 +507,7 @@ export interface AvalCleanupReceipt {
   readonly stalePublicationCount: number;
   readonly pagePhysicalBytes: number;
   readonly pageParticipantCount: number;
-  readonly pageActiveDecoderLeaseCount: number;
+  readonly pageActiveDecoderSlotCount: number;
   readonly pageQueuedDecoderTicketCount: number;
   readonly pageParkedDecoderTicketCount: number;
 }
@@ -256,6 +564,7 @@ export interface AvalDiagnostics {
   readonly runtime: Readonly<{
     selectedRendition: string | null;
     selectedCodec: string | null;
+    rendererBackend: "webgl2" | "canvas2d" | null;
     selectedBitDepth: 8 | 10 | null;
     transportMode: "range" | "full" | null;
     declaredFileBytes: number;
@@ -265,13 +574,22 @@ export interface AvalDiagnostics {
     activeTransportBodies: number;
     pendingLoads: number;
     interestedWaiters: number;
+    stalePublicationCount: number;
     playerTrackedBytes: number;
     pagePhysicalBytes: number;
     activeLeaseCount: number;
     decoderLeaseState: string | null;
+    pageActiveDecoderSlotCount: number;
+    pageQueuedDecoderTicketCount: number;
+    pageParkedDecoderTicketCount: number;
+    pageParticipantCount: number;
     reclamationCount: number;
     contextLossCount: number;
     contextRecoveryCount: number;
+    cleanupFailureCount: number;
+    playbackLifecycle: Readonly<AvalPlaybackLifecycleCounters>;
+    decoderDiagnostics: readonly Readonly<AvalDecoderDiagnostic>[];
+    rendererDiagnostics: readonly Readonly<AvalRendererDiagnostic>[];
   }>;
   readonly motion: Readonly<{
     configured: AvalMotion;
@@ -396,10 +714,3 @@ declare global {
     "aval-player": AvalElement;
   }
 }
-
-export type {
-  Binding,
-  RuntimeReadiness,
-  RuntimeReadinessResult,
-  StaticReason
-};

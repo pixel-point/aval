@@ -1,9 +1,12 @@
 export { inspectH264AnnexBRendition } from "./inspector.js";
 export {
   h264CodecForLevel,
+  h264CodecForProfileLevel,
+  h264LevelName,
   h264LevelLimits,
   isH264Codec,
   isH264LevelIdc,
+  minimumH264CompatibilityLevel,
   parseH264Codec
 } from "./codec.js";
 export {
@@ -14,8 +17,13 @@ export {
 export { prepareH264EncoderRendition } from "./encoder-preparation.js";
 export type {
   H264Codec,
+  H264CodecProfile,
+  H264CompatibilityLevelInput,
+  H264ConstrainedBaselineCodec,
+  H264HighCodec,
   H264LevelIdc,
-  H264LevelLimits
+  H264LevelLimits,
+  ParsedH264Codec
 } from "./codec.js";
 export type {
   H264AccessUnitInput,

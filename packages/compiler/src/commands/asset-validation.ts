@@ -1,7 +1,6 @@
 import {
   FORMAT_DEFAULT_BUDGETS,
   FormatError,
-  h264CodecForLevel,
   inspectAv1Rendition,
   inspectH264AnnexBRendition,
   inspectH265AnnexBRendition,
@@ -225,7 +224,7 @@ function inspectVideoRendition(
       });
       assertCodecString(
         rendition,
-        h264CodecForLevel(inspection.parameterSet.levelIdc)
+        inspection.parameterSet.codec
       );
       assertH264Timeline(units, inspection);
       throwIfAborted(signal);

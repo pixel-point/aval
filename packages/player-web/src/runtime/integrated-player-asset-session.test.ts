@@ -5,10 +5,11 @@ import { createIntegratedTestAsset } from "./asset-test-support.js";
 import { RuntimePlaybackError, normalizeRuntimeFailure } from "./errors.js";
 import {
   IntegratedPlayer,
+  integratedStateStoreOption,
   type IntegratedCandidateAttempt,
   type IntegratedCandidateAttemptContext,
   type IntegratedCandidateFactory,
-  type IntegratedFallbackStore
+  type IntegratedStateStore
 } from "./integrated-player.js";
 import {
   Deferred,
@@ -39,7 +40,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
       const store = new RecordingStaticStore(timeline);
       const factory = new RecordingCandidateFactory(timeline);
       let factoryCatalog: RuntimeAssetCatalog | null = null;
-      const createFallbackStore = vi.fn((catalog: RuntimeAssetCatalog) => {
+      const createStateStore = vi.fn((catalog: RuntimeAssetCatalog) => {
         expect(catalog).toBe(session.catalog);
         return store;
       });
@@ -49,7 +50,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
         assetSession: session,
         assetSessionOwnership: "external",
         selectedRendition: selectIntegratedTestVideoRendition(session.catalog),
-        createFallbackStore,
+        ...integratedStateStoreOption(createStateStore),
         candidateFactory: factory,
         timers: new ManualTimers()
       });
@@ -66,7 +67,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
       expect(copyChunk.mock.calls.every(([rendition]) =>
         rendition === "opaque-high"
       )).toBe(true);
-      expect(createFallbackStore).toHaveBeenCalledOnce();
+      expect(createStateStore).toHaveBeenCalledOnce();
 
       await player.dispose();
       expect(session.disposeCalls).toBe(0);
@@ -87,18 +88,16 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
       assetSession: unitSession,
       assetSessionOwnership: "external",
       selectedRendition: selectIntegratedTestVideoRendition(unitSession.catalog),
-      createFallbackStore: () => new RecordingStaticStore(unitTimeline),
+      ...integratedStateStoreOption(() => new RecordingStaticStore(unitTimeline)),
       candidateFactory: unitFactory,
       timers: new ManualTimers()
     });
 
-    await expect(unitPlayer.prepare()).resolves.toMatchObject({
-      mode: "static",
-      report: {
-        selectedRendition: null,
-        candidates: [{ rendition: "opaque-high", outcome: "rejected" }]
-      }
+    await expect(unitPlayer.prepare()).rejects.toMatchObject({
+      name: "RuntimePlaybackError",
+      code: "integrity-mismatch"
     });
+    expect(unitPlayer.snapshot().readiness).toBe("error");
     expect(copyChunk).not.toHaveBeenCalled();
     expect(unitSession.calls).toContain("evict:opaque-high");
     expect(unitFactory.calls).not.toContain("create:opaque-high");
@@ -117,7 +116,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
       assetSessionOwnership: "external",
       selectedRendition: selectIntegratedTestVideoRendition(session.catalog),
       initialVisibility: "hidden",
-      createFallbackStore: () => new RecordingStaticStore(timeline),
+      ...integratedStateStoreOption(() => new RecordingStaticStore(timeline)),
       candidateFactory: factory,
       timers: new ManualTimers()
     });
@@ -152,7 +151,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
       assetSession: session,
       assetSessionOwnership: "player",
       selectedRendition: selectIntegratedTestVideoRendition(session.catalog),
-      createFallbackStore: () => new RecordingStaticStore(timeline),
+      ...integratedStateStoreOption(() => new RecordingStaticStore(timeline)),
       candidateFactory: factory,
       timers: new ManualTimers()
     });
@@ -174,7 +173,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
       assetSession: hideSession,
       assetSessionOwnership: "external",
       selectedRendition: selectIntegratedTestVideoRendition(hideSession.catalog),
-      createFallbackStore: () => new RecordingStaticStore(hideTimeline),
+      ...integratedStateStoreOption(() => new RecordingStaticStore(hideTimeline)),
       candidateFactory: new RecordingCandidateFactory(hideTimeline),
       timers: new ManualTimers()
     });
@@ -196,7 +195,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
       assetSession: contextSession,
       assetSessionOwnership: "external",
       selectedRendition: selectIntegratedTestVideoRendition(contextSession.catalog),
-      createFallbackStore: () => new RecordingStaticStore(contextTimeline),
+      ...integratedStateStoreOption(() => new RecordingStaticStore(contextTimeline)),
       candidateFactory: contextFactory,
       timers: new ManualTimers()
     });
@@ -212,7 +211,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
   it("rejects ambiguous or implicit session ownership", () => {
     const session = new FakeAssetSession("range", []);
     const common = {
-      createFallbackStore: () => new RecordingStaticStore([]),
+      ...integratedStateStoreOption(() => new RecordingStaticStore([])),
       candidateFactory: new RecordingCandidateFactory([])
     };
     expect(() => new IntegratedPlayer({
@@ -234,7 +233,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
       assetSession: session,
       assetSessionOwnership: "external" as const,
       selectedRendition: selectIntegratedTestVideoRendition(session.catalog),
-      createFallbackStore: () => new RecordingStaticStore([]),
+      ...integratedStateStoreOption(() => new RecordingStaticStore([])),
       candidateFactory: new RecordingCandidateFactory([]),
       timers: new ManualTimers()
     });
@@ -258,7 +257,9 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
 
     expect(() => new IntegratedPlayer({
       ...options(),
-      createFallbackStore: () => { throw new Error("constructor seam"); }
+      ...integratedStateStoreOption(() => {
+        throw new Error("constructor seam");
+      })
     })).toThrow("constructor seam");
     await Promise.resolve();
     const afterFailure = new IntegratedPlayer(options());
@@ -267,7 +268,7 @@ describe("IntegratedPlayer sparse asset-session composition", () => {
   });
 });
 
-class RecordingStaticStore implements IntegratedFallbackStore {
+class RecordingStaticStore implements IntegratedStateStore {
   public readonly calls: string[] = [];
   readonly #timeline: string[];
   #state: string | null = null;
@@ -297,8 +298,6 @@ class RecordingStaticStore implements IntegratedFallbackStore {
     this.#state = state;
   }
   public currentState(): string | null { return this.#state; }
-  public coverCurrent(): void { this.#timeline.push("store:cover"); }
-  public revealAnimated(): void { this.#timeline.push("store:reveal"); }
   public async settled(): Promise<void> {}
   public dispose(): void {
     this.calls.push("dispose");

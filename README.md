@@ -5,9 +5,10 @@ loops, named application states, authored triggers, bounded transitions,
 reversals, and packed transparency.
 
 One logical animation is published as a codec bundle. Each codec gets its own
-AVAL 1.0 file—AV1, VP9, H.265/HEVC, or H.264—and the browser selects the first
-ordered `<source>` with a supported rendition. The state graph and authored
-timing are identical in every file.
+AVAL wire 1.1 file—AV1, VP9, H.265/HEVC, or H.264—and the browser selects the
+first ordered `<source>` that decodes and passes pre-readiness output
+qualification. The state graph and authored timing are identical in every
+file.
 
 ## Five-minute start
 
@@ -22,8 +23,8 @@ npm run dev
 
 Here `npx avl` resolves the `avl` executable from the compiler package
 installed on the preceding line. The generated starter contains its RGBA
-frames, project 1.0 file, four ordered encoding policies, fallback markup, and
-watch workflow.
+frames, project 1.0 file, four ordered encoding policies, consumer-owned error
+handling, and watch workflow.
 
 For a normal build, the compiler publishes a directory rather than a single
 output file:
@@ -47,39 +48,70 @@ Use literal direct-child sources in preference order. The exact codec strings
 come from `build.json`; the values below are illustrative.
 
 ```html
-<aval-player width="320" height="320">
-  <source
-    src="/motion/av1.avl"
-    type='application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"'
-  >
-  <source
-    src="/motion/vp9.avl"
-    type='application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"'
-  >
-  <source
-    src="/motion/h265.avl"
-    type='application/vnd.aval; codecs="hvc1.1.6.L93.B0"'
-  >
-  <source
-    src="/motion/h264.avl"
-    type='application/vnd.aval; codecs="avc1.640028"'
-  >
-  <img slot="fallback" src="/motion.png" alt="">
-</aval-player>
+<div class="motion-shell">
+  <aval-player id="motion" width="320" height="320">
+    <source
+      src="/motion/av1.avl"
+      type='application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"'
+    >
+    <source
+      src="/motion/vp9.avl"
+      type='application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"'
+    >
+    <source
+      src="/motion/h265.avl"
+      type='application/vnd.aval; codecs="hvc1.1.6.L93.B0"'
+    >
+    <source
+      src="/motion/h264.avl"
+      type='application/vnd.aval; codecs="avc1.42E01E"'
+    >
+  </aval-player>
+  <img id="motion-unavailable" src="/motion.png" alt="" hidden>
+</div>
 
 <script type="module" src="/motion.js"></script>
 ```
 
 ```js
 // motion.js, resolved by a package-aware web build
-import { defineAvalElement } from "@pixel-point/aval-element";
+import {
+  AvalPlaybackError,
+  defineAvalElement
+} from "@pixel-point/aval-element";
+
+const motion = document.querySelector("#motion");
+const unavailable = document.querySelector("#motion-unavailable");
+function revealPlaybackUnavailable(failure) {
+  const diagnostics = motion.getDiagnostics();
+  if (
+    motion.readiness === "error" &&
+    diagnostics.lastFailure !== null &&
+    failure === diagnostics.lastFailure
+  ) {
+    unavailable.hidden = false;
+  }
+}
+motion.addEventListener("error", (event) => {
+  if (event.detail.fatal) revealPlaybackUnavailable(event.detail.failure);
+});
+motion.addEventListener("readinesschange", () => {
+  if (motion.readiness === "interactiveReady") unavailable.hidden = true;
+});
 defineAvalElement();
+
+try {
+  await motion.prepare();
+} catch (error) {
+  if (!(error instanceof AvalPlaybackError)) throw error;
+  revealPlaybackUnavailable(error.failure);
+}
 ```
 
 The `<aval-player>` host does not carry `src`; URLs belong to each codec
-candidate. If no candidate is supported, the author-owned fallback remains
-visible. Applications can select any authored state without media seeking
-code:
+candidate. AVAL raises `AvalPlaybackError` when playback cannot run. The
+application decides whether to show its sibling image, another renderer, text,
+or nothing. Applications can select any authored state without media seeking:
 
 ```js
 const motion = document.querySelector("aval-player");
@@ -107,7 +139,7 @@ obligations remain the publisher's responsibility.
 ## Packages
 
 - `@pixel-point/aval-graph`: deterministic state and route engine.
-- `@pixel-point/aval-format`: strict AVAL wire 1.0 parser, validator, and writer.
+- `@pixel-point/aval-format`: strict AVAL wire 1.0/1.1 parser, validator, and writer.
 - `@pixel-point/aval-compiler`: project 1.0 authoring API and bundle compiler.
 - `@pixel-point/aval-player-web`: bounded loader, codec probing, decoder
   scheduling, renderer, and page resource management.
@@ -128,16 +160,19 @@ npm run build
 npm run test:browser:reference
 ```
 
-Browser animation is capability-probed in authored source order. Unsupported
-codec candidates fall through to the next `<source>`; when none can run, the
-element keeps its optional host-owned fallback slot visible.
+Browser animation is qualified in authored source order. A positive WebCodecs
+configuration probe remains provisional; unsupported configurations and
+codec-specific startup qualification failures fall through to the next
+`<source>`. Once `interactiveReady` is published, the selected codec never
+hot-switches. When no candidate qualifies, preparation rejects and one fatal
+`error` event identifies the failed source generation. AVAL never selects or
+reveals alternate application content.
 
 ## TODO
 
 - React dedicated component and API.  
 - More browser tests.  
 - Render some cool stuff in 3D for the demo instead of that AI-generated loop that I was not able to make look the way I wanted to actually showcase the uninterruptible animation.
-- Runtime bundle size optimization
 
 ## Documentation
 

@@ -5,7 +5,13 @@ import { spawnSync } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const toolBacked = process.argv.includes("--tool-backed");
-const args = ["vitest", "run", "packages/compiler/test/real-tool-matrix.test.ts", "packages/compiler/test/ffmpeg-integration.test.ts"];
+const args = [
+  "vitest",
+  "run",
+  "packages/compiler/test/project-bundle-compiler.test.ts",
+  "packages/compiler/test/video-rendition-pipeline.test.ts",
+  "packages/compiler/test/ivf-codec-integration.test.ts"
+];
 if (!toolBacked) {
   process.stdout.write(`${JSON.stringify({ status: "not-run", reason: "pass --tool-backed to run the recorded semantic native-tool matrix" })}\n`);
   process.exit(0);

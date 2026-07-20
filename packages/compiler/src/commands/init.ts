@@ -65,6 +65,7 @@ export async function runInitCommand(
       "package.json",
       "index.html",
       "main.js",
+      "style.css",
       ...frameFiles
     ]);
     const provenance = Object.freeze({
@@ -89,7 +90,8 @@ export async function runInitCommand(
       ["provenance.json", serializeCanonicalJson(provenance)],
       ["package.json", serializeCanonicalJson(STARTER_PACKAGE)],
       ["index.html", text(HTML_EXAMPLE)],
-      ["main.js", text(STARTER_SCRIPT)]
+      ["main.js", text(STARTER_SCRIPT)],
+      ["style.css", text(STYLE_EXAMPLE)]
     ]);
     for (let index = 0; index < frames.length; index += 1) {
       outputs.set(frameFiles[index]!, frames[index]!);
@@ -365,7 +367,7 @@ no host \`src\` or host \`integrity\` attribute.
 \`npm run dev\` runs the compiler's watch/browser workflow. The included
 \`index.html\` is the package-aware Vite entry used by \`npm run preview\`. It
 demonstrates a native button as the semantic interaction target and a light-DOM
-fallback.
+alternate image that the starter itself reveals after a fatal playback error.
 
 The generated RGBA frames are CC0-1.0 and their exact provenance is recorded
 in \`provenance.json\`. No upload, account, framework, or remote asset is
@@ -374,7 +376,11 @@ required.
 
 const HTML_EXAMPLE = `<!doctype html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Idle/hover AVAL</title></head>
+<head>
+  <meta charset="UTF-8">
+  <title>Idle/hover AVAL</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
 <body>
   <button id="favorite" type="button">
     <aval-player id="motion" interaction-for="favorite" aria-hidden="true">
@@ -382,8 +388,8 @@ const HTML_EXAMPLE = `<!doctype html>
       <source data-aval-codec="vp9">
       <source data-aval-codec="h265">
       <source data-aval-codec="h264">
-      <img slot="fallback" src="./frames/frame-0000.png" alt="" width="48" height="48">
     </aval-player>
+    <img id="motion-unavailable" src="./frames/frame-0000.png" alt="" width="48" height="48" hidden>
     <span>Favorite</span>
   </button>
   <script type="module" src="./main.js"></script>
@@ -391,8 +397,44 @@ const HTML_EXAMPLE = `<!doctype html>
 </html>
 `;
 
+const STYLE_EXAMPLE = `#favorite {
+  display: inline-grid;
+  grid-template-columns: 48px auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+#motion,
+#motion-unavailable {
+  grid-area: 1 / 1;
+  width: 48px;
+  height: 48px;
+}
+
+#favorite > span {
+  grid-column: 2;
+}
+`;
+
 const STARTER_SCRIPT = `const player = document.querySelector("#motion");
-if (!(player instanceof HTMLElement)) throw new Error("starter markup is incomplete");
+const unavailable = document.querySelector("#motion-unavailable");
+if (!(player instanceof HTMLElement) || !(unavailable instanceof HTMLImageElement)) {
+  throw new Error("starter markup is incomplete");
+}
+player.addEventListener("error", (event) => {
+  const diagnostics = player.getDiagnostics();
+  if (
+    event.detail.fatal === true &&
+    player.readiness === "error" &&
+    diagnostics.lastFailure !== null &&
+    event.detail.failure === diagnostics.lastFailure
+  ) {
+    unavailable.hidden = false;
+  }
+});
+player.addEventListener("readinesschange", () => {
+  if (player.readiness === "interactiveReady") unavailable.hidden = true;
+});
 
 try {
   const response = await fetch("./motion/build.json");
@@ -418,7 +460,8 @@ try {
     source.removeAttribute("data-aval-codec");
   }
 } catch (error) {
-  console.error("AVAL starter source setup failed; the fallback remains available.", error);
+  unavailable.hidden = false;
+  console.error("AVAL starter source setup failed.", error);
 }
 
 await import("@pixel-point/aval-element/auto");

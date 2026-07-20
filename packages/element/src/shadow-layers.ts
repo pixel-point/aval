@@ -1,12 +1,7 @@
 import { AVAL_SHADOW_STYLE } from "./shadow-style.js";
 
-export type AvalVisibleLayer =
-  | "fallback"
-  | "animated";
-
 export class ShadowLayerOwner {
   public readonly root: ShadowRoot;
-  public readonly fallback: HTMLSlotElement;
   public readonly animatedCanvas: HTMLCanvasElement;
 
   #hostRule: CSSStyleRule | null = null;
@@ -16,7 +11,6 @@ export class ShadowLayerOwner {
     width: null as number | null,
     height: null as number | null
   });
-  #visible: AvalVisibleLayer = "fallback";
   #sourceGeneration = 0;
   #animatedDrawn = false;
   #disposed = false;
@@ -24,13 +18,10 @@ export class ShadowLayerOwner {
 
   public constructor(host: HTMLElement, document: Document = host.ownerDocument) {
     this.root = host.attachShadow({ mode: "open" });
-    this.fallback = document.createElement("slot");
-    this.fallback.name = "fallback";
-    this.fallback.dataset.avalLayer = "fallback";
     this.animatedCanvas = this.#createCanvas();
-    this.root.append(this.fallback, this.animatedCanvas);
+    this.animatedCanvas.hidden = true;
+    this.root.append(this.animatedCanvas);
     this.rebindStyles(document);
-    this.#applyVisibility("fallback");
   }
 
   public get stylesSupported(): boolean {
@@ -80,25 +71,11 @@ export class ShadowLayerOwner {
     return this.#applyIntrinsicSize();
   }
 
-  public get visibleLayer(): AvalVisibleLayer {
-    return this.#visible;
-  }
-
   public resetSource(generation: number): void {
     this.#throwIfDisposed();
     this.#sourceGeneration = requireGeneration(generation);
     this.#animatedDrawn = false;
-    this.#applyVisibility("fallback");
-  }
-
-  public showBestFallback(): void {
-    this.#throwIfDisposed();
-    this.#applyVisibility("fallback");
-  }
-
-  public coverFallback(generation: number): void {
-    this.#assertCurrent(generation);
-    this.#applyVisibility("fallback");
+    this.animatedCanvas.hidden = true;
   }
 
   public markAnimatedDrawn(generation: number): void {
@@ -111,12 +88,7 @@ export class ShadowLayerOwner {
     if (!this.#animatedDrawn) {
       throw new Error("animated presentation cannot be revealed before draw");
     }
-    this.#applyVisibility("animated");
-  }
-
-  public showFallbackAfterFatal(generation: number): void {
-    this.#assertCurrent(generation);
-    this.#applyVisibility("fallback");
+    this.animatedCanvas.hidden = false;
   }
 
   public dispose(): boolean {
@@ -127,11 +99,9 @@ export class ShadowLayerOwner {
     const attempt = (operation: () => void): void => {
       try { operation(); } catch { complete = false; }
     };
-    attempt(() => { this.fallback.hidden = false; });
     attempt(() => { this.animatedCanvas.hidden = true; });
     attempt(() => { this.animatedCanvas.width = 0; });
     attempt(() => { this.animatedCanvas.height = 0; });
-    this.#visible = "fallback";
     this.#disposeComplete = complete;
     return complete;
   }
@@ -172,18 +142,7 @@ export class ShadowLayerOwner {
   #disableStyles(): void {
     this.#hostRule = null;
     this.#stylesSupported = false;
-    try { this.root.adoptedStyleSheets = []; } catch { /* fallback stays author-owned */ }
-    this.#applyVisibility("fallback");
-  }
-
-  #applyVisibility(layer: AvalVisibleLayer): void {
-    const showFallback = layer === "fallback";
-    const showAnimated = layer === "animated";
-    if (showFallback) this.fallback.hidden = false;
-    if (showAnimated) this.animatedCanvas.hidden = false;
-    this.animatedCanvas.hidden = !showAnimated;
-    this.fallback.hidden = !showFallback;
-    this.#visible = layer;
+    try { this.root.adoptedStyleSheets = []; } catch { /* unsupported realm */ }
   }
 
   #assertCurrent(generation: number): void {

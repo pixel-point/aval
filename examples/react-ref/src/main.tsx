@@ -31,7 +31,7 @@ function App() {
     setStatus(state === null ? "Waiting for a visual state…" : `Visual state: ${state}`);
   }, []);
   const handleError = useCallback(() => {
-    setStatus("Animation unavailable; the accessible fallback remains usable.");
+    setStatus("Animation unavailable; React rendered the alternate status.");
   }, []);
 
   return (

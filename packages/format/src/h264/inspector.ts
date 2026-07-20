@@ -10,11 +10,12 @@ import {
   type AnnexBNalUnit
 } from "./annex-b.js";
 import { RbspBitReader } from "./bit-reader.js";
-import { h264CodecForLevel, h264LevelLimits } from "./codec.js";
+import { h264CodecForProfileLevel, h264LevelLimits } from "./codec.js";
 import { h264Invalid, requireH264 } from "./failure.js";
 import {
   parsePps,
   parseSps,
+  type H264SpsCompatibilityPolicy,
   type ParsedPps,
   type ParsedSps
 } from "./parameter-sets.js";
@@ -64,17 +65,26 @@ interface H264AccessUnitStateResult {
  * Inspects every access unit in an independently decodable rendition.
  *
  * This is intentionally a syntax/dependency verifier, not a decoder. It
- * accepts only the production High-profile subset and returns a
+ * accepts the production Constrained Baseline subset and the legacy
+ * High-profile subset, and returns a
  * deeply immutable scalar summary; no caller-owned byte views escape.
  */
 export function inspectH264AnnexBRendition(
   input: H264RenditionInspectionInput
 ): H264RenditionInspection {
-  return inspectRendition(input);
+  return inspectRendition(input, "strict");
+}
+
+/** Inspect libx264's C0 Baseline candidate before bounded E0 canonicalization. */
+export function inspectH264AnnexBEncoderCandidateRendition(
+  input: H264RenditionInspectionInput
+): H264RenditionInspection {
+  return inspectRendition(input, "encoder-candidate");
 }
 
 function inspectRendition(
-  input: H264RenditionInspectionInput
+  input: H264RenditionInspectionInput,
+  compatibilityPolicy: H264SpsCompatibilityPolicy
 ): H264RenditionInspection {
   try {
     const profile = cloneH264Profile(input?.profile);
@@ -140,7 +150,8 @@ function inspectRendition(
           stableParameterSets,
           profile,
           orderState,
-          macroblocksPerFrame
+          macroblocksPerFrame,
+          compatibilityPolicy
         );
         activeParameterSets = result.parameterSets;
         if (stableParameterSets === undefined) {
@@ -314,7 +325,8 @@ function inspectH264AccessUnitStatefully(
   stableParameterSets: H264ParameterSetState | undefined,
   profile: H264Profile,
   orderState: H264PictureOrderState,
-  knownMacroblocksPerFrame: number | undefined
+  knownMacroblocksPerFrame: number | undefined,
+  compatibilityPolicy: H264SpsCompatibilityPolicy
 ): H264AccessUnitStateResult {
   const nals = splitAnnexBAccessUnit(accessUnit.bytes, `${path}.bytes`);
   requireH264(
@@ -352,7 +364,7 @@ function inspectH264AccessUnitStatefully(
           "SPS must appear once before PPS and VCL",
           nal.offset
         );
-        parsedSps = parseSps(nal, nalPath);
+        parsedSps = parseSps(nal, nalPath, compatibilityPolicy);
         break;
       case H264_NAL_TYPE_PPS:
         requireH264(
@@ -361,7 +373,7 @@ function inspectH264AccessUnitStatefully(
           "PPS must appear once after SPS and before VCL",
           nal.offset
         );
-        parsedPps = parsePps(nal, nalPath);
+        parsedPps = parsePps(nal, nalPath, parsedSps);
         requireH264(
           parsedPps.spsId === parsedSps.id,
           nalPath,
@@ -541,6 +553,32 @@ function validateCanonicalH264Subset(
     "AUD primary_pic_type does not match the coded picture"
   );
   const { sps } = parameterSets;
+  if (sps.profile === "constrained-baseline") {
+    const { pps } = parameterSets;
+    requireH264(
+      sps.maxNumRefFrames === 1 &&
+        sps.maxNumReorderFrames === 0 &&
+        pps.numRefIdxL0DefaultActiveMinus1 === 0 &&
+        pps.numRefIdxL1DefaultActiveMinus1 === 0,
+      path,
+      "Constrained Baseline requires one reference and no reordering"
+    );
+    requireH264(
+      !pps.entropyCoding &&
+        !pps.weightedPrediction &&
+        pps.weightedBipredIdc === 0 &&
+        !pps.transform8x8Mode,
+      path,
+      "Constrained Baseline forbids CABAC, weighted prediction, and 8x8 transform"
+    );
+    requireH264(
+      first
+        ? summary.sliceType === "I"
+        : summary.sliceType === "P",
+      path,
+      "Constrained Baseline units must contain one IDR I followed by P pictures"
+    );
+  }
   requireH264(
     sps.squareSampleAspect,
     `${path}.sps`,
@@ -848,8 +886,9 @@ export function createH264ParameterSetSummary(
   sps: ParsedSps
 ): H264ParameterSetSummary {
   return Object.freeze({
-    profileIdc: 100,
-    codec: h264CodecForLevel(sps.levelIdc),
+    profile: sps.profile,
+    profileIdc: sps.profileIdc,
+    codec: h264CodecForProfileLevel(sps.profile, sps.levelIdc),
     levelIdc: sps.levelIdc,
     codedWidth: sps.codedWidth,
     codedHeight: sps.codedHeight,

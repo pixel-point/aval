@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aval.local/schemas/browser-certification-policy-1.0.json",
+  "title": "AVAL rolling browser certification policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "policyVersion",
+    "inventoryResolvedAt",
+    "inventoryState",
+    "unresolvedProductVersionSlotIds",
+    "boundaryDate",
+    "rollingWindowMonths",
+    "requirements",
+    "braveBuilds",
+    "slots"
+  ],
+  "properties": {
+    "$schema": { "const": "./certification-policy.schema.json" },
+    "policyVersion": { "const": "1.0" },
+    "inventoryResolvedAt": { "$ref": "#/$defs/dateTime" },
+    "inventoryState": { "enum": ["resolved", "awaiting-device-browser-identities"] },
+    "unresolvedProductVersionSlotIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/identifier" }
+    },
+    "boundaryDate": { "$ref": "#/$defs/date" },
+    "rollingWindowMonths": { "const": 24 },
+    "requirements": { "$ref": "#/$defs/requirements" },
+    "braveBuilds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current", "boundary"],
+      "properties": {
+        "current": { "$ref": "#/$defs/braveBuild" },
+        "boundary": { "$ref": "#/$defs/braveBuild" }
+      }
+    },
+    "slots": {
+      "type": "array",
+      "minItems": 45,
+      "maxItems": 45,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/slot" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "type": "object", "properties": { "inventoryState": { "const": "resolved" } } },
+      "then": {
+        "properties": {
+          "unresolvedProductVersionSlotIds": { "type": "array", "maxItems": 0 },
+          "slots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "browser": {
+                  "type": "object",
+                  "properties": {
+                    "version": { "$ref": "#/$defs/numericVersion" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "unresolvedProductVersionSlotIds": {
+            "const": [
+              "android-17-pixel-9-chrome",
+              "android-16-pixel-9-chrome",
+              "android-15-galaxy-s25-chrome"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "numericVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+(?:\\.[0-9]+){1,3}$",
+      "maxLength": 32
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "httpsUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "demos",
+        "playbackModes",
+        "playbackModePurpose",
+        "authoredCodecsByMode",
+        "minimumSelectedCodecsByPlatform",
+        "interactionProfiles",
+        "evidence",
+        "soakSeconds"
+      ],
+      "properties": {
+        "demos": {
+          "const": [
+            {
+              "id": "end-user-playground",
+              "route": "/playground/",
+              "playerSelector": "#favorite-motion",
+              "interactionSelector": "#favorite-control",
+              "sourceContract": "multi-source",
+              "renditionId": "motion.1x",
+              "states": ["idle", "engaged"]
+            },
+            {
+              "id": "grass-rabbit",
+              "route": "/rabbit/",
+              "playerSelector": "#grass-rabbit",
+              "interactionSelector": "#grass-rabbit",
+              "sourceContract": "multi-source",
+              "renditionId": "video.1x",
+              "states": ["idle", "entering", "hover", "exiting"]
+            },
+            {
+              "id": "grass-rabbit-codecs",
+              "route": "/codecs/",
+              "playerSelector": "aval-player",
+              "interactionSelector": "aval-player",
+              "sourceContract": "multi-source",
+              "renditionId": "video.1x",
+              "states": ["idle", "entering", "hover", "exiting"]
+            },
+            {
+              "id": "kinetic-orb",
+              "route": "/orb/",
+              "playerSelector": "#kinetic-orb",
+              "interactionSelector": "#kinetic-orb",
+              "sourceContract": "multi-source",
+              "renditionId": "video.1x",
+              "states": ["idle", "entering", "hover", "exiting"]
+            }
+          ]
+        },
+        "playbackModes": {
+          "const": ["forced-h264", "full-ladder"]
+        },
+        "playbackModePurpose": {
+          "const": {
+            "forced-h264": "fallback-path-validation-only",
+            "full-ladder": "normal-selection-and-support-claim"
+          }
+        },
+        "authoredCodecsByMode": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["forced-h264", "full-ladder"],
+          "properties": {
+            "forced-h264": { "const": ["h264"] },
+            "full-ladder": { "const": ["av1", "vp9", "h265", "h264"] }
+          }
+        },
+        "minimumSelectedCodecsByPlatform": {
+          "const": {
+            "ios": ["av1", "vp9", "h265"]
+          }
+        },
+        "interactionProfiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["desktop", "touch", "unsupported"],
+          "properties": {
+            "desktop": {
+              "const": ["pointer", "focus", "overlap-reentry", "all-state-directions"]
+            },
+            "touch": {
+              "const": ["tap", "outside-tap", "overlap-reentry", "all-state-directions"]
+            },
+            "unsupported": {
+              "const": ["deterministic-error", "no-blank-nonterminal", "resource-retirement"]
+            }
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "manifestSchemaVersion",
+            "sessionSchemaVersion",
+            "interactionLedgerSchemaVersion",
+            "diagnosticReportSchemaVersion",
+            "immutableRunRootPattern",
+            "requiredArtifacts",
+            "minimumSoakMilliseconds",
+            "requireNonBlankPixels"
+          ],
+          "properties": {
+            "manifestSchemaVersion": { "const": 1 },
+            "sessionSchemaVersion": { "const": 1 },
+            "interactionLedgerSchemaVersion": { "const": 1 },
+            "diagnosticReportSchemaVersion": { "const": 1 },
+            "immutableRunRootPattern": {
+              "const": "artifacts/browser-compatibility/runs/{commit}/{session}"
+            },
+            "requiredArtifacts": {
+              "const": [
+                "canvas-png",
+                "context-png",
+                "frame-before-png",
+                "diagnostic-json",
+                "interaction-ledger",
+                "session-json"
+              ]
+            },
+            "minimumSoakMilliseconds": { "const": 60000 },
+            "requireNonBlankPixels": { "const": true }
+          }
+        },
+        "soakSeconds": { "const": 60 }
+      }
+    },
+    "demo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "route", "playerSelector", "interactionSelector", "sourceContract", "states"],
+      "properties": {
+        "id": {
+          "enum": ["end-user-playground", "grass-rabbit", "grass-rabbit-codecs", "kinetic-orb"]
+        },
+        "route": { "type": "string", "pattern": "^/[a-z0-9/-]*/$" },
+        "playerSelector": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "interactionSelector": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sourceContract": { "enum": ["multi-source", "h264-only"] },
+        "states": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+        }
+      }
+    },
+    "braveBuild": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "channel",
+        "version",
+        "chromiumVersion",
+        "releaseDate",
+        "releaseUrl",
+        "assets"
+      ],
+      "properties": {
+        "role": { "enum": ["current", "boundary"] },
+        "channel": { "const": "stable" },
+        "version": { "$ref": "#/$defs/numericVersion" },
+        "chromiumVersion": { "$ref": "#/$defs/numericVersion" },
+        "releaseDate": { "$ref": "#/$defs/dateTime" },
+        "releaseUrl": {
+          "allOf": [
+            { "$ref": "#/$defs/httpsUrl" },
+            { "type": "string", "pattern": "^https://github\\.com/brave/brave-browser/releases/tag/v[0-9]+(?:\\.[0-9]+){2}$" }
+          ]
+        },
+        "assets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["macos-arm64", "windows-x64"],
+          "properties": {
+            "macos-arm64": { "$ref": "#/$defs/braveAsset" },
+            "windows-x64": { "$ref": "#/$defs/braveAsset" }
+          }
+        }
+      }
+    },
+    "braveAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "url", "sha256", "size"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "url": {
+          "allOf": [
+            { "$ref": "#/$defs/httpsUrl" },
+            { "type": "string", "pattern": "^https://github\\.com/brave/brave-browser/releases/download/v[0-9]+(?:\\.[0-9]+){2}/" }
+          ]
+        },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size": { "type": "integer", "minimum": 1, "maximum": 536870912 }
+      }
+    },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "platform",
+        "os",
+        "device",
+        "browser",
+        "provider",
+        "expectation",
+        "demoIds",
+        "playbackModes",
+        "interactionProfile",
+        "soakSeconds"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "platform": { "enum": ["windows", "macos", "ios", "android"] },
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version", "providerLabel"],
+          "properties": {
+            "name": { "enum": ["Windows", "Windows Server", "macOS", "iOS", "Android"] },
+            "version": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+){0,2}$" },
+            "providerLabel": { "type": "string", "minLength": 1, "maxLength": 64 }
+          }
+        },
+        "device": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "providerLabel"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "providerLabel": { "type": "string", "minLength": 1, "maxLength": 64 }
+              }
+            }
+          ]
+        },
+        "browser": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["brand", "version", "channel", "engine", "engineVersion"],
+          "properties": {
+            "brand": { "enum": ["Chrome", "Firefox", "Safari", "Brave"] },
+            "version": {
+              "oneOf": [
+                { "$ref": "#/$defs/numericVersion" },
+                { "type": "null" }
+              ]
+            },
+            "channel": { "const": "stable" },
+            "engine": { "enum": ["Chromium", "Gecko", "WebKit"] },
+            "engineVersion": {
+              "oneOf": [
+                { "$ref": "#/$defs/numericVersion" },
+                { "type": "null" }
+              ]
+            }
+          }
+        },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "osLabel", "osVersionLabel", "browserLabel", "browserVersionLabel", "deviceLabel"],
+          "properties": {
+            "kind": { "enum": ["browserstack-live", "managed-macos-arm64", "github-hosted-windows-x64"] },
+            "osLabel": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "osVersionLabel": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "browserLabel": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "browserVersionLabel": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "deviceLabel": { "type": ["string", "null"], "maxLength": 64 }
+          }
+        },
+        "expectation": { "enum": ["playback", "unsupported-sentinel"] },
+        "demoIds": {
+          "const": ["end-user-playground", "grass-rabbit", "grass-rabbit-codecs", "kinetic-orb"]
+        },
+        "playbackModes": { "const": ["forced-h264", "full-ladder"] },
+        "interactionProfile": { "enum": ["desktop", "touch", "unsupported"] },
+        "soakSeconds": { "const": 60 },
+        "braveBuild": { "enum": ["current", "boundary"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "browser": {
+                "type": "object",
+                "properties": { "version": { "type": "null" } }
+              }
+            }
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "platform": { "const": "android" },
+              "browser": {
+                "type": "object",
+                "properties": {
+                  "brand": { "const": "Chrome" },
+                  "engine": { "const": "Chromium" },
+                  "engineVersion": { "type": "null" }
+                }
+              },
+              "provider": {
+                "type": "object",
+                "properties": {
+                  "kind": { "const": "browserstack-live" },
+                  "browserVersionLabel": { "const": "capture-required-from-device-report" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "type": "object", "properties": { "expectation": { "const": "unsupported-sentinel" } } },
+          "then": {
+            "type": "object",
+            "properties": {
+              "browser": {
+                "type": "object",
+                "properties": {
+                  "brand": { "const": "Firefox" },
+                  "version": { "enum": ["128.0", "129.0"] }
+                }
+              },
+              "interactionProfile": { "const": "unsupported" }
+            }
+          }
+        },
+        {
+          "if": { "type": "object", "properties": { "browser": { "type": "object", "properties": { "brand": { "const": "Brave" } } } } },
+          "then": {
+            "type": "object",
+            "required": ["braveBuild"],
+            "properties": {
+              "braveBuild": { "enum": ["current", "boundary"] },
+              "provider": {
+                "type": "object",
+                "properties": {
+                  "kind": { "enum": ["managed-macos-arm64", "github-hosted-windows-x64"] }
+                }
+              }
+            }
+          },
+          "else": {
+            "type": "object",
+            "not": {
+              "type": "object",
+              "properties": { "braveBuild": true },
+              "required": ["braveBuild"]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

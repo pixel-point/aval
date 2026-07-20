@@ -6,7 +6,8 @@ style exception. Its bundle paths and codec strings are illustrative
 placeholders.
 
 Compile or copy an `orbit` bundle directory containing one `.avl` per codec and
-its optional author fallback `orbit.png` into this directory, then run:
+an optional consumer-owned alternate image `orbit.png` into this directory,
+then run:
 
 ```sh
 npm install

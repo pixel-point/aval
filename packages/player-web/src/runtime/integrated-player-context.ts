@@ -124,7 +124,7 @@ export class IntegratedPlayerContextBinding {
     this.#context = new IntegratedPlayerContext({
       target: options.target,
       coverCurrent: () => {
-        this.#coveredState = options.activation.coverContextSurface();
+        this.#coveredState = options.activation.captureContextState();
       },
       freezeRealtime: () => this.#freeze(),
       retireCandidate: ({ signal }) => options.visibility.serializeContext(
@@ -191,8 +191,7 @@ export class IntegratedPlayerContextBinding {
     return !this.#options.isDisposed() && this.#blocked &&
       visibility.visibility === "visible" &&
       visibility.suspension === "active" &&
-      motion.desiredMode === "full" &&
-      !motion.stickyFailure;
+      motion.desiredMode === "full";
   }
 
   async #rebuild(signal: AbortSignal): Promise<boolean> {

@@ -10,9 +10,13 @@ describe("FFmpeg discovery calibration policy", () => {
       "-c:v", "libx264",
       "-preset", "medium",
       "-crf", "23",
-      "-profile:v", "high"
+      "-profile:v", "baseline",
+      "-level:v", "1.1",
+      "-bf", "0",
+      "-refs", "1"
     ]));
     expect(arguments_).not.toContain("zerolatency");
-    expect(arguments_).not.toContain("-bf");
+    expect(arguments_).toContain("-maxrate");
+    expect(arguments_).toContain("-bufsize");
   });
 });

@@ -13,7 +13,7 @@ function configureCodec(manifest: Record<string, any>, codec: VideoCodec, bitDep
   manifest.codec = codec;
   manifest.bitstream = codec === "vp9" ? "frame" : codec === "av1" ? "low-overhead" : "annex-b";
   manifest.renditions[0].codec = {
-    h264: "avc1.640020",
+    h264: "avc1.42E020",
     h265: "hvc1.1.6.L93.B0",
     vp9: "vp09.00.10.08",
     av1: bitDepth === 10

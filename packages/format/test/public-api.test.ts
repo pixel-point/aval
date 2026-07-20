@@ -16,13 +16,22 @@ const REQUIRED_RUNTIME_EXPORTS = Object.freeze([
   "CHUNK_INDEX_RECORD_LENGTH",
   "FORMAT_VERSION_MAJOR",
   "FORMAT_VERSION_MINOR",
+  "FORMAT_SUPPORTED_VERSIONS",
+  "PACKED_ALPHA_WITNESS_MAX_INTERVAL_WIDTH",
+  "PACKED_ALPHA_WITNESS_MAX_REFERENCE_DELTA",
+  "PACKED_ALPHA_WITNESS_MAX_SAMPLES",
   "FormatError",
+  "classifyDecoderColor",
   "createCanonicalChunkPlan",
   "deriveVideoRenditionGeometry",
   "h264CodecForLevel",
+  "h264CodecForProfileLevel",
+  "h264LevelLimits",
   "inspectH264AnnexBRendition",
-  "maximumH264DecodedRgbaBytes",
+  "minimumH264CompatibilityLevel",
+  "maximumDecodedRgbaBytes",
   "prepareH264EncoderRendition",
+  "parseH264Codec",
   "parseVideoCodecString",
   "isVideoCodecString",
   "inspectH265AnnexBRendition",
@@ -57,6 +66,7 @@ describe("@pixel-point/aval-format public boundary", () => {
 
   it("keeps all public collection constants and resolved budgets immutable", () => {
     expect(Object.isFrozen(packageApi.FORMAT_MAGIC)).toBe(true);
+    expect(Object.isFrozen(packageApi.FORMAT_SUPPORTED_VERSIONS)).toBe(true);
     expect(Object.isFrozen(packageApi.CHUNK_INDEX_MAGIC)).toBe(true);
     expect(Object.isFrozen(packageApi.IDENTIFIER_PATTERN)).toBe(true);
     expect(Object.isFrozen(packageApi.SHA256_HEX_PATTERN)).toBe(true);

@@ -1,5 +1,6 @@
 import {
   parseCompileBundleReport,
+  parseVideoCodecString,
   VIDEO_CODECS
 } from "@pixel-point/aval-format";
 
@@ -16,6 +17,7 @@ const CODEC_LABELS = Object.freeze({
 export const UNSUPPORTED_MESSAGE = "This codec is not supported in your browser.";
 export const UNAVAILABLE_MESSAGE = "Codec support could not be checked in your browser.";
 export const PLAYBACK_FAILURE_MESSAGE = "This codec could not be played in your browser.";
+export const INACTIVE_PLAYBACK_MESSAGE = "Motion is waiting for interactive playback…";
 export const BT709_LIMITED = Object.freeze({
   primaries: "bt709",
   transfer: "bt709",
@@ -24,8 +26,7 @@ export const BT709_LIMITED = Object.freeze({
 });
 export const RENDERED_READINESS = new Set([
   "visualReady",
-  "interactiveReady",
-  "staticReady"
+  "interactiveReady"
 ]);
 
 export function parseGrassRabbitReport(value) {
@@ -85,6 +86,16 @@ export function assertCodec(value) {
   if (!CODECS.includes(value)) {
     throw new TypeError("Codec must be one of av1, vp9, h265, or h264.");
   }
+}
+
+export function runtimeCodecFamily(value) {
+  const parsed = typeof value === "string"
+    ? parseVideoCodecString(value)
+    : undefined;
+  if (parsed === undefined || !CODECS.includes(parsed.family)) {
+    throw new TypeError("Prepared codec must identify an authored codec family.");
+  }
+  return parsed.family;
 }
 
 export function supportLabel(state) {

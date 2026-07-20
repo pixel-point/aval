@@ -1,5 +1,6 @@
 import type { MotionGraphEffect } from "@pixel-point/aval-graph";
 import { describe, expect, it } from "vitest";
+import { RuntimePlaybackError, normalizeRuntimeFailure } from "./errors.js";
 
 import {
   GraphRequestSettlementError,
@@ -103,28 +104,52 @@ describe("graph request promise host", () => {
     await expect(survivor).resolves.toBeUndefined();
   });
 
-  it("maps graph rejection names without exposing mutable capabilities", async () => {
+  it("uses the bound canonical error for terminal graph settlements", async () => {
     const microtasks = controlledMicrotasks();
     const requests = new RequestPromises({
       scheduleMicrotask: microtasks.schedule
     });
-    const fallback = requests.register(1);
-    const outcome = fallback.catch((error: unknown) => error);
+    const request = requests.register(1);
+    const outcome = request.catch((error: unknown) => error);
+    const terminal = new RuntimePlaybackError(normalizeRuntimeFailure(
+      "worker-decode-failure",
+      "decoder failed",
+      { operation: "content-tick" }
+    ));
+    requests.bindTerminalPlaybackError(terminal);
 
     requests.queueSettlement(settle([1], {
       type: "reject",
       timing: "microtask",
-      error: "PlaybackFallbackError"
+      error: "PlaybackError"
     }));
     microtasks.runNext();
 
-    await expect(outcome).resolves.toEqual(
-      expect.objectContaining({
-        name: "PlaybackFallbackError",
-        graphError: "PlaybackFallbackError"
-      })
-    );
-    expect(await outcome).toBeInstanceOf(GraphRequestSettlementError);
+    await expect(outcome).resolves.toBe(terminal);
+  });
+
+  it("rejects an unbound or rebound terminal graph settlement", () => {
+    const microtasks = controlledMicrotasks();
+    const requests = new RequestPromises({
+      scheduleMicrotask: microtasks.schedule
+    });
+    void requests.register(1);
+
+    expect(() => requests.queueSettlement(settle([1], {
+      type: "reject",
+      timing: "microtask",
+      error: "PlaybackError"
+    }))).toThrow(/requires a bound terminal playback error/);
+    expect(microtasks.callbacks).toHaveLength(0);
+
+    const terminal = new RuntimePlaybackError(normalizeRuntimeFailure(
+      "renderer-failure"
+    ));
+    requests.bindTerminalPlaybackError(terminal);
+    requests.bindTerminalPlaybackError(terminal);
+    expect(() => requests.bindTerminalPlaybackError(
+      new RuntimePlaybackError(normalizeRuntimeFailure("renderer-failure"))
+    )).toThrow(/cannot be rebound/);
   });
 
   it("rejects duplicate, unknown, and partially invalid settlements atomically", () => {

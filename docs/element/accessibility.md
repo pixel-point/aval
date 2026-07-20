@@ -7,12 +7,15 @@ business action.
 ```html
 <button id="favorite" type="button" aria-pressed="false">
   <aval-player
-    src="favorite.avl"
     interaction-for="favorite"
     aria-hidden="true"
   >
-    <img slot="fallback" src="favorite.png" alt="">
+    <source
+      src="favorite.h264.avl"
+      type='application/vnd.aval; codecs="avc1.42E01E"'
+    >
   </aval-player>
+  <img id="favorite-unavailable" src="favorite.png" alt="" hidden>
   <span>Favorite</span>
 </button>
 ```
@@ -22,3 +25,6 @@ loading or errors. Static reduced-motion states must communicate the same
 meaning as animated states. Supply a separate pause control when nonessential
 motion continues beyond five seconds. Avoid rapid flashes, excessive parallax,
 and high-frequency infinite motion even when full motion is requested.
+
+If the application chooses to reveal alternate content after a fatal `error`,
+it also owns that content's accessible name, visibility, and status messaging.

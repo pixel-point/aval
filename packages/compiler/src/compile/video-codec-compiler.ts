@@ -1,7 +1,6 @@
 import {
   canonicalizeH265EncoderUnitStream,
   FormatError,
-  h264CodecForLevel,
   inspectH265AnnexBRendition,
   prepareH264EncoderRendition,
   type H264RenditionInspection,
@@ -196,7 +195,7 @@ function prepareH264Rendition(
   );
   return Object.freeze({
     id: input.renditionId,
-    codec: h264CodecForLevel(prepared.inspection.parameterSet.levelIdc),
+    codec: prepared.inspection.parameterSet.codec,
     bitDepth: 8,
     geometry: input.geometry,
     bitrate: Object.freeze({ average: bitrate, peak: bitrate }),

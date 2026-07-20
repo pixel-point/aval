@@ -38,6 +38,8 @@ const report = await certification.validateDisplayReportBundle({
     allowedMediaTypes: new Set(policy.allowedAttachmentMediaTypes),
     allowedFixtureDigests: fixtureAuthority.digests,
     allowedFixtureModels: fixtureAuthority.models,
+    allowedFatalBoundaryFixtureDigests: fixtureAuthority.fatalBoundaryFixtureDigests,
+    allowedCertificationHarnessDigests: fixtureAuthority.harnessDigests,
     allowedDisplayPatterns: fixtureAuthority.displayPatterns,
     ...displayQualificationPolicy(policy)
   }

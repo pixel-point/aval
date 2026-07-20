@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 const port = process.env.AVL_GRASS_RABBIT_PORT ?? "4176";
 const baseURL = `http://127.0.0.1:${port}`;
@@ -13,7 +13,7 @@ export default defineConfig({
   use: {
     baseURL,
     deviceScaleFactor: 2,
-    trace: "off",
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
     viewport: { width: 1280, height: 720 }
   },
@@ -27,8 +27,24 @@ export default defineConfig({
     {
       name: "chromium",
       use: {
+        ...devices["Desktop Chrome"],
         deviceScaleFactor: 2,
-        headless: false,
+        viewport: { width: 1280, height: 720 }
+      }
+    },
+    {
+      name: "firefox",
+      use: {
+        ...devices["Desktop Firefox"],
+        deviceScaleFactor: 2,
+        viewport: { width: 1280, height: 720 }
+      }
+    },
+    {
+      name: "webkit",
+      use: {
+        ...devices["Desktop Safari"],
+        deviceScaleFactor: 2,
         viewport: { width: 1280, height: 720 }
       }
     }

@@ -1,5 +1,5 @@
 import type { RuntimeCertificationReport } from "../src/model.js";
-import { REQUIRED_RUNTIME_CRITERION_IDS, REQUIRED_RUNTIME_SCENARIOS, scenarioAttachmentId } from "../src/scenario-contract.js";
+import { FATAL_ERROR_BOUNDARY_ATTACHMENT_ID, REQUIRED_RUNTIME_CRITERION_IDS, REQUIRED_RUNTIME_SCENARIOS, scenarioAttachmentId } from "../src/scenario-contract.js";
 
 const digest = "a".repeat(64);
 
@@ -16,13 +16,23 @@ export function validRuntimeReport(): RuntimeCertificationReport {
       scenario(REQUIRED_RUNTIME_SCENARIOS.settlement.id, repetition, { frameCount: 0 })
     ];
   }).flat();
-  const attachments = scenarios.map((scenario) => ({
+  const scenarioAttachments = scenarios.map((scenario) => ({
     id: scenarioAttachmentId(scenario.id, scenario.repetition),
     path: `raw/${scenario.id}-${String(scenario.repetition)}.json`,
     sha256: digest,
     byteLength: 1024,
     mediaType: "application/json"
   }));
+  const attachments = [
+    ...scenarioAttachments,
+    {
+      id: FATAL_ERROR_BOUNDARY_ATTACHMENT_ID,
+      path: "raw/runtime-fatal-error-boundary.json",
+      sha256: digest,
+      byteLength: 1024,
+      mediaType: "application/json"
+    }
+  ];
   return {
     schemaVersion: "1.0",
     reportKind: "runtime-scheduling",
@@ -94,7 +104,9 @@ export function validRuntimeReport(): RuntimeCertificationReport {
     criteria: REQUIRED_RUNTIME_CRITERION_IDS.map((id) => ({
       id,
       status: "passed" as const,
-      evidence: attachments.map(({ id }) => id)
+      evidence: id === "runtime-fatal-error-boundary"
+        ? [FATAL_ERROR_BOUNDARY_ATTACHMENT_ID]
+        : scenarioAttachments.map(({ id }) => id)
     })),
     attachments
   };

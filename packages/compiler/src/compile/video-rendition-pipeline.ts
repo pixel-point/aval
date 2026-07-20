@@ -14,10 +14,12 @@ import {
   extractRgba16Range
 } from "../ffmpeg/encode-unit.js";
 import type { PreparedEncodingRendition } from "./project-encoding-compiler.js";
+import { selectPackedAlphaWitnessCandidates } from "./packed-alpha-witness.js";
 import {
   resolvePreparedFrameRange,
   type PreparedProjectSource
 } from "./project-source.js";
+import { deriveReadiness } from "./readiness-plan.js";
 import {
   AV1_VIDEO_CODEC_COMPILER,
   H264_VIDEO_CODEC_COMPILER,
@@ -26,6 +28,7 @@ import {
   type VideoCodecCompiler
 } from "./video-codec-compiler.js";
 import { writeVideoYuvUnitSpool } from "./video-yuv-spool.js";
+import { verifyPackedAlphaWitness } from "./verify-packed-alpha-witness.js";
 
 export interface CompileVideoEncodingRenditionsInput {
   readonly project: Readonly<NormalizedSourceProject>;
@@ -84,6 +87,8 @@ async function compileCodecRenditions<
 ): Promise<Readonly<CompiledVideoEncodingRenditions>> {
   const renditions: PreparedEncodingRendition[] = [];
   const invocations: CompileInvocationDetails[] = [];
+  const bootstrapUnits = deriveReadiness(input.project).bootstrapUnits;
+  const witnessUnit = bootstrapUnits[0];
   for (const rendition of input.encoding.renditions) {
     const geometry = deriveVideoRenditionGeometry({
       canvasWidth: input.project.canvas.width,
@@ -97,6 +102,9 @@ async function compileCodecRenditions<
       }
     });
     const encodedUnits: Readonly<U>[] = [];
+    let witnessCandidates: ReturnType<
+      typeof selectPackedAlphaWitnessCandidates
+    > | undefined;
     for (const unit of input.project.units) {
       const source = input.sources.get(unit.source);
       if (source === undefined) {
@@ -130,6 +138,28 @@ async function compileCodecRenditions<
         )
       }));
       const rgba16 = await extractRgba16Range(extraction);
+      if (
+        input.layout === "packed-alpha" &&
+        unit.id === witnessUnit
+      ) {
+        const firstFrame = rgba16[0];
+        if (firstFrame === undefined) {
+          throw new CompilerError(
+            "IO_FAILED",
+            `Canonical bootstrap unit ${unit.id} has no witness frame`
+          );
+        }
+        witnessCandidates = selectPackedAlphaWitnessCandidates({
+          bootstrapUnits,
+          frames: [{
+            unit: unit.id,
+            frame: 0,
+            width: rendition.width,
+            height: rendition.height,
+            rgba: firstFrame
+          }]
+        });
+      }
       const spool = await writeVideoYuvUnitSpool({
         geometry,
         frameRate: input.project.frameRate,
@@ -159,12 +189,40 @@ async function compileCodecRenditions<
         await spool.cleanup();
       }
     }
-    renditions.push(compiler.prepare({
+    const prepared = compiler.prepare({
       encoding: input.encoding,
       renditionId: rendition.id,
       geometry,
       frameRate: input.project.frameRate,
       units: encodedUnits
+    });
+    if (input.layout === "opaque") {
+      renditions.push(prepared);
+      continue;
+    }
+    if (witnessCandidates === undefined) {
+      throw new CompilerError(
+        "IO_FAILED",
+        "Packed-alpha compilation could not resolve a canonical bootstrap witness frame"
+      );
+    }
+    const verified = await verifyPackedAlphaWitness({
+      codec: input.encoding.codec,
+      frameRate: input.project.frameRate,
+      rendition: prepared,
+      selection: witnessCandidates,
+      executable: input.executable,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
+    invocations.push(Object.freeze({
+      operation: `${input.encoding.codec}:${rendition.id}:${witnessCandidates.unit}:verify-packed-alpha`,
+      tool: "ffmpeg",
+      arguments: verified.invocationArguments
+    }));
+    renditions.push(Object.freeze({
+      ...prepared,
+      outputQualification: verified.witness
     }));
   }
   return Object.freeze({

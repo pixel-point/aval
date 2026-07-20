@@ -9,7 +9,7 @@ import { CompilerError } from "../src/diagnostics.js";
 import type { NormalizedSourceProject } from "../src/model.js";
 
 describe("one-codec project encoding assembly", () => {
-  it("emits a separate AV1 10-bit wire-1.0 asset and preserves decode order", () => {
+  it("emits a qualified AV1 10-bit wire-1.1 asset and preserves decode order", () => {
     const project = projectFixture();
     const encoding = project.encodings[0]!;
     const geometry = deriveVideoRenditionGeometry({
@@ -30,6 +30,7 @@ describe("one-codec project encoding assembly", () => {
         bitDepth: 10,
         geometry,
         bitrate: { average: 800, peak: 1_200 },
+        outputQualification: witness(),
         units: [{
           id: "idle.body",
           chunks: [
@@ -44,7 +45,7 @@ describe("one-codec project encoding assembly", () => {
     expect(result).toMatchObject({ codec: "av1", bytes: result.assetBytes.byteLength });
     expect(result.sha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(front.manifest).toMatchObject({
-      formatVersion: "1.0",
+      formatVersion: "1.1",
       generator: "aval-compiler/1.0",
       codec: "av1",
       bitstream: "low-overhead",
@@ -59,7 +60,8 @@ describe("one-codec project encoding assembly", () => {
           type: "stacked",
           colorRect: [0, 0, 16, 8],
           alphaRect: [0, 16, 16, 8]
-        }
+        },
+        outputQualification: witness()
       }]
     });
     expect(front.records.map((record) => ({
@@ -102,7 +104,49 @@ describe("one-codec project encoding assembly", () => {
       }]
     })).toThrow(CompilerError);
   });
+
+  it("rejects packed-alpha assembly without an emitted-rendition witness", () => {
+    const project = projectFixture();
+    const encoding = project.encodings[0]!;
+    const geometry = deriveVideoRenditionGeometry({
+      canvasWidth: 16,
+      canvasHeight: 8,
+      layout: "packed-alpha",
+      visibleWidth: 16,
+      visibleHeight: 8,
+      storage: { widthAlignment: 2, heightAlignment: 2 }
+    });
+    expect(() => compileProjectEncoding({
+      project,
+      encoding,
+      layout: "packed-alpha",
+      renditions: [{
+        id: "video.main",
+        codec: "av01.0.08M.10",
+        bitDepth: 10,
+        geometry,
+        bitrate: { average: 1, peak: 1 },
+        units: [{ id: "idle.body", chunks: [chunk([1], 0, true)] }]
+      }]
+    })).toThrowError(expect.objectContaining<Partial<CompilerError>>({
+      code: "INPUT_INVALID",
+      message: expect.stringContaining("missing output qualification")
+    }));
+  });
 });
+
+function witness() {
+  return Object.freeze({
+    kind: "packed-alpha-v1" as const,
+    unit: "idle.body",
+    frame: 0,
+    samples: Object.freeze([Object.freeze({
+      x: 0,
+      y: 0,
+      expectedRange: Object.freeze([0, 32] as const)
+    })])
+  });
+}
 
 function chunk(bytes: number[], presentationTimestamp: number, randomAccess: boolean) {
   return Object.freeze({

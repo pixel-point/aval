@@ -7,7 +7,6 @@ import type {
   VideoBitstream,
   VideoCodec
 } from "@pixel-point/aval-format";
-
 import {
   inspectBorrowedVideoRendition,
   type BorrowedVideoRenditionPlan
@@ -18,12 +17,12 @@ const H264_ACCESS_UNITS = Object.freeze([
   Object.freeze({
     key: true,
     bytes: fromHex(
-      "0000000109100000000167640020ace5109a6a02020280000003008000001e46d04422cb0000000168eeb2c8b00000000165b840fc"
+      "000000010910000000016742e020f42134d40404050000030001000003003c8da08846a00000000168ce32c80000000165b840fc"
     )
   }),
   Object.freeze({
     key: false,
-    bytes: fromHex("0000000109300000000141e243f8")
+    bytes: fromHex("0000000109300000000141e243f0")
   })
 ]);
 
@@ -78,7 +77,7 @@ interface CodecFixture {
 
 const EXPECTED = Object.freeze({
   h264: Object.freeze({
-    codec: "avc1.640020",
+    codec: "avc1.42E020",
     bitstream: "annex-b" as const,
     bitDepth: 8 as const,
     width: 64,
@@ -182,6 +181,14 @@ describe("codec-neutral borrowed video inspection", () => {
     )).toThrow(/BT\.709/iu);
   });
 
+  it("rejects an H264 manifest profile that disagrees with the inspected SPS", () => {
+    const mismatch = createFixture("h264", "avc1.640020");
+    expect(() => inspectBorrowedVideoRendition(
+      mismatch.plan,
+      createBorrow(mismatch)
+    )).toThrow(/inspected codec string disagrees/iu);
+  });
+
   it("rejects hostile chunk metadata before producing decoder submissions", () => {
     const displayed = createFixture("vp9");
     const hidden = displayed.plan.units[0]!.chunks[1]!;
@@ -248,7 +255,7 @@ describe("codec-neutral borrowed video inspection", () => {
   });
 });
 
-function createFixture(family: VideoCodec): CodecFixture {
+function createFixture(family: VideoCodec, codecOverride?: string): CodecFixture {
   const spec = fixtureSpec(family);
   const blobs = new Map<string, Uint8Array>();
   let byteOffset = 0;
@@ -274,7 +281,7 @@ function createFixture(family: VideoCodec): CodecFixture {
   });
   const rendition: ProductionRendition = Object.freeze({
     id: "main",
-    codec: spec.codec,
+    codec: codecOverride ?? spec.codec,
     bitDepth: spec.bitDepth,
     codedWidth: spec.width,
     codedHeight: spec.height,

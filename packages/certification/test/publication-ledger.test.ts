@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { PUBLIC_RELEASE_PACKAGES } from "../src/compatibility.js";
 import {
   assertPromotionAllowed,
   completePublicationOperation,
@@ -141,7 +142,7 @@ describe("publication ledger", () => {
   });
 
   it("blocks latest after network failure before every package and after consumer failure", () => {
-    const packages = ["graph", "format", "compiler", "player-web", "element"];
+    const packages = [...PUBLIC_RELEASE_PACKAGES];
     for (let failBeforeIndex = 0; failBeforeIndex < packages.length; failBeforeIndex += 1) {
       const result = simulatePublication({ packageNames: packages, failBeforeIndex, registryConsumerPassed: true });
       expect(result.promotedLatest).toEqual([]);
@@ -193,13 +194,13 @@ function ledger(
 }
 
 function plannedReleaseSet() {
-  return ["graph", "format", "player-web", "element", "compiler"].map((short, index) => planExactPublication({
-    packageName: `@pixel-point/aval-${short}`,
+  return PUBLIC_RELEASE_PACKAGES.map((packageName, index) => planExactPublication({
+    packageName,
     version: "1.0.0",
     tarballSha256: String(index + 1).repeat(64),
     registryIntegrity: integrity,
     desiredTag: "next",
-    registry: { name: `@pixel-point/aval-${short}`, version: "1.0.0", integrity: null, tags: {} },
+    registry: { name: packageName, version: "1.0.0", integrity: null, tags: {} },
     sequence: index + 1,
     timestamp: "2026-07-12T13:00:00.000Z",
     approvalId: "dry-run-approval"
@@ -208,8 +209,7 @@ function plannedReleaseSet() {
 
 function initialReleaseRollbackOperations() {
   const operations: ReturnType<typeof planTagCompensation>[] = [];
-  for (const short of ["compiler", "element", "player-web", "format", "graph"]) {
-    const packageName = `@pixel-point/aval-${short}`;
+  for (const packageName of [...PUBLIC_RELEASE_PACKAGES].reverse()) {
     const base = {
       packageName,
       version: "1.0.0" as const,

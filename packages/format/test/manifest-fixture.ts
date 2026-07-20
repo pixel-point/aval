@@ -1,9 +1,9 @@
-import type { CompiledManifest } from "../src/model.js";
+import type { CompiledManifestV1_0 } from "../src/model.js";
 
 const DIGEST = "0".repeat(64);
 
 /** A fresh compact manifest covering every graph-bearing 1.0 unit kind. */
-export function validManifest(): CompiledManifest {
+export function validManifest(): CompiledManifestV1_0 {
   return {
     formatVersion: "1.0",
     generator: "aval-tests",
@@ -154,7 +154,7 @@ export function validManifest(): CompiledManifest {
 }
 
 /** A valid manifest exactly at the state/edge/unit/blob/frame ceilings. */
-export function limitManifest(): CompiledManifest {
+export function limitManifest(): CompiledManifestV1_0 {
   const bodyUnits = Array.from({ length: 32 }, (_, index) => ({
     id: numbered("body", index),
     kind: "body" as const,
@@ -280,7 +280,7 @@ function body(
   frameCount: number,
   portalFrames: readonly number[],
   chunkStart: number
-): Extract<CompiledManifest["units"][number], { readonly kind: "body" }> {
+): Extract<CompiledManifestV1_0["units"][number], { readonly kind: "body" }> {
   return {
     id,
     kind: "body",
@@ -296,7 +296,7 @@ function basicUnit(
   kind: "bridge" | "one-shot",
   frameCount: number,
   chunkStart: number
-): Extract<CompiledManifest["units"][number], { readonly kind: typeof kind }> {
+): Extract<CompiledManifestV1_0["units"][number], { readonly kind: typeof kind }> {
   return { id, kind, frameCount, chunks: [chunk(chunkStart, frameCount)] };
 }
 

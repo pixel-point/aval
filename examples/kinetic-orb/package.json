@@ -1,0 +1,22 @@
+{
+  "name": "@pixel-point/aval-kinetic-orb-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "compile": "avl compile motion.json --out public/kinetic-orb --force",
+    "dev": "vite --host 127.0.0.1 --force",
+    "render": "bash blender/render.sh"
+  },
+  "dependencies": {
+    "@pixel-point/aval-element": "1.0.0"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@pixel-point/aval-compiler": "1.0.0",
+    "@tailwindcss/vite": "^4.3.2",
+    "tailwindcss": "^4.3.2",
+    "vite": "8.1.4"
+  }
+}

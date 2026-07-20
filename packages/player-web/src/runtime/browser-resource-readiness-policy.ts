@@ -44,7 +44,7 @@ export interface BrowserProductionMotionPhaseEvidence {
     | "restoring"
     | "restored"
     | "superseded-reduction"
-    | "sticky-failure"
+    | "visibility-suspended"
     | "disposed";
   readonly policy: MotionPolicySnapshot["policy"];
   readonly hostReducedMotion: boolean;
@@ -53,13 +53,12 @@ export interface BrowserProductionMotionPhaseEvidence {
   readonly generation: number;
   readonly transition: MotionPolicySnapshot["transition"];
   readonly staticOrigin: MotionPolicySnapshot["staticOrigin"];
-  readonly stickyFailure: boolean;
 }
 
 export interface BrowserProductionMotionPolicyEvidence {
   readonly passed: boolean;
   readonly staleTransitionRejected: boolean;
-  readonly stickyFailureRejectedReentry: boolean;
+  readonly transientSuspensionReentered: boolean;
   readonly phases: readonly Readonly<BrowserProductionMotionPhaseEvidence>[];
 }
 
@@ -145,18 +144,16 @@ export function assessProductionMotionPolicy(): Readonly<
     !coordinator.commitStatic(stale);
   record("superseded-reduction");
 
-  coordinator.failToStatic("animation-failure");
-  coordinator.setPolicy("reduce");
-  coordinator.setPolicy("full");
-  const stickyFailureRejectedReentry =
-    coordinator.snapshot().stickyFailure &&
-    coordinator.nextTransition() === null;
-  record("sticky-failure");
+  coordinator.suspendStatic("visibility-suspended");
+  record("visibility-suspended");
+  const resume = coordinator.nextTransition();
+  const transientSuspensionReentered = resume !== null &&
+    coordinator.commitAnimated(resume);
   coordinator.dispose();
   record("disposed");
 
   const passed = reduced && restored && staleTransitionRejected &&
-    stickyFailureRejectedReentry &&
+    transientSuspensionReentered &&
     phases.every((value, index) =>
       index === 0 || value.generation >= phases[index - 1]!.generation
     ) &&
@@ -164,7 +161,7 @@ export function assessProductionMotionPolicy(): Readonly<
   return Object.freeze({
     passed,
     staleTransitionRejected,
-    stickyFailureRejectedReentry,
+    transientSuspensionReentered,
     phases: Object.freeze(phases)
   });
 }
@@ -187,7 +184,6 @@ function freezeMotionPhase(
     actualMode: snapshot.actualMode,
     generation: snapshot.generation,
     transition: snapshot.transition,
-    staticOrigin: snapshot.staticOrigin,
-    stickyFailure: snapshot.stickyFailure
+    staticOrigin: snapshot.staticOrigin
   });
 }

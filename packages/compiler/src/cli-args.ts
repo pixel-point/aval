@@ -458,7 +458,7 @@ function parseCrf(
   codec: DirectCompileCodecArguments["codec"]
 ): number {
   const maximum = codec === "h264" || codec === "h265" ? 51 : 63;
-  return parseIntegerInRange(value, "--crf", 0, maximum);
+  return parseIntegerInRange(value, "--crf", codec === "h264" ? 1 : 0, maximum);
 }
 
 function parseH264Preset(value: string): H264EncoderPreset {

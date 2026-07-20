@@ -1,40 +1,36 @@
 import { describe, expect, it } from "vitest";
 
 import { CompilerError } from "../src/diagnostics.js";
-import { parseIvf } from "../src/ffmpeg/ivf.js";
+import { parseIvf, serializeIvf } from "../src/ffmpeg/ivf.js";
 
 function ivf(
   fourcc: "VP90" | "AV01",
   frames: readonly { readonly timestamp: bigint; readonly bytes: Uint8Array }[]
 ): Uint8Array {
-  const byteLength = 32 + frames.reduce(
-    (total, frame) => total + 12 + frame.bytes.byteLength,
-    0
-  );
-  const bytes = new Uint8Array(byteLength);
-  const view = new DataView(bytes.buffer);
-  bytes.set(new TextEncoder().encode("DKIF"), 0);
-  view.setUint16(4, 0, true);
-  view.setUint16(6, 32, true);
-  bytes.set(new TextEncoder().encode(fourcc), 8);
-  view.setUint16(12, 320, true);
-  view.setUint16(14, 180, true);
-  view.setUint32(16, 30_000, true);
-  view.setUint32(20, 1_001, true);
-  view.setUint32(24, frames.length, true);
-  view.setUint32(28, 0, true);
-  let cursor = 32;
-  for (const frame of frames) {
-    view.setUint32(cursor, frame.bytes.byteLength, true);
-    view.setBigUint64(cursor + 4, frame.timestamp, true);
-    cursor += 12;
-    bytes.set(frame.bytes, cursor);
-    cursor += frame.bytes.byteLength;
-  }
-  return bytes;
+  return serializeIvf({
+    codec: fourcc === "VP90" ? "vp9" : "av1",
+    width: 320,
+    height: 180,
+    timeBase: { numerator: 1_001, denominator: 30_000 },
+    frames: frames.map(({ timestamp, bytes }) => ({
+      timestamp: Number(timestamp),
+      bytes
+    }))
+  });
 }
 
 describe("bounded IVF transport parsing", () => {
+  it("serializes deterministic transport without mutating payloads", () => {
+    const payload = Uint8Array.of(1, 2, 3);
+    const first = ivf("AV01", [{ timestamp: 4n, bytes: payload }]);
+    const second = ivf("AV01", [{ timestamp: 4n, bytes: payload }]);
+
+    expect(first).toEqual(second);
+    expect(parseIvf(first, { expectedCodec: "av1" }).frames)
+      .toEqual([{ timestamp: 4, bytes: payload }]);
+    expect(payload).toEqual(Uint8Array.of(1, 2, 3));
+  });
+
   it("detaches VP9 records in decoder submission order", () => {
     const input = ivf("VP90", [
       { timestamp: 2n, bytes: Uint8Array.of(0x82, 0x49) },

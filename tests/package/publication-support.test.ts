@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as certification from "../../packages/certification/src/index.js";
 import { loadBoundLedger, loadMitigationEvidence, loadRegistryConsumerEvidence } from "../../scripts/release/publication-support.mjs";
 
-const order = ["graph", "format", "player-web", "element", "compiler"].map((name) => `@pixel-point/aval-${name}`);
+const order = [...certification.PUBLIC_RELEASE_PACKAGES];
 const integrity = `sha512-${Buffer.alloc(64, 9).toString("base64")}`;
 const authorization = {
   digest: "a".repeat(64),

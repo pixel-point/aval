@@ -6,8 +6,8 @@
   "publicPackages": [
     "@pixel-point/aval-graph",
     "@pixel-point/aval-format",
-    "@pixel-point/aval-player-web",
     "@pixel-point/aval-element",
+    "@pixel-point/aval-player-web",
     "@pixel-point/aval-compiler"
   ],
   "registry": { "url": "https://registry.npmjs.org/" },
@@ -41,10 +41,39 @@
     "artifactRetentionDays": 30
   },
   "namedProfiles": {
-    "requiredPlatformClasses": ["macos-26-apple-silicon", "windows-11-uhd620-or-better"],
+    "requiredPlatformClasses": [
+      "macos-26-apple-silicon",
+      "windows-11-uhd620-or-better",
+      "ios-26-iphone-real-device",
+      "ios-18-iphone-real-device",
+      "android-15-samsung-midrange-real-device"
+    ],
     "requiredBrowsersByPlatform": {
-      "macos-26-apple-silicon": ["Safari", "Chrome", "Firefox", "Microsoft Edge"],
-      "windows-11-uhd620-or-better": ["Chrome", "Microsoft Edge", "Firefox"]
+      "macos-26-apple-silicon": [
+        { "browserProduct": "Safari", "browserVersion": "26.5", "browserChannel": "shipping", "osProduct": "macOS", "osVersion": "26.5", "deviceClass": "Apple-Silicon-M1-or-later", "virtualization": "none" },
+        { "browserProduct": "Chrome", "browserVersion": "149", "browserChannel": "stable", "osProduct": "macOS", "osVersion": "26.5", "deviceClass": "Apple-Silicon-M1-or-later", "virtualization": "none" },
+        { "browserProduct": "Firefox", "browserVersion": "151", "browserChannel": "release", "osProduct": "macOS", "osVersion": "26.5", "deviceClass": "Apple-Silicon-M1-or-later", "virtualization": "none" },
+        { "browserProduct": "Microsoft Edge", "browserVersion": "149", "browserChannel": "stable", "osProduct": "macOS", "osVersion": "26.5", "deviceClass": "Apple-Silicon-M1-or-later", "virtualization": "none" }
+      ],
+      "windows-11-uhd620-or-better": [
+        { "browserProduct": "Chrome", "browserVersion": "150", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
+        { "browserProduct": "Chrome", "browserVersion": "149", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
+        { "browserProduct": "Chrome", "browserVersion": "148", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
+        { "browserProduct": "Chrome", "browserVersion": "127", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
+        { "browserProduct": "Microsoft Edge", "browserVersion": "149", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
+        { "browserProduct": "Firefox", "browserVersion": "151", "browserChannel": "release", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" }
+      ],
+      "ios-26-iphone-real-device": [
+        { "browserProduct": "Mobile Safari", "browserVersion": "26.5", "browserChannel": "shipping", "osProduct": "iOS", "osVersion": "26.5", "deviceClass": "iPhone-real-device", "virtualization": "none" },
+        { "browserProduct": "Mobile Safari", "browserVersion": "26.4", "browserChannel": "shipping", "osProduct": "iOS", "osVersion": "26.4", "deviceClass": "iPhone-real-device", "virtualization": "none" },
+        { "browserProduct": "Mobile Safari", "browserVersion": "26.0", "browserChannel": "shipping", "osProduct": "iOS", "osVersion": "26.0", "deviceClass": "iPhone-real-device", "virtualization": "none" }
+      ],
+      "ios-18-iphone-real-device": [
+        { "browserProduct": "Mobile Safari", "browserVersion": "18.0", "browserChannel": "shipping", "osProduct": "iOS", "osVersion": "18.0", "deviceClass": "iPhone-real-device", "virtualization": "none" }
+      ],
+      "android-15-samsung-midrange-real-device": [
+        { "browserProduct": "Chrome", "browserVersion": "145", "browserChannel": "stable", "osProduct": "Android", "osVersion": "15", "deviceClass": "Samsung-midrange-real-device", "virtualization": "none" }
+      ]
     },
     "requiredRefreshMilliHz": [60000],
     "conditionalRefreshMilliHz": 120000,

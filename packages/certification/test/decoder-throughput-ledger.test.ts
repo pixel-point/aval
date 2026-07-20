@@ -5,7 +5,7 @@ import { evaluateDecoderThroughputLedger } from "../src/decoder-throughput-ledge
 const DEFAULT_RENDITION = Object.freeze({
   id: "alpha.1x",
   codecFamily: "h264",
-  codec: "avc1.64000A",
+  codec: "avc1.42E00B",
   bitDepth: 8,
   codedWidth: 64,
   codedHeight: 72,
@@ -73,6 +73,7 @@ function validLedger(
 
 describe("decoder throughput raw ledger", () => {
   it.each([
+    ["h264", "avc1.42E00B", 8],
     ["h264", "avc1.64000A", 8],
     ["h265", "hvc1.1.6.L30.90", 8],
     ["vp9", "vp09.00.10.08.01.01.01.01.00", 8],
@@ -97,7 +98,7 @@ describe("decoder throughput raw ledger", () => {
     ["family mismatch", { codecFamily: "h265" }, /canonical h265 codec/u],
     ["unsupported non-AV1 depth", { codecFamily: "vp9", codec: "vp09.00.10.10.01.01.01.01.00", bitDepth: 10 }, /must be 8 for vp9/u],
     ["AV1 depth mismatch", { codecFamily: "av1", codec: "av01.0.00M.10.0.110.01.01.01.0", bitDepth: 8 }, /matching bit depth/u],
-    ["noncanonical codec", { codec: "avc1.64000a" }, /canonical h264 codec/u]
+    ["noncanonical codec", { codec: "avc1.42e00B" }, /canonical h264 codec/u]
   ])("rejects %s", (_name, replacement, message) => {
     expect(() => evaluateDecoderThroughputLedger(validLedger({
       ...DEFAULT_RENDITION,

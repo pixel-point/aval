@@ -43,18 +43,19 @@
               height="48"
               aria-hidden="true"
             >
-              <source src="/favorite/av1.avl" type='application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"' integrity="sha256-J+umDYqlSWvTvzu/fordVdI23LStR3Z0ApoyXPQsY2A=">
-              <source src="/favorite/vp9.avl" type='application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"' integrity="sha256-SxUpg1y8p1imH4LJG4M8FNscJ1wUu0HuruGa9/mQ0zU=">
-              <source src="/favorite/h265.avl" type='application/vnd.aval; codecs="hvc1.1.6.L30.90"' integrity="sha256-+GGn1ksWb/WNcF6ORDbrkNQi4ONm5O22ISddMx8dT8w=">
-              <source src="/favorite/h264.avl" type='application/vnd.aval; codecs="avc1.64000A"' integrity="sha256-iYHtz2wQXqTY9YFl2/7URTr/e72TVF1z893UzSGLKYQ=">
-              <img
-                slot="fallback"
-                src="/favorite.png"
-                alt=""
-                width="48"
-                height="48"
-              >
+              <source src="/favorite/av1.avl" type='application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"' integrity="sha256-UWa/IUr5RCcZvURpGqT0Al7QUbS9ha+MdBBYmUtJbNg=">
+              <source src="/favorite/vp9.avl" type='application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"' integrity="sha256-2Xz8jHAU7EbPY1y82xHWnP1SDb080TapIOI6x210xHg=">
+              <source src="/favorite/h265.avl" type='application/vnd.aval; codecs="hvc1.1.6.L30.90"' integrity="sha256-T5f+W6j+cd7U3Ag565gg8tdaksWNnkTTpC9YrwugXIw=">
+              <source src="/favorite/h264.avl" type='application/vnd.aval; codecs="avc1.42E00B"' integrity="sha256-IMwoVAoIf2gFOcH9ydXF6+5bgNdIPFRdbtJD672jqco=">
             </aval-player>
+            <img
+              id="favorite-unavailable"
+              src="/favorite.png"
+              alt=""
+              width="48"
+              height="48"
+              hidden
+            >
           </button>
           <p class="stage-hint">Hover or focus the icon</p>
         </div>
@@ -64,7 +65,7 @@
           <h2 id="demo-title">Favorite interaction</h2>
           <p class="description">
             This is ordinary HTML backed by a checked-in <code>.avl</code> asset.
-            The host-owned PNG stays available when the animated runtime is unsupported.
+            The application can reveal its own PNG if animated playback fails.
           </p>
 
           <div class="runtime-line" aria-live="polite" aria-atomic="true">

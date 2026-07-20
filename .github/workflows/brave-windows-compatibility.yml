@@ -1,0 +1,173 @@
+name: brave-windows-compatibility
+run-name: brave-windows-${{ inputs.session_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tunnel_url:
+        description: Exact HTTPS endpoint created for this immutable compatibility run
+        required: true
+        type: string
+      source_commit:
+        description: Exact full source commit exposed by the endpoint
+        required: true
+        type: string
+      tunnel_created_at:
+        description: Exact UTC timestamp when the immutable HTTPS endpoint was created
+        required: true
+        type: string
+      session_id:
+        description: Unique UTC session identifier used in the artifact name
+        required: true
+        type: string
+
+concurrency:
+  group: brave-windows-${{ inputs.session_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  branded-brave:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      INPUT_TUNNEL_URL: ${{ inputs.tunnel_url }}
+      INPUT_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      INPUT_SESSION_ID: ${{ inputs.session_id }}
+      INPUT_TUNNEL_CREATED_AT: ${{ inputs.tunnel_created_at }}
+      POLICY_PATH: scripts/browser-compatibility/certification-policy.json
+    steps:
+      - name: Validate dispatch inputs before use
+        shell: pwsh
+        run: |
+          if ($env:INPUT_SOURCE_COMMIT -notmatch '^[a-f0-9]{40}$') {
+            throw 'source_commit must be a full lowercase Git commit'
+          }
+          if ($env:INPUT_SESSION_ID -notmatch '^[0-9]{8}T[0-9]{6}Z(?:-[a-z0-9][a-z0-9-]{0,47})?$') {
+            throw 'session_id must be a bounded UTC identifier'
+          }
+          $uri = $null
+          if (-not [Uri]::TryCreate($env:INPUT_TUNNEL_URL, [UriKind]::Absolute, [ref]$uri) -or
+              $uri.Scheme -ne 'https' -or $uri.UserInfo -ne '' -or $uri.Fragment -ne '' -or
+              $uri.Query -ne '' -or $uri.AbsolutePath -ne '/') {
+            throw 'tunnel_url must be an origin-only HTTPS URL without credentials, query, or fragment'
+          }
+          $tunnelCreatedAt = [DateTimeOffset]::MinValue
+          if (-not [DateTimeOffset]::TryParse($env:INPUT_TUNNEL_CREATED_AT, [ref]$tunnelCreatedAt) -or
+              $tunnelCreatedAt.Offset -ne [TimeSpan]::Zero -or
+              $tunnelCreatedAt -gt [DateTimeOffset]::UtcNow) {
+            throw 'tunnel_created_at must be a valid UTC timestamp no later than dispatch validation'
+          }
+          "SAFE_SESSION_ID=$env:INPUT_SESSION_ID" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Bind checkout to the requested commit
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -cne $env:INPUT_SOURCE_COMMIT) {
+            throw "checkout mismatch: $actual"
+          }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.12.0
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify official Brave resolution still matches checked-in policy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          node scripts/browser-compatibility/brave/resolve-builds.mjs
+          --boundary-date 2024-07-19
+          --policy scripts/browser-compatibility/certification-policy.json
+          --check
+      - name: Allocate caller-owned install and evidence roots
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP "aval-brave-$($env:SAFE_SESSION_ID)"
+          $runParent = Join-Path $PWD "artifacts/browser-compatibility/runs/$($env:INPUT_SOURCE_COMMIT)"
+          New-Item -ItemType Directory -Path $runParent -Force -ErrorAction Stop | Out-Null
+          $runRoot = Join-Path $runParent $env:SAFE_SESSION_ID
+          New-Item -ItemType Directory -Path $runRoot -ErrorAction Stop | Out-Null
+          "BRAVE_INSTALL_ROOT=$installRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BRAVE_RUN_ROOT=$runRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          [pscustomobject]@{
+            schemaVersion = 1
+            sourceCommit = $env:INPUT_SOURCE_COMMIT
+            sessionId = $env:SAFE_SESSION_ID
+            tunnelOrigin = ([Uri]$env:INPUT_TUNNEL_URL).GetLeftPart([UriPartial]::Authority)
+            hostOperatingSystem = 'Windows Server 2025'
+            hostKernelVersion = [System.Environment]::OSVersion.Version.ToString()
+            runnerImage = $env:ImageOS
+            runnerImageVersion = $env:ImageVersion
+            createdAt = [DateTime]::UtcNow.ToString('o')
+          } | ConvertTo-Json | Out-File -FilePath (Join-Path $runRoot 'brave-workflow-provenance-windows-2025.json') -Encoding utf8
+      - name: Acquire exact official standalone Brave builds
+        run: >-
+          node scripts/browser-compatibility/brave/acquire-builds.mjs
+          --policy scripts/browser-compatibility/certification-policy.json
+          --platform windows-x64
+          --output "$env:BRAVE_INSTALL_ROOT"
+      - name: Independently verify extracted Brave executables
+        shell: pwsh
+        run: |
+          $executables = @(Get-ChildItem -LiteralPath $env:BRAVE_INSTALL_ROOT -Filter brave.exe -File -Recurse)
+          if ($executables.Count -ne 2) {
+            throw "expected exactly two extracted brave.exe files; got $($executables.Count)"
+          }
+          $versions = @()
+          foreach ($executable in $executables) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $executable.FullName
+            if ($signature.Status -ne 'Valid' -or
+                $signature.SignerCertificate.Subject -notmatch '(^|,\s*)CN="?Brave Software, Inc\."?(,|$)') {
+              throw "invalid Brave signature: $($executable.FullName)"
+            }
+            $version = & $executable.FullName --version
+            if ($LASTEXITCODE -ne 0 -or $version -notmatch '\bBrave(?: Browser)?\b') {
+              throw "invalid branded version output: $($executable.FullName)"
+            }
+            $versions += [pscustomobject]@{
+              path = $executable.FullName.Substring($env:BRAVE_INSTALL_ROOT.Length + 1).Replace('\', '/')
+              signer = $signature.SignerCertificate.Subject
+              versionOutput = [string]$version
+            }
+          }
+          $versions | ConvertTo-Json | Out-File -FilePath (Join-Path $env:BRAVE_RUN_ROOT 'brave-authenticode-windows-2025.json') -Encoding utf8
+          Copy-Item -LiteralPath (Join-Path $env:BRAVE_INSTALL_ROOT 'manifest.json') -Destination (Join-Path $env:BRAVE_RUN_ROOT 'brave-acquisition-copy-windows-2025.json')
+          if (@(Get-ChildItem -LiteralPath $env:BRAVE_INSTALL_ROOT -Filter '*Setup.exe' -File -Recurse).Count -ne 0) {
+            throw 'standalone installers must not be retained after extraction'
+          }
+      - name: Run every demo, interaction, codec mode, and soak
+        shell: pwsh
+        run: |
+          node scripts/browser-compatibility/brave/run-matrix.mjs `
+            --policy $env:POLICY_PATH `
+            --platform windows `
+            --install-root $env:BRAVE_INSTALL_ROOT `
+            --base-url $env:INPUT_TUNNEL_URL `
+            --run-root $env:BRAVE_RUN_ROOT `
+            --source-commit $env:INPUT_SOURCE_COMMIT `
+            --session-id $env:SAFE_SESSION_ID `
+            --tunnel-created-at $env:INPUT_TUNNEL_CREATED_AT
+      - name: Remove acquired browsers and clean profiles
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path -LiteralPath $env:BRAVE_INSTALL_ROOT) {
+            Remove-Item -LiteralPath $env:BRAVE_INSTALL_ROOT -Recurse -Force
+          }
+          Get-ChildItem -LiteralPath $env:RUNNER_TEMP -Directory -Filter 'aval-brave-profile-*' -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: brave-windows-${{ env.SAFE_SESSION_ID }}
+          path: artifacts/browser-compatibility/runs/${{ inputs.source_commit }}/${{ env.SAFE_SESSION_ID }}
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 30

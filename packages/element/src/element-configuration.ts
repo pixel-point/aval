@@ -3,10 +3,8 @@ import type {
   AvalBindings,
   AvalCrossOrigin,
   AvalFit,
-  AvalMotion,
-  AvalSourceCandidate
+  AvalMotion
 } from "./public-types.js";
-import type { ElementSourceCandidatesRead } from "./element-source-candidates.js";
 
 export const MAX_ELEMENT_URL_CODE_UNITS = 4_096;
 export const MAX_INTERACTION_ID_CODE_UNITS = 256;
@@ -14,148 +12,6 @@ const MAX_SAFE_INTEGER_DECIMAL_DIGITS = String(Number.MAX_SAFE_INTEGER).length;
 const IDENTIFIER_PATTERN = /^[a-z][a-z0-9._-]{0,63}$/u;
 const EXTERNAL_INTEGRITY_PATTERN = /^sha256-([A-Za-z0-9+/]{43})=$/u;
 const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-export interface ElementConfiguration {
-  readonly sourceCandidates: readonly Readonly<AvalSourceCandidate>[];
-  readonly crossOrigin: AvalCrossOrigin;
-  readonly motion: AvalMotion;
-  readonly autoplay: AvalAutoplay;
-  readonly fit: AvalFit | null;
-  readonly bindings: AvalBindings;
-  readonly state: string | null;
-  readonly interactionFor: string;
-  readonly width: number | null;
-  readonly height: number | null;
-}
-
-export interface ElementConfigurationFailure {
-  readonly attribute: string;
-  readonly code: "invalid-configuration";
-}
-
-export interface ElementConfigurationRead {
-  readonly configuration: Readonly<ElementConfiguration>;
-  readonly failures: readonly Readonly<ElementConfigurationFailure>[];
-}
-
-export interface ElementConfigurationChangeSet {
-  readonly retrievalIdentity: boolean;
-  readonly motion: boolean;
-  readonly autoplay: boolean;
-  readonly fit: boolean;
-  readonly bindings: boolean;
-  readonly state: boolean;
-  readonly interactionTarget: boolean;
-  readonly size: boolean;
-}
-
-export function readElementConfiguration(
-  getAttribute: (name: string) => string | null,
-  sourceRead: Readonly<ElementSourceCandidatesRead> = EMPTY_SOURCE_READ
-): Readonly<ElementConfigurationRead> {
-  const failures: ElementConfigurationFailure[] = sourceRead.failures.map((failure) =>
-    Object.freeze({
-      attribute: `source[${failure.sourceIndex}].${failure.attribute}`,
-      code: "invalid-configuration" as const
-    })
-  );
-  const read = <T>(
-    name: string,
-    normalize: (value: string | null) => T,
-    fallback: T
-  ): T => {
-    try {
-      return normalize(getAttribute(name));
-    } catch {
-      failures.push(Object.freeze({
-        attribute: name,
-        code: "invalid-configuration" as const
-      }));
-      return fallback;
-    }
-  };
-  const configuration = Object.freeze({
-    sourceCandidates: freezeSourceCandidates(sourceRead.candidates),
-    crossOrigin: read("crossorigin", normalizeCrossOriginAttribute, "anonymous"),
-    motion: read("motion", (value) => normalizeEnum(value ?? "auto", MOTIONS, "motion"), "auto"),
-    autoplay: read(
-      "autoplay",
-      (value) => normalizeEnum(value ?? "visible", AUTOPLAYS, "autoplay"),
-      "visible"
-    ),
-    fit: read("fit", normalizeFitAttribute, null),
-    bindings: read(
-      "bindings",
-      (value) => normalizeEnum(value ?? "auto", BINDINGS, "bindings"),
-      "auto"
-    ),
-    state: read("state", normalizeOptionalIdentifier, null),
-    interactionFor: read(
-      "interaction-for",
-      (value) => normalizeInteractionFor(value ?? ""),
-      ""
-    ),
-    width: read("width", normalizeOptionalSizeAttribute, null),
-    height: read("height", normalizeOptionalSizeAttribute, null)
-  } satisfies ElementConfiguration);
-  return Object.freeze({ configuration, failures: Object.freeze(failures) });
-}
-
-export function diffElementConfiguration(
-  previous: Readonly<ElementConfiguration> | null,
-  next: Readonly<ElementConfiguration>
-): Readonly<ElementConfigurationChangeSet> {
-  if (previous === null) {
-    return Object.freeze({
-      retrievalIdentity: next.sourceCandidates.length > 0,
-      motion: true,
-      autoplay: true,
-      fit: true,
-      bindings: true,
-      state: next.state !== null,
-      interactionTarget: true,
-      size: true
-    });
-  }
-  return Object.freeze({
-    retrievalIdentity:
-      !sourceCandidatesEqual(previous.sourceCandidates, next.sourceCandidates) ||
-      previous.crossOrigin !== next.crossOrigin,
-    motion: previous.motion !== next.motion,
-    autoplay: previous.autoplay !== next.autoplay,
-    fit: previous.fit !== next.fit,
-    bindings: previous.bindings !== next.bindings,
-    state: previous.state !== next.state,
-    interactionTarget: previous.interactionFor !== next.interactionFor,
-    size: previous.width !== next.width || previous.height !== next.height
-  });
-}
-
-function sourceCandidatesEqual(
-  previous: readonly Readonly<AvalSourceCandidate>[],
-  next: readonly Readonly<AvalSourceCandidate>[]
-): boolean {
-  if (previous.length !== next.length) return false;
-  return previous.every((candidate, index) => {
-    const other = next[index];
-    return other !== undefined &&
-      candidate.src === other.src &&
-      candidate.type === other.type &&
-      candidate.codec === other.codec &&
-      candidate.integrity === other.integrity;
-  });
-}
-
-function freezeSourceCandidates(
-  candidates: readonly Readonly<AvalSourceCandidate>[]
-): readonly Readonly<AvalSourceCandidate>[] {
-  return Object.freeze(candidates.map((candidate) => Object.freeze({
-    src: candidate.src,
-    type: candidate.type,
-    codec: candidate.codec,
-    integrity: candidate.integrity
-  })));
-}
 
 export function normalizeSource(value: unknown): string {
   const normalized = normalizeBoundedString(value, "src");
@@ -243,22 +99,38 @@ function normalizeBoundedString(value: unknown, label: string): string {
   return value;
 }
 
-function normalizeCrossOriginAttribute(value: string | null): AvalCrossOrigin {
+export function normalizeCrossOriginAttribute(value: string | null): AvalCrossOrigin {
   if (value === null || value === "") return "anonymous";
   return normalizeCrossOrigin(value);
 }
 
-function normalizeFitAttribute(value: string | null): AvalFit | null {
+export function normalizeMotionAttribute(value: string | null): AvalMotion {
+  return normalizeEnum(value ?? "auto", MOTIONS, "motion");
+}
+
+export function normalizeAutoplayAttribute(value: string | null): AvalAutoplay {
+  return normalizeEnum(value ?? "visible", AUTOPLAYS, "autoplay");
+}
+
+export function normalizeFitAttribute(value: string | null): AvalFit | null {
   if (value === null || value === "") return null;
   return normalizeFit(value);
 }
 
-function normalizeOptionalIdentifier(value: string | null): string | null {
+export function normalizeBindingsAttribute(value: string | null): AvalBindings {
+  return normalizeEnum(value ?? "auto", BINDINGS, "bindings");
+}
+
+export function normalizeStateAttribute(value: string | null): string | null {
   if (value === null || value === "") return null;
   return normalizeState(value);
 }
 
-function normalizeOptionalSizeAttribute(value: string | null): number | null {
+export function normalizeInteractionForAttribute(value: string | null): string {
+  return normalizeInteractionFor(value ?? "");
+}
+
+export function normalizeSizeAttribute(value: string | null): number | null {
   if (value === null || value === "") return null;
   if (!/^[0-9]+$/u.test(value)) {
     throw new RangeError("size attribute must be a positive integer");
@@ -317,8 +189,3 @@ const BINDINGS: ReadonlySet<AvalBindings> = new Set([
   "auto",
   "none"
 ]);
-
-const EMPTY_SOURCE_READ: Readonly<ElementSourceCandidatesRead> = Object.freeze({
-  candidates: Object.freeze([]),
-  failures: Object.freeze([])
-});

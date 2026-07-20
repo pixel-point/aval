@@ -18,14 +18,18 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { build as viteBuild, preview as vitePreview } from "vite";
 
+import { ELEMENT_RELEASE_WORKER } from "./element-release-contract.mjs";
+import {
+  RELEASE_PACKAGE_SPECS,
+  RELEASE_VERSION,
+  releaseArchiveFilename
+} from "./release-set-model.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const packageDirectory = resolve(root, option("--packages") ?? "artifacts/1.0.0/packages");
-const policy = JSON.parse(await readFile(
-  resolve(root, "config/release/release-policy.json"),
-  "utf8"
-));
-const releaseVersion = policy.releaseVersion;
-const expectedPackages = ["compiler", "element", "format", "graph", "player-web"];
+const packageDirectory = resolve(
+  root,
+  option("--packages") ?? `artifacts/${RELEASE_VERSION}/packages`
+);
 const expectedCodecs = Object.freeze(["av1", "vp9", "h265", "h264"]);
 const expectedCodecPrefixes = Object.freeze({
   av1: "av01.",
@@ -33,11 +37,20 @@ const expectedCodecPrefixes = Object.freeze({
   h265: "hvc1.",
   h264: "avc1."
 });
-const archives = (await readdir(packageDirectory))
+const STRICT_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; " +
+  "connect-src 'self'; worker-src 'self'; img-src 'self'; object-src 'none'; " +
+  "base-uri 'none'; frame-ancestors 'none'";
+const archiveNames = (await readdir(packageDirectory))
   .filter((name) => name.endsWith(".tgz"))
-  .sort()
-  .map((name) => join(packageDirectory, name));
-assert(archives.length === expectedPackages.length, `expected five package archives, found ${archives.length}`);
+  .sort();
+const expectedArchiveNames = RELEASE_PACKAGE_SPECS
+  .map(({ name }) => releaseArchiveFilename(name))
+  .sort();
+assert(
+  JSON.stringify(archiveNames) === JSON.stringify(expectedArchiveNames),
+  `packed archive set was not exact: ${JSON.stringify(archiveNames)}`
+);
+const archives = expectedArchiveNames.map((name) => join(packageDirectory, name));
 
 const temporary = await realpath(await mkdtemp(join(tmpdir(), "aval-packed-dev-")));
 const project = join(temporary, "project");
@@ -67,7 +80,7 @@ try {
     project,
     120_000
   );
-  await verifyInstalledGraph(project, releaseVersion);
+  await verifyInstalledGraph(project, RELEASE_VERSION);
 
   const cli = join(
     project,
@@ -92,12 +105,21 @@ try {
     env: { ...process.env, NO_COLOR: "1" },
     stdio: ["ignore", "pipe", "pipe"]
   });
-  const output = createJsonLineCollector(child.stdout, "packed avl dev stdout");
   let stderr = "";
+  const output = createJsonLineCollector(
+    child.stdout,
+    "packed avl dev stdout",
+    () => stderr
+  );
+  const observeDiagnostic = createJsonErrorMonitor((diagnostic) => {
+    output.fail(devDiagnosticError(diagnostic));
+    child.kill("SIGTERM");
+  });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk) => {
     try {
       stderr = boundedAppend(stderr, chunk, 4 * 1024 * 1024, "packed avl dev stderr");
+      observeDiagnostic(chunk);
     } catch (error) {
       output.fail(error);
       child.kill("SIGTERM");
@@ -112,7 +134,7 @@ try {
   }).then((result) => {
     childExitState = result;
     output.fail(new Error(
-      `packed avl dev exited (${String(result.code ?? result.signal)}):\n${stderr}`
+      `packed avl dev exited (${String(result.code ?? result.signal)})`
     ));
     return result;
   });
@@ -147,7 +169,12 @@ try {
     root: project,
     configFile: false,
     logLevel: "silent",
-    preview: { host: "127.0.0.1", port: 0, strictPort: true }
+    preview: {
+      host: "127.0.0.1",
+      port: 0,
+      strictPort: true,
+      headers: { "Content-Security-Policy": STRICT_CSP }
+    }
   });
   const starterUrl = viteServer.resolvedUrls?.local[0];
   assert(typeof starterUrl === "string" && /^http:\/\/127\.0\.0\.1:[0-9]+\/$/u.test(starterUrl), "generated production starter preview omitted its loopback URL");
@@ -157,7 +184,14 @@ try {
   await installWorkerEvidence(starterContext);
   const starterPage = await starterContext.newPage();
   const starterFailures = monitorBrowser(starterPage, starterUrl, [root, project]);
-  await starterPage.goto(starterUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  const starterResponse = await starterPage.goto(starterUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000
+  });
+  assert(
+    starterResponse?.headers()["content-security-policy"] === STRICT_CSP,
+    "generated production starter preview omitted its strict CSP"
+  );
   await assertPinnedChromiumCapabilities(starterPage);
   await waitForElementReady(starterPage, "interactiveReady");
   const starterSnapshot = await publicSnapshot(starterPage);
@@ -180,25 +214,23 @@ try {
   starterFailures.assertClean();
   await starterContext.close();
 
-  const fallbackContext = await browser.newContext();
-  await fallbackContext.addInitScript(() => {
+  const failureContext = await browser.newContext();
+  await failureContext.addInitScript(() => {
     Object.defineProperty(globalThis, "Worker", { configurable: true, value: undefined });
   });
-  const fallbackPage = await fallbackContext.newPage();
-  const fallbackFailures = monitorBrowser(fallbackPage, starterUrl, [root, project]);
-  await fallbackPage.goto(starterUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await waitForElementReady(fallbackPage, "staticReady");
-  const fallbackSnapshot = await publicSnapshot(fallbackPage);
-  assert(
-    fallbackSnapshot.staticReason === "worker-unavailable" || fallbackSnapshot.staticReason === "visibility-suspended",
-    `forced-static starter used an unexpected reason: ${String(fallbackSnapshot.staticReason)}`
-  );
-  assert(fallbackSnapshot.fallbackVisible && !fallbackSnapshot.fallbackSlotHidden, "forced-static starter did not reveal its author-owned fallback");
-  assert(fallbackSnapshot.animatedCanvasHidden && fallbackSnapshot.canvasCount === 1, "forced-static starter exposed an unexpected presentation canvas");
-  assert(fallbackSnapshot.fallbackAuthorOwned && fallbackSnapshot.fallbackImageLoaded, "starter did not retain and load its author-owned fallback");
-  assert(fallbackSnapshot.videoCount === 0, "forced-static starter created a video element");
-  fallbackFailures.assertClean();
-  await fallbackContext.close();
+  const failurePage = await failureContext.newPage();
+  const failureMonitor = monitorBrowser(failurePage, starterUrl, [root, project]);
+  await failurePage.goto(starterUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await waitForElementReady(failurePage, "error");
+  const failureSnapshot = await publicSnapshot(failurePage);
+  assert(failureSnapshot.staticReason === null, "terminal starter failure claimed static readiness");
+  assert(failureSnapshot.alternateVisible, "consumer did not reveal its alternate image after failure");
+  assert(failureSnapshot.fallbackSlotCount === 0, "element retained a managed fallback slot");
+  assert(failureSnapshot.animatedCanvasHidden && failureSnapshot.canvasCount === 1, "failed starter exposed an unexpected presentation canvas");
+  assert(failureSnapshot.alternateConsumerOwned && failureSnapshot.alternateImageLoaded, "starter did not retain and load its consumer-owned alternate image");
+  assert(failureSnapshot.videoCount === 0, "failed starter created a video element");
+  failureMonitor.assertClean();
+  await failureContext.close();
 
   const devContext = await browser.newContext();
   await installWorkerEvidence(devContext);
@@ -265,7 +297,7 @@ try {
 
   process.stdout.write(`${JSON.stringify({
     status: "passed",
-    packages: expectedPackages.length,
+    packages: RELEASE_PACKAGE_SPECS.length,
     firstGeneration: firstBuild.sequence,
     replacementGeneration: secondBuild.sequence,
     readiness: replacementSnapshot.readiness,
@@ -307,29 +339,29 @@ async function verifyInstalledGraph(projectRoot, version) {
   const scope = join(projectRoot, "node_modules", "@pixel-point");
   const canonicalScope = await realpath(scope);
   const manifests = new Map();
-  for (const name of expectedPackages) {
-    const directory = join(scope, `aval-${name}`);
-    assert(!(await lstat(directory)).isSymbolicLink(), `installed ${name} package is a symlink`);
+  for (const specification of RELEASE_PACKAGE_SPECS) {
+    const directory = join(scope, specification.name.slice("@pixel-point/".length));
+    assert(!(await lstat(directory)).isSymbolicLink(), `installed ${specification.name} package is a symlink`);
     const canonical = await realpath(directory);
     assert(
       canonical.startsWith(`${canonicalScope}${sep}`),
-      `installed ${name} package escaped the clean node_modules scope`
+      `installed ${specification.name} package escaped the clean node_modules scope`
     );
     const manifest = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
-    assert(manifest.version === version, `${name} installed at ${String(manifest.version)}, expected ${version}`);
-    manifests.set(name, manifest);
+    assert(manifest.name === specification.name, `installed package identity drifted for ${specification.name}`);
+    assert(manifest.version === version, `${specification.name} installed at ${String(manifest.version)}, expected ${version}`);
+    manifests.set(specification.name, manifest);
   }
-  const expectedDependencies = {
-    graph: [],
-    format: ["graph"],
-    "player-web": ["graph", "format"],
-    element: ["player-web"],
-    compiler: ["graph", "format", "player-web", "element"]
-  };
-  for (const [name, expected] of Object.entries(expectedDependencies)) {
-    const dependencies = manifests.get(name)?.dependencies ?? {};
-    assert(JSON.stringify(Object.keys(dependencies).sort()) === JSON.stringify(expected.map((short) => `@pixel-point/aval-${short}`).sort()), `packed ${name} dependency graph is not exact`);
-    for (const value of Object.values(dependencies)) assert(value === version, `packed ${name} dependency version is not exact`);
+  for (const specification of RELEASE_PACKAGE_SPECS) {
+    const dependencies = manifests.get(specification.name)?.dependencies ?? {};
+    assert(
+      JSON.stringify(Object.keys(dependencies).sort()) ===
+        JSON.stringify([...specification.dependencies].sort()),
+      `packed ${specification.name} dependency graph is not exact`
+    );
+    for (const value of Object.values(dependencies)) {
+      assert(value === version, `packed ${specification.name} dependency version is not exact`);
+    }
   }
 }
 
@@ -343,9 +375,12 @@ async function verifyHttpSurface(url, build, forbiddenPaths) {
   const moduleResponse = await checkedFetch(new URL("modules/element/auto.js", url));
   assert(moduleResponse.status === 200, `packed element module returned ${moduleResponse.status}`);
   const moduleText = await moduleResponse.text();
-  const workerResponse = await checkedFetch(new URL("modules/player-web/decoder-worker/entry.js", url));
-  assert(workerResponse.status === 200, `packed decoder worker entry returned ${workerResponse.status}`);
-  assert(workerResponse.headers.get("content-security-policy")?.includes("default-src 'none'") === true, "packed decoder worker entry omitted its closed CSP");
+  const workerResponse = await checkedFetch(new URL(
+    `modules/element/${ELEMENT_RELEASE_WORKER.output}?no-inline`,
+    url
+  ));
+  assert(workerResponse.status === 200, `packed element decoder worker returned ${workerResponse.status}`);
+  assert(workerResponse.headers.get("content-security-policy")?.includes("default-src 'none'") === true, "packed element decoder worker omitted its closed CSP");
   const workerText = await workerResponse.text();
   const originRoot = new URL("/", url);
   const unscoped = await checkedFetch(originRoot);
@@ -400,7 +435,7 @@ function monitorBrowser(page, baseUrl, forbiddenPaths = []) {
     consoleErrors.push(`${message.text()}${location === "" ? "" : ` (${location})`}`);
   });
   page.on("response", (response) => {
-    if (response.request().resourceType() === "worker" || response.url().includes("/decoder-worker/entry.js")) workerResponses.push({ status: response.status(), url: response.url() });
+    if (response.request().resourceType() === "worker" || response.url().includes(`/${ELEMENT_RELEASE_WORKER.output}`)) workerResponses.push({ status: response.status(), url: response.url() });
     if (response.status() >= 400 && !response.url().endsWith("/favicon.ico")) {
       failedResponses.push(`${String(response.status())} ${response.url()}`);
     }
@@ -540,11 +575,10 @@ async function waitForElementReady(page, expectedReadiness) {
 
 async function publicSnapshot(page) {
   return page.locator("aval-player").first().evaluate((motion) => {
-    const fallback = motion.querySelector("[slot=fallback]");
-    const fallbackStyle = fallback === null ? null : getComputedStyle(fallback);
-    const fallbackImage = fallback instanceof HTMLImageElement ? fallback : null;
+    const alternate = document.querySelector("#motion-unavailable");
+    const alternateStyle = alternate === null ? null : getComputedStyle(alternate);
+    const alternateImage = alternate instanceof HTMLImageElement ? alternate : null;
     const animatedCanvas = motion.shadowRoot?.querySelector('canvas[data-aval-layer="animated"]');
-    const fallbackSlot = motion.shadowRoot?.querySelector('slot[data-aval-layer="fallback"]');
     return ({
       readiness: motion.readiness,
       staticReason: motion.staticReason,
@@ -558,12 +592,12 @@ async function publicSnapshot(page) {
       })),
       sourceGeneration: motion.getDiagnostics().sourceGeneration,
       videoCount: document.querySelectorAll("video").length,
-      fallbackVisible: fallback !== null && fallbackStyle?.display !== "none" && fallbackStyle?.visibility !== "hidden" && fallback.getBoundingClientRect().width > 0 && fallback.getBoundingClientRect().height > 0,
-      fallbackImageLoaded: fallbackImage === null || (fallbackImage.complete && fallbackImage.naturalWidth > 0),
-      fallbackAuthorOwned: fallback !== null && fallback.parentElement === motion,
+      alternateVisible: alternate !== null && alternateStyle?.display !== "none" && alternateStyle?.visibility !== "hidden" && alternate.getBoundingClientRect().width > 0 && alternate.getBoundingClientRect().height > 0,
+      alternateImageLoaded: alternateImage !== null && alternateImage.complete && alternateImage.naturalWidth > 0,
+      alternateConsumerOwned: alternate !== null && alternate.parentElement !== motion,
       canvasCount: motion.shadowRoot?.querySelectorAll("canvas").length ?? 0,
       animatedCanvasHidden: animatedCanvas instanceof HTMLCanvasElement && animatedCanvas.hidden,
-      fallbackSlotHidden: fallbackSlot instanceof HTMLSlotElement && fallbackSlot.hidden
+      fallbackSlotCount: motion.shadowRoot?.querySelectorAll('slot[name="fallback"]').length ?? 0
     });
   });
 }
@@ -664,10 +698,11 @@ function integrityForSha256(value) {
   return `sha256-${Buffer.from(value, "hex").toString("base64")}`;
 }
 
-function createJsonLineCollector(stream, label) {
+function createJsonLineCollector(stream, label, stderr) {
   const records = [];
   const waiters = new Set();
   let buffer = "";
+  let transcript = "";
   let totalBytes = 0;
   let failure;
   stream.setEncoding("utf8");
@@ -677,6 +712,7 @@ function createJsonLineCollector(stream, label) {
       fail(new Error(`${label} exceeded 4 MiB`));
       return;
     }
+    transcript += chunk;
     buffer += chunk;
     for (;;) {
       const newline = buffer.indexOf("\n");
@@ -693,6 +729,10 @@ function createJsonLineCollector(stream, label) {
   });
 
   function emit(value) {
+    if (value?.severity === "error") {
+      fail(devDiagnosticError(value));
+      return;
+    }
     records.push(value);
     if (records.length > 128) records.shift();
     for (const waiter of [...waiters]) {
@@ -705,10 +745,10 @@ function createJsonLineCollector(stream, label) {
 
   function fail(error) {
     if (failure !== undefined) return;
-    failure = error;
+    failure = withCollectedOutput(error, transcript, stderr());
     for (const waiter of waiters) {
       clearTimeout(waiter.timer);
-      waiter.reject(error);
+      waiter.reject(failure);
     }
     waiters.clear();
   }
@@ -726,13 +766,60 @@ function createJsonLineCollector(stream, label) {
           reject: rejectWait,
           timer: setTimeout(() => {
             waiters.delete(waiter);
-            rejectWait(new Error(`${label} did not emit the expected record in ${String(timeoutMs)} ms`));
+            rejectWait(withCollectedOutput(
+              new Error(`${label} did not emit the expected record in ${String(timeoutMs)} ms`),
+              transcript,
+              stderr()
+            ));
           }, timeoutMs)
         };
         waiters.add(waiter);
       });
     }
   });
+}
+
+function createJsonErrorMonitor(onError) {
+  let buffer = "";
+  return (chunk) => {
+    buffer += chunk;
+    for (;;) {
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line === "") continue;
+      try {
+        const value = JSON.parse(line);
+        if (value?.severity === "error") onError(value);
+      } catch {
+        // The child can emit platform diagnostics that are not CLI JSON.
+      }
+    }
+  };
+}
+
+function devDiagnosticError(diagnostic) {
+  return new Error(
+    `packed avl dev reported ${String(diagnostic.code ?? "an error")}: ` +
+    `${String(diagnostic.message ?? "no diagnostic message")}`
+  );
+}
+
+function withCollectedOutput(error, stdout, stderr) {
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `${message}\n\nCollected stdout:\n${diagnosticExcerpt(stdout)}` +
+    `\n\nCollected stderr:\n${diagnosticExcerpt(stderr)}`,
+    { cause: error }
+  );
+}
+
+function diagnosticExcerpt(value) {
+  const maximum = 32 * 1024;
+  if (value.length <= maximum) return value === "" ? "<empty>" : value;
+  return `<truncated ${String(value.length - maximum)} leading characters>\n` +
+    value.slice(-maximum);
 }
 
 async function checkedFetch(url, init = {}) {

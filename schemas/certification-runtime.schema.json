@@ -54,8 +54,8 @@
           "required": ["product", "version", "build", "channel", "engineVersion", "flags", "profileClean"],
           "properties": {
             "product": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "version": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "build": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "version": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[0-9]+(?:\\.[0-9]+)*$" },
+            "build": { "type": "string", "minLength": 3, "maxLength": 128, "pattern": "^[0-9]+(?:\\.[0-9]+)+$" },
             "channel": { "type": "string", "minLength": 1, "maxLength": 64 },
             "engineVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
             "flags": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
@@ -68,7 +68,7 @@
           "required": ["product", "version", "build", "architecture", "patchState"],
           "properties": {
             "product": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "version": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "version": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[0-9]+(?:\\.[0-9]+)*$" },
             "build": { "type": "string", "minLength": 1, "maxLength": 128 },
             "architecture": { "type": "string", "minLength": 1, "maxLength": 64 },
             "patchState": { "type": "string", "minLength": 1, "maxLength": 128 }

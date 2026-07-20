@@ -4,12 +4,10 @@ import {
   createIntegratedTestAsset
 } from "./asset-test-support.js";
 import {
+  RuntimePlaybackError,
   type RuntimeFailureCode
 } from "./errors.js";
-import {
-  PlaybackFallbackError,
-  type IntegratedTimerHost
-} from "./integrated-player.js";
+import type { IntegratedTimerHost } from "./integrated-player.js";
 import {
   Deferred,
   ManualTimers,
@@ -33,10 +31,9 @@ describe("IntegratedPlayer preparation lifecycle", () => {
     const result = await first;
 
     expect(result.mode).toBe("animated");
-    expect(harness.fallbackStore.calls).toEqual([
+    expect(harness.stateStore.calls).toEqual([
       "install:idle",
-      "validate-all",
-      "reveal-animated"
+      "validate-all"
     ]);
     expect(harness.factory.maximumActiveAttempts).toBe(1);
     expect(harness.player.snapshot()).toMatchObject({
@@ -45,31 +42,29 @@ describe("IntegratedPlayer preparation lifecycle", () => {
     });
   });
 
-  it("falls back to static after the selected candidate fails", async () => {
+  it("terminalizes and retains one error after the selected candidate fails", async () => {
     const harness = createHarness({
       behaviors: [
         { kind: "failure", code: "unsupported-profile" }
       ]
     });
 
-    const result = await harness.player.prepare();
+    const terminal = await rejectedRuntimeError(harness.player.prepare());
 
-    expect(result).toMatchObject({
-      mode: "static",
-      reason: "codec-unsupported",
-      report: { selectedRendition: null }
+    expect(terminal.code).toBe("unsupported-profile");
+    await expect(harness.player.prepare()).rejects.toBe(terminal);
+    await expect(harness.player.settled()).rejects.toBe(terminal);
+    expect(harness.player.snapshot()).toMatchObject({
+      readiness: "error",
+      selectedRendition: null
     });
-    expect(result.report.candidates.map(({ rendition, outcome }) =>
-      [rendition, outcome]
-    )).toEqual([
-      ["opaque-high", "rejected"]
-    ]);
     expect(harness.factory.calls).toEqual([
       "create:opaque-high",
       "prepare:opaque-high",
       "dispose:opaque-high"
     ]);
-    expect(harness.events.some(({ type }) => type === "fallback")).toBe(true);
+    expect(harness.events.some(({ type }) => String(type) === "fallback"))
+      .toBe(false);
   });
 
   it("activates only the exact rendition selected before construction", async () => {
@@ -97,22 +92,18 @@ describe("IntegratedPlayer preparation lifecycle", () => {
           { kind: "success" }
         ]
       });
-      const result = await harness.player.prepare();
+      const terminal = await rejectedRuntimeError(harness.player.prepare());
 
-      expect(result).toMatchObject({
-        mode: "static",
-        report: {
-          selectedRendition: null,
-          candidates: [{ rendition: "opaque-high", outcome: "rejected" }]
-        }
-      });
+      expect(terminal.code).toBe(code);
+      expect(harness.player.snapshot().readiness).toBe("error");
       expect(harness.factory.activeAttempts).toBe(0);
       expect(harness.factory.calls).not.toContain("create:opaque-low");
-      expect(harness.events.some(({ type }) => type === "fallback")).toBe(true);
+      expect(harness.events.some(({ type }) => String(type) === "fallback"))
+        .toBe(false);
     }
   );
 
-  it("times out to static only after the complete static check is ready", async () => {
+  it("terminalizes when animated preparation exceeds its deadline", async () => {
     const timers = new ManualTimers();
     const harness = createHarness({
       behaviors: [{ kind: "pending" }],
@@ -122,12 +113,15 @@ describe("IntegratedPlayer preparation lifecycle", () => {
     await waitForCall(harness.factory.calls, "prepare:opaque-high");
     timers.fireAll();
 
-    await expect(preparation).resolves.toMatchObject({
-      mode: "static",
-      reason: "preparation-timeout"
+    await expect(preparation).rejects.toMatchObject({
+      name: "RuntimePlaybackError",
+      code: "readiness-failure",
+      failure: {
+        context: { operation: "animation-preparation-timeout" }
+      }
     });
     expect(harness.factory.calls).toContain("dispose:opaque-high");
-    expect(harness.player.snapshot().readiness).toBe("staticReady");
+    expect(harness.player.snapshot().readiness).toBe("error");
   });
 
   it("fails terminally when the deadline expires before static readiness", async () => {
@@ -137,10 +131,10 @@ describe("IntegratedPlayer preparation lifecycle", () => {
       timers
     });
     const preparation = harness.player.prepare({ timeoutMs: 25 });
-    await waitForCall(harness.fallbackStore.calls, "install:idle");
+    await waitForCall(harness.stateStore.calls, "install:idle");
     timers.fireAll();
 
-    await expect(preparation).rejects.toBeInstanceOf(PlaybackFallbackError);
+    await expect(preparation).rejects.toBeInstanceOf(RuntimePlaybackError);
     expect(harness.player.snapshot().readiness).toBe("error");
     expect(harness.factory.calls).toEqual([]);
   });
@@ -220,10 +214,8 @@ describe("IntegratedPlayer preparation lifecycle", () => {
       ]
     });
 
-    await expect(harness.player.prepare()).resolves.toMatchObject({
-      mode: "static",
-      reason: "readiness-failed"
-    });
+    await expect(harness.player.prepare()).rejects
+      .toBeInstanceOf(RuntimePlaybackError);
     expect(harness.factory.calls.filter((call) => call.startsWith("create:")))
       .toEqual(["create:opaque-high"]);
   });
@@ -289,7 +281,8 @@ describe("IntegratedPlayer preparation lifecycle", () => {
       visualState: "idle",
       isTransitioning: true
     });
-    expect(harness.events.some(({ type }) => type === "fallback")).toBe(false);
+    expect(harness.events.some(({ type }) => String(type) === "fallback"))
+      .toBe(false);
     await harness.player.dispose();
   });
 
@@ -318,81 +311,63 @@ describe("IntegratedPlayer preparation lifecycle", () => {
     await harness.player.dispose();
   });
 
-  it("covers before candidate cleanup when animated reveal fails after first draw", async () => {
-    const harness = createHarness({
-      staticBehavior: "fail-first-reveal",
-      behaviors: [{ kind: "success" }]
-    });
+  it("activates without invoking consumer presentation callbacks", async () => {
+    const harness = createHarness({ behaviors: [{ kind: "success" }] });
 
     await expect(harness.player.prepare()).resolves.toMatchObject({
-      mode: "static",
-      reason: "animation-failure",
-      report: { selectedRendition: null }
+      mode: "animated",
+      report: { selectedRendition: "opaque-high" }
     });
-    expect(harness.factory.calls).toContain("dispose:opaque-high");
-    expect(harness.factory.calls).not.toContain("create:opaque-low");
-    const reveal = harness.order.indexOf("static:reveal-animated");
-    const cover = harness.order.indexOf("static:cover-current");
-    const dispose = harness.order.indexOf("candidate:dispose:opaque-high");
-    expect(reveal).toBeGreaterThanOrEqual(0);
-    expect(cover).toBeGreaterThan(reveal);
-    expect(dispose).toBeGreaterThan(cover);
-    expect(harness.player.snapshot().readiness).toBe("staticReady");
+    expect(harness.stateStore.calls).toEqual([
+      "install:idle",
+      "validate-all"
+    ]);
+    expect(harness.factory.calls).not.toContain("dispose:opaque-high");
+    expect(harness.player.snapshot().readiness).toBe("interactiveReady");
   });
 
-  it("recovers to static when the activation draw fails after graph commit", async () => {
+  it("rejects the same terminal error when activation draw fails", async () => {
     const harness = createHarness({
       behaviors: [{ kind: "draw-failure" }]
     });
 
-    await expect(harness.player.prepare()).resolves.toMatchObject({
-      mode: "static",
-      reason: "animation-failure",
-      report: {
-        readiness: "staticReady",
-        selectedRendition: null
-      }
-    });
+    const terminal = await rejectedRuntimeError(harness.player.prepare());
+    expect(terminal.code).toBe("readiness-failure");
+    await expect(harness.player.settled()).rejects.toBe(terminal);
+    await expect(harness.player.prepare()).rejects.toBe(terminal);
     expect(harness.factory.calls).toEqual(expect.arrayContaining([
       "draw:opaque-high:intro",
       "dispose:opaque-high"
     ]));
-    expect(harness.fallbackStore.calls).toEqual(expect.arrayContaining([
-      "stage:idle",
-      "cover-current"
-    ]));
+    expect(harness.stateStore.calls).not.toContain("present:idle");
     expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
+      readiness: "error",
       selectedRendition: null,
       visualState: "idle",
       isTransitioning: false
     });
   });
 
-  it("presents the latest request before committing initial static fallback", async () => {
-    const gate = new Deferred<void>();
+  it("rejects a pending request without staging alternate UI", async () => {
     const harness = createHarness({
-      staticBehavior: { kind: "gate-first-present", gate },
       behaviors: [
-        { kind: "failure", code: "readiness-failure" },
         { kind: "failure", code: "readiness-failure" }
       ]
     });
-    const preparation = harness.player.prepare();
-    await waitForCall(harness.fallbackStore.calls, "present:idle");
     const hover = harness.player.requestState("hover");
-    gate.resolve(undefined);
+    const hoverOutcome = hover.catch((error: unknown) => error);
+    const terminal = await rejectedRuntimeError(harness.player.prepare());
 
-    await expect(preparation).resolves.toMatchObject({ mode: "static" });
-    await expect(hover).resolves.toBeUndefined();
-    expect(harness.fallbackStore.calls.filter((call) =>
+    expect(await hoverOutcome).toBe(terminal);
+    expect(harness.stateStore.calls.filter((call) =>
       call.startsWith("present:")
-    )).toEqual(["present:idle", "present:hover"]);
-    expect(harness.fallbackStore.committed).toEqual(["hover"]);
+    )).toEqual([]);
+    expect(harness.stateStore.committed).toEqual([]);
+    await expect(harness.player.prepare()).rejects.toBe(terminal);
     expect(harness.player.snapshot()).toMatchObject({
-      readiness: "staticReady",
+      readiness: "error",
       requestedState: "hover",
-      visualState: "hover",
+      visualState: "idle",
       isTransitioning: false
     });
   });
@@ -434,9 +409,8 @@ describe("IntegratedPlayer preparation lifecycle", () => {
       availability: { workerAvailable: true, rendererAvailable: false },
       reason: "renderer-unavailable"
     }
-  ] as const)("uses exact $reason availability evidence", async ({
-    availability,
-    reason
+  ] as const)("terminalizes for unavailable $reason capability", async ({
+    availability
   }) => {
     const harness = createHarness({
       availability,
@@ -446,10 +420,9 @@ describe("IntegratedPlayer preparation lifecycle", () => {
       ]
     });
 
-    await expect(harness.player.prepare()).resolves.toMatchObject({
-      mode: "static",
-      reason
-    });
+    await expect(harness.player.prepare()).rejects
+      .toBeInstanceOf(RuntimePlaybackError);
+    expect(harness.player.snapshot().readiness).toBe("error");
   });
 
   it("rejects corrupt preferred H.264 without inspecting a lower rendition", async () => {
@@ -459,15 +432,11 @@ describe("IntegratedPlayer preparation lifecycle", () => {
       })
     });
 
-    await expect(harness.player.prepare()).resolves.toMatchObject({
-      mode: "static",
-      report: {
-        selectedRendition: null,
-        candidates: [
-          { rendition: "opaque-high", outcome: "rejected" }
-        ]
-      }
+    await expect(harness.player.prepare()).rejects.toMatchObject({
+      name: "RuntimePlaybackError",
+      code: "readiness-failure"
     });
+    expect(harness.player.snapshot().readiness).toBe("error");
     expect(harness.factory.calls.filter((call) => call.startsWith("create:")))
       .toEqual([]);
   });
@@ -511,32 +480,29 @@ describe("IntegratedPlayer preparation lifecycle", () => {
     expect(remove).toHaveBeenCalled();
   });
 
-  it("bounds timeout fallback and links it to player disposal", async () => {
+  it("bounds terminal timeout cleanup and links it to player disposal", async () => {
     const timers = new ManualTimers();
     const bounded = createHarness({
-      staticBehavior: "pending-present",
       behaviors: [{ kind: "pending" }],
       timers
     });
     const boundedPreparation = bounded.player.prepare({ timeoutMs: 25 });
     await waitForCall(bounded.factory.calls, "prepare:opaque-high");
     timers.fireAll();
-    await waitForCall(bounded.fallbackStore.calls, "present:idle");
-    timers.fireAll();
     await expect(boundedPreparation).rejects.toMatchObject({
-      name: "TimeoutError"
+      name: "RuntimePlaybackError",
+      code: "readiness-failure"
     });
+    expect(bounded.stateStore.calls).not.toContain("present:idle");
 
     const disposalTimers = new ManualTimers();
     const disposal = createHarness({
-      staticBehavior: "pending-present",
       behaviors: [{ kind: "pending" }],
       timers: disposalTimers
     });
     const disposalPreparation = disposal.player.prepare({ timeoutMs: 25 });
     await waitForCall(disposal.factory.calls, "prepare:opaque-high");
     disposalTimers.fireAll();
-    await waitForCall(disposal.fallbackStore.calls, "present:idle");
     const rejected = expect(disposalPreparation).rejects.toMatchObject({
       name: "AbortError"
     });
@@ -555,10 +521,22 @@ describe("IntegratedPlayer preparation lifecycle", () => {
     expect(harness.factory.calls.filter((call) =>
       call === "dispose:opaque-high"
     )).toHaveLength(1);
-    expect(harness.fallbackStore.calls.at(-1)).toBe("dispose");
+    expect(harness.stateStore.calls.at(-1)).toBe("dispose");
     expect(harness.player.snapshot()).toMatchObject({
       readiness: "disposed",
       disposed: true
     });
   });
 });
+
+async function rejectedRuntimeError(
+  promise: Promise<unknown>
+): Promise<RuntimePlaybackError> {
+  try {
+    await promise;
+  } catch (error) {
+    expect(error).toBeInstanceOf(RuntimePlaybackError);
+    return error as RuntimePlaybackError;
+  }
+  throw new Error("expected RuntimePlaybackError rejection");
+}

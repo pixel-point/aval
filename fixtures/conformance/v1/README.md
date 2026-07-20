@@ -19,12 +19,22 @@ Rebuild from the canonical project with the local FFmpeg toolchain:
 
 ```sh
 npm run build -w @pixel-point/aval-compiler
+AVAL_FIXTURE_TMP="$(mktemp -d /tmp/aval-v1-rebuild.XXXXXX)"
 node packages/compiler/dist/cli.js compile \
   fixtures/compiler/v1/source/motion.json \
-  --out fixtures/conformance/v1 --force
+  --out "$AVAL_FIXTURE_TMP/bundle"
+cp "$AVAL_FIXTURE_TMP/bundle/av1.avl" fixtures/conformance/v1/av1.avl
+cp "$AVAL_FIXTURE_TMP/bundle/vp9.avl" fixtures/conformance/v1/vp9.avl
+cp "$AVAL_FIXTURE_TMP/bundle/h265.avl" fixtures/conformance/v1/h265.avl
+cp "$AVAL_FIXTURE_TMP/bundle/h264.avl" fixtures/conformance/v1/h264.avl
+cp "$AVAL_FIXTURE_TMP/bundle/build.json" fixtures/conformance/v1/build.json
 node fixtures/conformance/v1/update-provenance.mjs
 npm run fixtures:verify
 ```
+
+The compiler publishes a bundle by replacing its output directory. Compile in
+temporary storage and copy only generated files so this mixed fixture directory
+keeps its README, provenance, and update script.
 
 The exact source bytes and generated outputs are pinned in `provenance.json`.
 The source frames are CC0-1.0.

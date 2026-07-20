@@ -3,7 +3,7 @@ export const RELEASE_PACKAGE_SPECS = Object.freeze([
   packageSpec("@pixel-point/aval-graph", "graph", []),
   packageSpec("@pixel-point/aval-format", "format", ["@pixel-point/aval-graph"]),
   packageSpec("@pixel-point/aval-player-web", "player-web", ["@pixel-point/aval-graph", "@pixel-point/aval-format"]),
-  packageSpec("@pixel-point/aval-element", "element", ["@pixel-point/aval-player-web"]),
+  packageSpec("@pixel-point/aval-element", "element", ["@pixel-point/aval-graph", "@pixel-point/aval-format"]),
   packageSpec("@pixel-point/aval-compiler", "compiler", ["@pixel-point/aval-graph", "@pixel-point/aval-format", "@pixel-point/aval-player-web", "@pixel-point/aval-element"])
 ]);
 export const RELEASE_PACKAGE_NAMES = Object.freeze(topologicalPackageOrder(RELEASE_PACKAGE_SPECS));

@@ -1,6 +1,6 @@
 export interface RouteLedgerEntry {
   readonly ordinal: number;
-  readonly event: "requestedstatechange" | "transitionstart" | "visualstatechange" | "transitionend" | "fallback" | "error" | "underflow";
+  readonly event: "requestedstatechange" | "transitionstart" | "visualstatechange" | "transitionend" | "error" | "underflow";
   readonly timestampMicroseconds: number;
   readonly generation: number;
   readonly from: string | null;

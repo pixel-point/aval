@@ -2,6 +2,7 @@ import type {
   GraphSettlementError,
   MotionGraphEffect
 } from "@pixel-point/aval-graph";
+import { RuntimePlaybackError } from "./errors.js";
 
 export type RequestSettlementEffect = Readonly<
   Extract<MotionGraphEffect, { readonly type: "settle" }>
@@ -56,6 +57,7 @@ export class GraphRequestSettlementError extends Error {
 export class RequestPromises {
   readonly #scheduleMicrotask: (callback: () => void) => void;
   readonly #capabilities = new Map<number, RequestCapability>();
+  #terminalPlaybackError: RuntimePlaybackError | null = null;
   #disposed = false;
 
   public constructor(options: RequestPromisesOptions = {}) {
@@ -111,9 +113,32 @@ export class RequestPromises {
     );
   }
 
+  /** Bind the one canonical error before terminal graph effects are applied. */
+  public bindTerminalPlaybackError(error: RuntimePlaybackError): void {
+    this.#assertActive();
+    if (!(error instanceof RuntimePlaybackError)) {
+      throw new RequestPromiseInvariantError(
+        "terminal playback settlement requires a RuntimePlaybackError"
+      );
+    }
+    if (this.#terminalPlaybackError === null) {
+      this.#terminalPlaybackError = error;
+      return;
+    }
+    if (this.#terminalPlaybackError !== error) {
+      throw new RequestPromiseInvariantError(
+        "terminal playback error cannot be rebound"
+      );
+    }
+  }
+
   public queueSettlement(effect: RequestSettlementEffect): void {
     this.#assertActive();
     const requestIds = validateSettlement(effect, this.#capabilities);
+    const terminalPlaybackError = effect.outcome.type === "reject" &&
+        effect.outcome.error === "PlaybackError"
+      ? this.#requireTerminalPlaybackError()
+      : null;
     for (const requestId of requestIds) {
       this.#capabilities.get(requestId)!.status = "scheduled";
     }
@@ -121,7 +146,7 @@ export class RequestPromises {
     const outcome = Object.freeze({ ...effect.outcome });
     try {
       this.#scheduleMicrotask(() => {
-        this.#complete(requestIds, outcome);
+        this.#complete(requestIds, outcome, terminalPlaybackError);
       });
     } catch {
       for (const requestId of requestIds) {
@@ -146,7 +171,8 @@ export class RequestPromises {
 
   #complete(
     requestIds: readonly number[],
-    outcome: RequestSettlementEffect["outcome"]
+    outcome: RequestSettlementEffect["outcome"],
+    terminalPlaybackError: RuntimePlaybackError | null
   ): void {
     if (this.#disposed) return;
     for (const requestId of requestIds) {
@@ -158,7 +184,10 @@ export class RequestPromises {
       if (outcome.type === "resolve") {
         capability.resolve();
       } else {
-        capability.reject(new GraphRequestSettlementError(outcome.error));
+        capability.reject(requestSettlementError(
+          outcome.error,
+          terminalPlaybackError
+        ));
       }
     }
   }
@@ -169,6 +198,15 @@ export class RequestPromises {
         "request promise host is disposed"
       );
     }
+  }
+
+  #requireTerminalPlaybackError(): RuntimePlaybackError {
+    if (this.#terminalPlaybackError === null) {
+      throw new RequestPromiseInvariantError(
+        "PlaybackError settlement requires a bound terminal playback error"
+      );
+    }
+    return this.#terminalPlaybackError;
   }
 }
 
@@ -242,7 +280,22 @@ function messageFor(error: GraphSettlementError): string {
       return "animation input limit was exceeded";
     case "AbortError":
       return "animation request was aborted";
-    case "PlaybackFallbackError":
-      return "animation static fallback failed";
+    case "PlaybackError":
+      return "animation state presentation failed";
   }
+}
+
+function requestSettlementError(
+  error: GraphSettlementError,
+  terminalPlaybackError: RuntimePlaybackError | null
+): Error {
+  if (error !== "PlaybackError") {
+    return new GraphRequestSettlementError(error);
+  }
+  if (terminalPlaybackError === null) {
+    throw new RequestPromiseInvariantError(
+      "PlaybackError settlement lost its terminal playback error"
+    );
+  }
+  return terminalPlaybackError;
 }

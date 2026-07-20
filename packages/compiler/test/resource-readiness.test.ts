@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ELEMENT_DECODER_CAPACITY } from "@pixel-point/aval-element";
 import { deriveReadiness } from "../src/compile/readiness-plan.js";
 import { estimateRuntimeLimits } from "../src/compile/resource-estimate.js";
 import { deriveVideoRenditionGeometry } from "@pixel-point/aval-format";
@@ -9,7 +10,7 @@ import type {
 } from "../src/model.js";
 
 describe("compiled resource and readiness derivation", () => {
-  it("includes reversible residency, cuts, decoder ring, real encoded bytes, and canvas", () => {
+  it("includes reversible residency, cuts, two decoder rings, real encoded bytes, and canvas", () => {
     const project = {
       canvas: { width: 32, height: 16 },
       encodings: [{
@@ -31,7 +32,7 @@ describe("compiled resource and readiness derivation", () => {
         targetRunwayFrames: 8
       }]
     } as unknown as NormalizedSourceProject;
-    const limits = estimateRuntimeLimits(project, [
+    const limits = estimateRuntimeLimits(project, "h264", [
       sample("large", 10),
       sample("large", 20),
       sample("small", 40)
@@ -59,7 +60,9 @@ describe("compiled resource and readiness derivation", () => {
       maxRuntimeBytes: Number.MAX_SAFE_INTEGER,
       decodedPixelBytes: 2_048,
       persistentCacheBytes: 26 * 2_048,
-      runtimeWorkingSetBytes: 26 * 2_048 + 12 * 2_048 + 40 + 2_048
+      runtimeWorkingSetBytes: 26 * 2_048 +
+        ELEMENT_DECODER_CAPACITY.totalDecodedSurfaces * 64 * 48 * 4 +
+        40 + 2_048
     });
   });
 
@@ -74,7 +77,7 @@ describe("compiled resource and readiness derivation", () => {
       units: [],
       edges: []
     } as unknown as NormalizedSourceProject;
-    const limits = estimateRuntimeLimits(project, [], [
+    const limits = estimateRuntimeLimits(project, "h264", [], [
       deriveVideoRenditionGeometry({
         canvasWidth: 2_048,
         canvasHeight: 2_048,

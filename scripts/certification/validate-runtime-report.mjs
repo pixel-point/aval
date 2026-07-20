@@ -18,7 +18,9 @@ const report = await module.validateRuntimeReportBundle(dirname(resolve(path)), 
   maximumAttachmentBytes: policy.limits.maximumAttachmentBytes,
   allowedMediaTypes: new Set(policy.allowedAttachmentMediaTypes),
   allowedFixtureDigests: fixtureAuthority.digests,
-  allowedFixtureModels: fixtureAuthority.models
+  allowedFixtureModels: fixtureAuthority.models,
+  allowedFatalBoundaryFixtureDigests: fixtureAuthority.fatalBoundaryFixtureDigests,
+  allowedCertificationHarnessDigests: fixtureAuthority.harnessDigests
 });
 if (candidateDigest !== report.candidateManifestDigest) throw new Error("runtime report candidate manifest digest mismatch");
 if (candidate.commit !== report.commit || candidate.tree !== report.tree) throw new Error("runtime report source identity mismatch");

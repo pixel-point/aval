@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+import { QUALIFIED_FIXTURE_PREFIX } from
+  "../../apps/playground/fixture-routes.js";
+
 const CODEC_ORDER = ["av1", "vp9", "h265", "h264"] as const;
 
 interface BrowserOutcome {
@@ -16,6 +19,24 @@ interface FixtureMetrics {
     readonly range: string | null;
     readonly status: number;
   }>[];
+}
+
+interface StartupFailoverProbe {
+  readonly attempts: readonly Readonly<{
+    readonly codec: string;
+    readonly commands: readonly string[];
+    readonly configuredSupported: boolean;
+    readonly delegated: boolean;
+    readonly invalidOutput: boolean;
+    readonly terminated: boolean;
+  }>[];
+  readonly publicEvents: readonly Readonly<{
+    readonly type: string;
+    readonly from: string | null;
+    readonly to: string | null;
+    readonly fatal: boolean | null;
+  }>[];
+  readonly animatedReveals: number;
 }
 
 test("publishes four ordered direct-child sources and no host source authority", async ({ page }) => {
@@ -55,7 +76,9 @@ test("publishes four ordered direct-child sources and no host source authority",
   expect(snapshot.sources.map(({ codec }) => codec)).toEqual(CODEC_ORDER);
   for (const [index, source] of snapshot.sources.entries()) {
     const codec = CODEC_ORDER[index]!;
-    expect(new URL(source.src!).pathname).toBe(`/__aval_v1__/${codec}.avl`);
+    expect(new URL(source.src!).pathname).toBe(
+      `${QUALIFIED_FIXTURE_PREFIX}${codec}.avl`
+    );
     expect(source.type).toMatch(/^application\/vnd\.aval; codecs="[A-Za-z0-9.]+"$/u);
     expect(source.integrity).toBeNull();
   }
@@ -102,7 +125,7 @@ test("uses the first exact supported source and never probes a later file", asyn
   });
 
   const metricsResponse = await request.get(
-    `/__aval_v1__/metrics?session=${session}`
+    `${QUALIFIED_FIXTURE_PREFIX}metrics?session=${session}`
   );
   expect(metricsResponse.ok()).toBe(true);
   const metrics = await metricsResponse.json() as FixtureMetrics;
@@ -132,10 +155,148 @@ test("uses the first exact supported source and never probes a later file", asyn
     const selectedIndex = CODEC_ORDER.indexOf(selectedFamily);
     expect(authoredIndices.every((index) => index <= selectedIndex)).toBe(true);
   } else {
-    expect(["staticReady", "error"]).toContain(outcome.readiness);
+    expect(outcome.readiness).toBe("error");
+    expect(outcome.error).not.toBeNull();
     expect(outcome.selectedCodec).toBeNull();
     await expect(page.locator(".fallback")).toBeVisible();
   }
+});
+
+test("retires a positively configured AV1 startup failure before selecting VP9", async ({
+  browserName,
+  page,
+  request
+}) => {
+  test.skip(browserName !== "chromium", "the deterministic worker delegate targets Chromium");
+  test.setTimeout(90_000);
+  await page.addInitScript(installStartupFailoverWorker);
+  const session = uniqueSession("startup_failover");
+  await page.goto(`/?session=${session}&integrity=0`);
+
+  const outcome = await page.evaluate(async () => {
+    const api = (window as unknown as {
+      avalSourcePlayground: {
+        readonly ready: Promise<void>;
+        readonly player: HTMLElement & {
+          readonly readiness?: string;
+          getDiagnostics?(): Readonly<{
+            lastFailure: unknown;
+            runtime: Readonly<{
+              selectedCodec: string | null;
+              selectedRendition: string | null;
+              decoderDiagnostics: readonly Readonly<{
+                sourceIndex: number;
+                rendition: string;
+              codec: string;
+              lane: number;
+              phase: string;
+              code: string;
+              firstFrame: Readonly<{
+                  displayWidth: number;
+                  displayHeight: number;
+                }> | null;
+                lastGoodFrame: Readonly<{
+                  displayWidth: number;
+                  displayHeight: number;
+                }> | null;
+                outputFailure: unknown;
+              }>[];
+            }>;
+          }>;
+        };
+      };
+      __avalStartupFailoverProbe: StartupFailoverProbe;
+    }).avalSourcePlayground;
+    let error: string | null = null;
+    try {
+      await api.ready;
+    } catch (reason) {
+      error = reason instanceof Error ? reason.message : "unknown initialization failure";
+    }
+    const diagnostics = api.player.getDiagnostics?.();
+    const probe = (window as unknown as {
+      __avalStartupFailoverProbe: StartupFailoverProbe;
+    }).__avalStartupFailoverProbe;
+    return {
+      readiness: api.player.readiness ?? "unavailable",
+      selectedCodec: diagnostics?.runtime.selectedCodec ?? null,
+      selectedRendition: diagnostics?.runtime.selectedRendition ?? null,
+      decoderDiagnostics: diagnostics?.runtime.decoderDiagnostics ?? [],
+      lastFailure: diagnostics?.lastFailure ?? null,
+      error,
+      probe
+    };
+  });
+
+  expect(outcome).toMatchObject({
+    readiness: "interactiveReady",
+    selectedCodec: expect.stringMatching(/^vp09\./u),
+    selectedRendition: expect.any(String),
+    lastFailure: null,
+    error: null
+  });
+  expect(outcome.decoderDiagnostics).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      sourceIndex: 0,
+      codec: expect.stringMatching(/^av01\./u),
+      phase: "output-validation",
+      code: "invalid-output",
+      firstFrame: expect.objectContaining({
+        displayWidth: expect.any(Number),
+        displayHeight: expect.any(Number)
+      }),
+      lastGoodFrame: null,
+      outputFailure: expect.objectContaining({
+        kind: "display-aspect",
+        validationLayer: "host-expectation",
+        field: "display-aspect",
+        expected: expect.objectContaining({
+          displayAspectWidth: expect.any(Number),
+          displayAspectHeight: expect.any(Number)
+        }),
+        actual: expect.objectContaining({
+          displayWidth: expect.any(Number),
+          displayHeight: expect.any(Number)
+        })
+      })
+    })
+  ]));
+
+  const attemptedFamilies = [...new Set(outcome.probe.attempts.map(({ codec }) =>
+    familyForCodec(codec)
+  ))];
+  expect(attemptedFamilies).toEqual(["av1", "vp9"]);
+  const av1Attempts = outcome.probe.attempts.filter(({ codec }) =>
+    codec.startsWith("av01.")
+  );
+  expect(av1Attempts.length).toBeGreaterThan(0);
+  expect(av1Attempts.every(({ configuredSupported }) => configuredSupported)).toBe(true);
+  expect(av1Attempts.some(({ invalidOutput }) => invalidOutput)).toBe(true);
+  expect(av1Attempts.every(({ delegated }) => !delegated)).toBe(true);
+  expect(av1Attempts.every(({ terminated }) => terminated)).toBe(true);
+  expect(outcome.probe.attempts.filter(({ codec }) => codec.startsWith("vp09.")))
+    .not.toHaveLength(0);
+
+  const readinessTransitions = outcome.probe.publicEvents
+    .filter(({ type }) => type === "readinesschange")
+    .map(({ to }) => to);
+  expect(readinessTransitions.filter((value) => value === "metadataReady")).toHaveLength(1);
+  expect(readinessTransitions.at(-1)).toBe("interactiveReady");
+  expect(readinessTransitions).not.toContain("error");
+  expect(outcome.probe.publicEvents.filter(({ type, fatal }) =>
+    type === "error" && fatal === true
+  )).toEqual([]);
+  expect(outcome.probe.animatedReveals).toBe(1);
+
+  const metricsResponse = await request.get(
+    `${QUALIFIED_FIXTURE_PREFIX}metrics?session=${session}`
+  );
+  expect(metricsResponse.ok()).toBe(true);
+  const metrics = await metricsResponse.json() as FixtureMetrics;
+  const requestedAssets = [...new Set(metrics.requests
+    .map(({ path }) => path)
+    .filter((path) => path.endsWith(".avl")))];
+  expect(requestedAssets).toEqual(["av1.avl", "vp9.avl"]);
 });
 
 test("lets the user move a codec to the front of the source list", async ({
@@ -163,6 +324,31 @@ test("lets the user move a codec to the front of the source list", async ({
     return api.player.getDiagnostics?.().sourceGeneration ?? 0;
   });
 
+  const fatalReadiness = await page.evaluate(async (qualifiedPrefix) => {
+    const player = (window as unknown as {
+      avalSourcePlayground: {
+        readonly player: HTMLElement & {
+          readonly readiness?: string;
+          prepare?(options?: Readonly<{ timeoutMs?: number }>): Promise<unknown>;
+        };
+      };
+    }).avalSourcePlayground.player;
+    const source = player.querySelector<HTMLSourceElement>(
+      ':scope > source[data-aval-codec="av1"]'
+    );
+    if (source === null) throw new Error("AV1 source is unavailable");
+    source.src = `${qualifiedPrefix}missing.avl?failure=${String(Date.now())}`;
+    try {
+      await player.prepare?.({ timeoutMs: 10_000 });
+    } catch {
+      // The retained public state and consumer alternate are asserted below.
+    }
+    return player.readiness ?? "unavailable";
+  }, QUALIFIED_FIXTURE_PREFIX);
+  expect(fatalReadiness).toBe("error");
+  await expect(page.locator("aval-player")).toBeVisible();
+  await expect(page.locator(".fallback")).toBeVisible();
+
   const vp9 = page.getByRole("button", { name: "VP9", exact: true });
   await expect(vp9).toHaveAttribute("aria-pressed", "false");
   await vp9.click();
@@ -174,6 +360,8 @@ test("lets the user move a codec to the front of the source list", async ({
           readonly readiness?: string;
           getDiagnostics?(): Readonly<{
             sourceGeneration: number;
+            staticReason: string | null;
+            effectivelyVisible: boolean;
             runtime: Readonly<{ selectedCodec: string | null }>;
           }>;
         };
@@ -185,14 +373,22 @@ test("lets the user move a codec to the front of the source list", async ({
       firstSource: api.sourceSnapshot()[0]?.codec ?? null,
       readiness: api.player.readiness ?? "unavailable",
       selectedCodec: diagnostics?.runtime.selectedCodec ?? null,
-      sourceGeneration: diagnostics?.sourceGeneration ?? 0
+      sourceGeneration: diagnostics?.sourceGeneration ?? 0,
+      staticReason: diagnostics?.staticReason ?? null,
+      effectivelyVisible: diagnostics?.effectivelyVisible ?? false
     };
   }), { timeout: 30_000 }).toMatchObject({
     firstSource: "vp9",
-    readiness: "interactiveReady",
     ...(browserName === "chromium"
-      ? { selectedCodec: expect.stringMatching(/^vp09\./u) }
-      : {}),
+      ? {
+          readiness: "interactiveReady",
+          selectedCodec: expect.stringMatching(/^vp09\./u),
+          staticReason: null,
+          effectivelyVisible: true
+        }
+      : {
+          readiness: expect.stringMatching(/^(?:interactiveReady|error)$/u)
+        }),
     sourceGeneration: expect.any(Number)
   });
 
@@ -210,6 +406,8 @@ test("lets the user move a codec to the front of the source list", async ({
   if (browserName === "chromium") {
     await expect(vp9).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator("#status")).toContainText("selected VP9");
+    await expect(page.locator("aval-player")).toBeVisible();
+    await expect(page.locator(".fallback")).toBeHidden();
   }
 });
 
@@ -326,7 +524,9 @@ test("per-source integrity uses full-file requests", async ({ page, request }) =
     await api.ready.catch(() => undefined);
   });
 
-  const response = await request.get(`/__aval_v1__/metrics?session=${session}`);
+  const response = await request.get(
+    `${QUALIFIED_FIXTURE_PREFIX}metrics?session=${session}`
+  );
   const metrics = await response.json() as FixtureMetrics;
   const assetRequests = metrics.requests.filter(({ path }) => path.endsWith(".avl"));
   expect(assetRequests.length).toBeGreaterThan(0);
@@ -343,6 +543,251 @@ function familyForCodec(codec: string): typeof CODEC_ORDER[number] {
 
 function uniqueSession(prefix: string): string {
   return `${prefix}_${process.pid.toString(36)}_${Date.now().toString(36)}`;
+}
+
+function installStartupFailoverWorker(): void {
+  type Attempt = {
+    codec: string;
+    commands: string[];
+    configuredSupported: boolean;
+    delegated: boolean;
+    invalidOutput: boolean;
+    terminated: boolean;
+  };
+  type Probe = {
+    attempts: Attempt[];
+    publicEvents: Array<{
+      type: string;
+      from: string | null;
+      to: string | null;
+      fatal: boolean | null;
+    }>;
+    animatedReveals: number;
+  };
+  type DecoderConfigure = Readonly<{
+    t: "configure";
+    config: Readonly<{
+      codec: string;
+      codedWidth?: number;
+      codedHeight?: number;
+      displayAspectWidth?: number;
+      displayAspectHeight?: number;
+    }>;
+  }>;
+  type DecoderCommand = Readonly<{
+    t: string;
+    run?: number;
+    chunks?: readonly Readonly<{
+      timestamp: number;
+      duration: number;
+    }>[];
+  }>;
+
+  const NativeWorker = globalThis.Worker;
+  const probe: Probe = {
+    attempts: [],
+    publicEvents: [],
+    animatedReveals: 0
+  };
+  Object.defineProperty(globalThis, "__avalStartupFailoverProbe", {
+    value: probe,
+    configurable: false,
+    enumerable: false,
+    writable: false
+  });
+
+  const dispatch = EventTarget.prototype.dispatchEvent;
+  EventTarget.prototype.dispatchEvent = function(event: Event): boolean {
+    if (this instanceof HTMLElement && this.localName === "aval-player" &&
+      (event.type === "readinesschange" || event.type === "error")) {
+      const detail = (event as CustomEvent<{
+        from?: unknown;
+        to?: unknown;
+        fatal?: unknown;
+      }>).detail;
+      probe.publicEvents.push({
+        type: event.type,
+        from: typeof detail?.from === "string" ? detail.from : null,
+        to: typeof detail?.to === "string" ? detail.to : null,
+        fatal: typeof detail?.fatal === "boolean" ? detail.fatal : null
+      });
+    }
+    return dispatch.call(this, event);
+  };
+
+  const hidden = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "hidden");
+  if (hidden?.get !== undefined && hidden.set !== undefined) {
+    Object.defineProperty(HTMLElement.prototype, "hidden", {
+      ...hidden,
+      get: hidden.get,
+      set(value: boolean) {
+        if (this instanceof HTMLCanvasElement &&
+          this.dataset.avalLayer === "animated" && value === false) {
+          probe.animatedReveals += 1;
+        }
+        hidden.set!.call(this, value);
+      }
+    });
+  }
+
+  // Preserve the real worker for every non-AV1 candidate. For AV1, acknowledge
+  // configuration and then emit the same bounded invalid-output shape that a
+  // browser decoder can report after a successful capability probe.
+  function StartupFailoverWorker(url: string | URL, options?: WorkerOptions): Worker {
+    const worker = new NativeWorker(url, options);
+    const post = worker.postMessage.bind(worker);
+    const terminate = worker.terminate.bind(worker);
+    let attempt: Attempt | null = null;
+    let configuration: DecoderConfigure["config"] | null = null;
+    let synthetic = false;
+    let terminated = false;
+    const emit = (data: unknown): void => {
+      queueMicrotask(() => {
+        if (!terminated) worker.dispatchEvent(new MessageEvent("message", { data }));
+      });
+    };
+    Object.defineProperties(worker, {
+      postMessage: {
+        configurable: true,
+        value: (
+          value: unknown,
+          transferOrOptions?: StructuredSerializeOptions | Transferable[]
+        ): void => {
+          const command = value as DecoderCommand;
+          if (attempt === null) {
+            const configure = value as DecoderConfigure;
+            if (configure?.t !== "configure" ||
+              typeof configure.config?.codec !== "string") {
+              throw new TypeError("decoder worker must be configured first");
+            }
+            configuration = configure.config;
+            synthetic = configure.config.codec.startsWith("av01.");
+            attempt = {
+              codec: configure.config.codec,
+              commands: [configure.t],
+              configuredSupported: synthetic,
+              delegated: !synthetic,
+              invalidOutput: false,
+              terminated: false
+            };
+            probe.attempts.push(attempt);
+            if (synthetic) {
+              terminate();
+              emit({ t: "configured", supported: true });
+              return;
+            }
+          } else {
+            attempt.commands.push(command.t);
+          }
+          if (!synthetic) {
+            if (transferOrOptions === undefined) post(value);
+            else if (Array.isArray(transferOrOptions)) post(value, transferOrOptions);
+            else post(value, transferOrOptions);
+            return;
+          }
+          if (command.t === "start" && command.run !== undefined) {
+            emit({ t: "started", run: command.run });
+            return;
+          }
+          if (command.t === "close" && command.run !== undefined) {
+            emit({ t: "closed", run: command.run });
+            return;
+          }
+          if (command.t !== "decode" || command.run === undefined ||
+            command.chunks === undefined || attempt.invalidOutput) return;
+          attempt.invalidOutput = true;
+          const first = command.chunks[0]!;
+          const codedWidth = positiveInteger(configuration!.codedWidth, 640);
+          const codedHeight = positiveInteger(configuration!.codedHeight, 360);
+          const expectedWidth = positiveInteger(
+            configuration!.displayAspectWidth,
+            codedWidth
+          );
+          const expectedHeight = positiveInteger(
+            configuration!.displayAspectHeight,
+            codedHeight
+          );
+          const width = Math.max(1, expectedWidth - 1);
+          const height = Math.max(1, expectedHeight - 1);
+          const visibleRect = { x: 0, y: 0, width: codedWidth, height: codedHeight };
+          const colorSpace = ["bt709", "bt709", "bt709", false] as const;
+          emit({ t: "accepted", run: command.run });
+          emit({
+            t: "error",
+            diagnostic: {
+              phase: "output-validation",
+              code: "invalid-output",
+              run: command.run,
+              decodeOrdinal: 0,
+              exception: {
+                name: "EncodingError",
+                message: "synthetic AV1 output dimensions do not match the manifest"
+              },
+              firstFrame: {
+                timestamp: first.timestamp,
+                duration: first.duration,
+                codedWidth,
+                codedHeight,
+                displayWidth: width,
+                displayHeight: height,
+                visibleRect,
+                colorSpace
+              },
+              lastGoodFrame: null,
+              outputFailure: {
+                kind: "display-aspect",
+                validationLayer: "host-expectation",
+                field: "display-aspect",
+                expected: {
+                  timestamp: first.timestamp,
+                  duration: first.duration,
+                  codedWidth,
+                  codedHeight,
+                  displayAspectWidth: expectedWidth,
+                  displayAspectHeight: expectedHeight,
+                  visibleRect,
+                  colorSpace,
+                  frameCount: null
+                },
+                actual: {
+                  timestamp: first.timestamp,
+                  duration: first.duration,
+                  codedWidth,
+                  codedHeight,
+                  displayWidth: width,
+                  displayHeight: height,
+                  visibleRect,
+                  colorSpace,
+                  receivedFrameCount: null
+                }
+              }
+            }
+          });
+        }
+      },
+      terminate: {
+        configurable: true,
+        value: (): void => {
+          if (terminated) return;
+          terminated = true;
+          if (attempt !== null) attempt.terminated = true;
+          terminate();
+        }
+      }
+    });
+    return worker;
+  }
+
+  Object.defineProperty(globalThis, "Worker", {
+    value: StartupFailoverWorker,
+    configurable: true,
+    enumerable: false,
+    writable: true
+  });
+
+  function positiveInteger(value: number | undefined, fallback: number): number {
+    return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : fallback;
+  }
 }
 
 async function sourceGeneration(page: import("@playwright/test").Page): Promise<number> {

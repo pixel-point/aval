@@ -68,6 +68,11 @@ h1 {
   place-items: center;
 }
 
+.motion-frame > aval-player,
+.motion-frame > .fallback {
+  grid-area: 1 / 1;
+}
+
 aval-player {
   display: block;
   width: 100%;
@@ -79,7 +84,12 @@ aval-player {
   width: 100%;
   height: 100%;
   color: #8991a3;
+  background: #0d1017;
   place-items: center;
+}
+
+.fallback[hidden] {
+  display: none;
 }
 
 h2 {

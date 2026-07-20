@@ -4,9 +4,7 @@ import {
   CHUNK_INDEX_HEADER_LENGTH,
   CHUNK_INDEX_RECORD_LENGTH,
   FORMAT_HEADER_LENGTH,
-  FORMAT_MAGIC,
-  FORMAT_VERSION_MAJOR,
-  FORMAT_VERSION_MINOR
+  FORMAT_MAGIC
 } from "../src/constants.js";
 import { writeUint32LE, writeUint64LE } from "../src/checked-integer.js";
 import { FormatError } from "../src/errors.js";
@@ -17,8 +15,8 @@ import {
 } from "../src/header.js";
 
 const HEADER: FormatHeader = {
-  major: FORMAT_VERSION_MAJOR,
-  minor: FORMAT_VERSION_MINOR,
+  major: 1,
+  minor: 0,
   headerLength: FORMAT_HEADER_LENGTH,
   requiredFeatureFlags: 0,
   declaredFileLength: 136,
@@ -70,6 +68,11 @@ describe("version-1.0 header codec", () => {
     const parsed = parseHeader(encodeHeader(HEADER));
     expect(parsed).toEqual(HEADER);
     expect(Object.isFrozen(parsed)).toBe(true);
+  });
+
+  it("round-trips the qualified 1.1 header without rewriting its version", () => {
+    const qualified: FormatHeader = { ...HEADER, major: 1, minor: 1 };
+    expect(parseHeader(encodeHeader(qualified))).toEqual(qualified);
   });
 
   it("supports an unaligned Uint8Array view without reading adjacent bytes", () => {

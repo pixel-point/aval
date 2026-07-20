@@ -26,6 +26,17 @@ export interface IvfStream {
   readonly frames: readonly IvfFrame[];
 }
 
+export interface SerializeIvfInput {
+  readonly codec: IvfCodec;
+  readonly width: number;
+  readonly height: number;
+  readonly timeBase: {
+    readonly numerator: number;
+    readonly denominator: number;
+  };
+  readonly frames: readonly Readonly<IvfFrame>[];
+}
+
 export interface ParseIvfOptions {
   readonly expectedCodec: IvfCodec;
   readonly expectedWidth?: number;
@@ -33,6 +44,80 @@ export interface ParseIvfOptions {
   readonly expectedFrameCount?: number;
   readonly maximumFrames?: number;
   readonly maximumFrameBytes?: number;
+}
+
+/** Wrap unchanged elementary payloads in deterministic seekable IVF transport. */
+export function serializeIvf(input: Readonly<SerializeIvfInput>): Uint8Array {
+  requireIvf(input?.codec === "vp9" || input?.codec === "av1", "IVF codec is unsupported");
+  requireIvf(
+    Number.isSafeInteger(input.width) && input.width > 0 && input.width <= 0xffff,
+    "IVF width must fit uint16"
+  );
+  requireIvf(
+    Number.isSafeInteger(input.height) && input.height > 0 && input.height <= 0xffff,
+    "IVF height must fit uint16"
+  );
+  requireIvf(
+    Number.isSafeInteger(input.timeBase?.numerator) &&
+      input.timeBase.numerator > 0 &&
+      input.timeBase.numerator <= 0xffff_ffff,
+    "IVF time-base numerator must fit uint32"
+  );
+  requireIvf(
+    Number.isSafeInteger(input.timeBase?.denominator) &&
+      input.timeBase.denominator > 0 &&
+      input.timeBase.denominator <= 0xffff_ffff,
+    "IVF time-base denominator must fit uint32"
+  );
+  requireIvf(
+    Array.isArray(input.frames) &&
+      input.frames.length > 0 &&
+      input.frames.length <= 0xffff_ffff,
+    "IVF frame count must fit uint32"
+  );
+  let byteLength = IVF_HEADER_BYTES;
+  for (const frame of input.frames) {
+    requireIvf(
+      Number.isSafeInteger(frame?.timestamp) && frame.timestamp >= 0,
+      "IVF frame timestamp must be a nonnegative safe integer"
+    );
+    requireIvf(
+      frame?.bytes instanceof Uint8Array &&
+        frame.bytes.byteLength > 0 &&
+        frame.bytes.byteLength <= 0xffff_ffff,
+      "IVF frame payload length must fit uint32"
+    );
+    byteLength = checkedIvfAdd(byteLength, IVF_FRAME_HEADER_BYTES);
+    byteLength = checkedIvfAdd(byteLength, frame.bytes.byteLength);
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(byteLength);
+  } catch (cause) {
+    throw new CompilerError("OUTPUT_LIMIT", "IVF transport could not be allocated", {
+      cause
+    });
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  writeAscii(bytes, 0, IVF_SIGNATURE);
+  view.setUint16(4, 0, true);
+  view.setUint16(6, IVF_HEADER_BYTES, true);
+  writeAscii(bytes, 8, input.codec === "vp9" ? "VP90" : "AV01");
+  view.setUint16(12, input.width, true);
+  view.setUint16(14, input.height, true);
+  view.setUint32(16, input.timeBase.denominator, true);
+  view.setUint32(20, input.timeBase.numerator, true);
+  view.setUint32(24, input.frames.length, true);
+  view.setUint32(28, 0, true);
+  let cursor = IVF_HEADER_BYTES;
+  for (const frame of input.frames) {
+    view.setUint32(cursor, frame.bytes.byteLength, true);
+    view.setBigUint64(cursor + 4, BigInt(frame.timestamp), true);
+    cursor += IVF_FRAME_HEADER_BYTES;
+    bytes.set(frame.bytes, cursor);
+    cursor += frame.bytes.byteLength;
+  }
+  return bytes;
 }
 
 /** Parse FFmpeg's IVF transport and detach the elementary VP9/AV1 payloads. */
@@ -164,6 +249,20 @@ function ascii(bytes: Uint8Array, offset: number, length: number): string {
     value += String.fromCharCode(byte);
   }
   return value;
+}
+
+function writeAscii(bytes: Uint8Array, offset: number, value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    bytes[offset + index] = value.charCodeAt(index);
+  }
+}
+
+function checkedIvfAdd(left: number, right: number): number {
+  requireIvf(
+    Number.isSafeInteger(right) && right >= 0 && left <= Number.MAX_SAFE_INTEGER - right,
+    "IVF transport length exceeds safe arithmetic"
+  );
+  return left + right;
 }
 
 function greatestCommonDivisor(left: number, right: number): number {

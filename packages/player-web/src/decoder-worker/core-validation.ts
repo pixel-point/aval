@@ -1,4 +1,8 @@
-import { parseVideoCodecString } from "@pixel-point/aval-format";
+import {
+  classifyDecoderColor,
+  parseVideoCodecString,
+  type DecoderColorTuple
+} from "@pixel-point/aval-format";
 
 import {
   DECODER_WORKER_HARD_LIMITS,
@@ -575,26 +579,45 @@ function matchesDecodedBt709ColorSpace(
   actual: VideoColorSpace,
   expected: DecoderWorkerColorSpaceExpectation | null
 ): boolean {
-  const nonContradictory = actual.fullRange !== true &&
+  const actualTuple = decoderColorTuple(actual);
+  if (expected !== null) {
+    return classifyDecoderColor(
+      decoderColorTuple(expected),
+      actualTuple
+    ).kind !== "incompatible";
+  }
+  if (actualTuple.every((field) => field === null)) return true;
+  if (actualTuple.every((field) => field !== null)) {
+    return classifyDecoderColor(BT709_LIMITED, actualTuple).kind !==
+      "incompatible";
+  }
+  // Configuration-less validation may expose partially omitted metadata.
+  // Keep that legacy path permissive only when every concrete field is BT.709.
+  return actual.fullRange !== true &&
     (actual.matrix === null || actual.matrix === "bt709") &&
     (actual.primaries === null || actual.primaries === "bt709") &&
     (actual.transfer === null || actual.transfer === "bt709");
-  const webkitNormalized = actual.fullRange === true &&
-    actual.matrix === "bt709" &&
-    actual.primaries === "bt709" &&
-    actual.transfer === "iec61966-2-1";
-  if (!nonContradictory && !webkitNormalized) return false;
-  if (expected === null) return true;
-  if (webkitNormalized) {
-    return expected.fullRange === false &&
-      expected.matrix === "bt709" &&
-      expected.primaries === "bt709" &&
-      expected.transfer === "bt709";
-  }
-  return actual.fullRange === expected.fullRange &&
-    actual.matrix === expected.matrix &&
-    actual.primaries === expected.primaries &&
-    actual.transfer === expected.transfer;
+}
+
+const BT709_LIMITED: Readonly<DecoderColorTuple> = Object.freeze([
+  "bt709",
+  "bt709",
+  "bt709",
+  false
+]);
+
+function decoderColorTuple(
+  color: Pick<
+    VideoColorSpace,
+    "primaries" | "transfer" | "matrix" | "fullRange"
+  >
+): Readonly<DecoderColorTuple> {
+  return [
+    color.primaries,
+    color.transfer,
+    color.matrix,
+    color.fullRange
+  ];
 }
 
 function sameConfigMember(left: unknown, right: unknown): boolean {

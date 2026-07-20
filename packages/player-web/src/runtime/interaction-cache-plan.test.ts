@@ -1,4 +1,4 @@
-import type { CompiledManifest, Unit } from "@pixel-point/aval-format";
+import type { CompiledManifestV1_0, Unit } from "@pixel-point/aval-format";
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeFrameKey } from "./model.js";
@@ -341,7 +341,9 @@ function body(
   };
 }
 
-function routeManifest(overrides: Partial<CompiledManifest> = {}): CompiledManifest {
+function routeManifest(
+  overrides: Partial<CompiledManifestV1_0> = {}
+): CompiledManifestV1_0 {
   const units: readonly Unit[] = [
     body("a-body", "loop", 2, 0),
     body("b-body", "finite", 2, 2),

@@ -6,9 +6,13 @@ export {
   FORMAT_DEFAULT_BUDGETS,
   FORMAT_HEADER_LENGTH,
   FORMAT_MAGIC,
+  FORMAT_SUPPORTED_VERSIONS,
   FORMAT_VERSION_MAJOR,
   FORMAT_VERSION_MINOR,
   IDENTIFIER_PATTERN,
+  PACKED_ALPHA_WITNESS_MAX_INTERVAL_WIDTH,
+  PACKED_ALPHA_WITNESS_MAX_REFERENCE_DELTA,
+  PACKED_ALPHA_WITNESS_MAX_SAMPLES,
   SHA256_HEX_PATTERN,
   resolveFormatBudgets
 } from "./constants.js";
@@ -27,17 +31,22 @@ export type {
 export {
   H264_DECODER_SURFACE_PADDING,
   h264CodecForLevel,
+  h264CodecForProfileLevel,
+  h264LevelName,
   h264LevelLimits,
   inspectH264AnnexBRendition,
   isH264Codec,
   isH264LevelIdc,
-  maximumH264DecodedRgbaBytes,
   maximumH264DecoderSurfaceDimension,
+  minimumH264CompatibilityLevel,
   parseH264Codec,
   prepareH264EncoderRendition
 } from "./h264/index.js";
 export type {
   H264Codec,
+  H264CodecProfile,
+  H264CompatibilityLevelInput,
+  H264ConstrainedBaselineCodec,
   H264AccessUnitInput,
   H264AccessUnitSummary,
   H264ColorSummary,
@@ -47,13 +56,15 @@ export type {
   H264EncoderRenditionPreparationInput,
   H264EncoderUnitStreamInput,
   H264FrameRate,
+  H264HighCodec,
   H264LevelIdc,
   H264LevelLimits,
   H264ParameterSetSummary,
   H264RenditionInspection,
   H264RenditionInspectionInput,
   H264UnitInput,
-  H264UnitInspection
+  H264UnitInspection,
+  ParsedH264Codec
 } from "./h264/index.js";
 export { adaptManifestToMotionGraph } from "./graph-adapter.js";
 export { parseHeader } from "./header.js";
@@ -72,10 +83,16 @@ export {
   VIDEO_BITSTREAM_BY_CODEC,
   VIDEO_CODECS
 } from "./video/codec-string.js";
+export { maximumDecodedRgbaBytes } from "./video/decoder-surface.js";
+export { classifyDecoderColor } from "./video/decoder-color.js";
 export { deriveVideoRenditionGeometry, PACKED_ALPHA_GUTTER } from "./video/geometry.js";
 export type {
   ParsedVideoCodecString
 } from "./video/codec-string.js";
+export type {
+  DecoderColorClassification,
+  DecoderColorTuple
+} from "./video/decoder-color.js";
 export {
   COMPILE_BUNDLE_H264_PRESETS,
   COMPILE_BUNDLE_H265_PRESETS,
@@ -127,18 +144,33 @@ export type {
   CanonicalAssetInput,
   ChunkDigestInput,
   CompiledManifest,
+  CompiledManifestBase,
   CompiledManifestInput,
+  CompiledManifestInputV1_0,
+  CompiledManifestV1_0,
   DeclaredLimits,
   Edge,
   EncodedChunkInput,
   EncodedChunkRecord,
   FormatBudgets,
   FormatHeader,
+  FormatHeaderBase,
   FormatOptions,
+  FormatVersion,
   Id,
+  OpaqueCompiledManifestV1_1,
+  OpaqueCompiledManifestInputV1_1,
+  OpaqueProductionRenditionV1_1,
+  PackedAlphaCompiledManifestV1_1,
+  PackedAlphaCompiledManifestInputV1_1,
+  PackedAlphaProductionRenditionV1_1,
+  PackedAlphaWitnessSampleV1,
+  PackedAlphaWitnessV1,
   ParsedFrontIndex,
   Port,
   ProductionRendition,
+  ProductionRenditionBase,
+  ProductionRenditionV1_0,
   Rational,
   Readiness,
   Rect,

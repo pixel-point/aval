@@ -10,6 +10,7 @@ import { CompileBundleReportAsset as CompileBundleReportAsset_2 } from '@pixel-p
 import { CompileBundleReportTool as CompileBundleReportTool_2 } from '@pixel-point/aval-format';
 import { CompileBundleReportToolchain as CompileBundleReportToolchain_2 } from '@pixel-point/aval-format';
 import { CompiledManifestInput } from '@pixel-point/aval-format';
+import type { FormatVersion } from '@pixel-point/aval-format';
 import { H264RenditionInspection } from '@pixel-point/aval-format';
 import { H265RenditionInspection } from '@pixel-point/aval-format';
 import { ParsedCompileBundleReport } from '@pixel-point/aval-format';
@@ -79,7 +80,7 @@ export interface AssetInspection {
     // (undocumented)
     readonly file: string;
     // (undocumented)
-    readonly formatVersion: "1.0";
+    readonly formatVersion: FormatVersion;
     // (undocumented)
     readonly frameRate: string;
     // (undocumented)
@@ -633,7 +634,7 @@ export interface H265Encoding<R extends SourceRenditionTarget = SourceRenditionT
 }
 
 // @public (undocumented)
-export const HELP_TEXT = "Usage:\n  avl compile <project.json> --out <bundle-directory>\n  avl compile <input.mov|input.mp4|input.m4v> --codec <h264|h265|vp9|av1> --loop <start:end> [codec options] [--alpha auto|opaque|packed] --out <bundle-directory>\n  avl compile <prefix%0Nd.png> --codec <h264|h265|vp9|av1> --frames <first:count> --fps <n/d> --loop <start:end> [codec options] [--canvas <wxh>] [--alpha auto|opaque|packed] --out <bundle-directory>\n  avl inspect <asset.avl> [--json]\n  avl validate <asset.avl> [--json]\n  avl unpack <asset.avl> --out <empty-directory> [--json]\n  avl init <directory> [--json]\n  avl dev <project.json> --out <bundle-directory> [--media-timeout-ms <integer>] [--port <0-65535>] [--open] [--force] [--json]\n\nDirect encoding options:\n  --crf <integer>                constant quality (H.264/H.265 0..51; VP9/AV1 0..63)\n  --preset <name>                H.264/H.265 preset, ultrafast through placebo\n  --deadline <mode>              VP9 best, good, or realtime deadline\n  --cpu-used <integer>           VP9 -8..8 or AV1 0..8 speed/quality control\n  --bit-depth <8|10>             AV1 output bit depth\n  --tiles <columns>x<rows>       AV1 power-of-two tile layout, product at most 64\n  --row-mt                       enable AV1 row multithreading\n  --threads <1..64>              H.265, VP9, or AV1 encoder threads\n\nOperational options:\n  --media-timeout-ms <integer>   per FFmpeg operation for slow/large encodes\n\nProject files own their ordered codec-major rendition and compression policy.\nMuxer tags, faststart, arbitrary filters, audio, and raw FFmpeg arguments are unavailable.\n\nCommon compile options: --ffmpeg <absolute-path> --ffprobe <absolute-path> --force --json";
+export const HELP_TEXT = "Usage:\n  avl compile <project.json> --out <bundle-directory>\n  avl compile <input.mov|input.mp4|input.m4v> --codec <h264|h265|vp9|av1> --loop <start:end> [codec options] [--alpha auto|opaque|packed] --out <bundle-directory>\n  avl compile <prefix%0Nd.png> --codec <h264|h265|vp9|av1> --frames <first:count> --fps <n/d> --loop <start:end> [codec options] [--canvas <wxh>] [--alpha auto|opaque|packed] --out <bundle-directory>\n  avl inspect <asset.avl> [--json]\n  avl validate <asset.avl> [--json]\n  avl unpack <asset.avl> --out <empty-directory> [--json]\n  avl init <directory> [--json]\n  avl dev <project.json> --out <bundle-directory> [--media-timeout-ms <integer>] [--port <0-65535>] [--open] [--force] [--json]\n\nDirect encoding options:\n  --crf <integer>                constant quality (H.264 1..51; H.265 0..51; VP9/AV1 0..63)\n  --preset <name>                H.264/H.265 preset, ultrafast through placebo\n  --deadline <mode>              VP9 best, good, or realtime deadline\n  --cpu-used <integer>           VP9 -8..8 or AV1 0..8 speed/quality control\n  --bit-depth <8|10>             AV1 output bit depth\n  --tiles <columns>x<rows>       AV1 power-of-two tile layout, product at most 64\n  --row-mt                       enable AV1 row multithreading\n  --threads <1..64>              H.265, VP9, or AV1 encoder threads\n\nOperational options:\n  --media-timeout-ms <integer>   per FFmpeg operation for slow/large encodes\n\nProject files own their ordered codec-major rendition and compression policy.\nMuxer tags, faststart, arbitrary filters, audio, and raw FFmpeg arguments are unavailable.\n\nCommon compile options: --ffmpeg <absolute-path> --ffprobe <absolute-path> --force --json";
 
 // @public (undocumented)
 export interface HelpCliArguments {

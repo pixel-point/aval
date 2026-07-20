@@ -8,7 +8,7 @@ export async function reconstructReportIndex({ indexPath, candidatePath, referen
   const indexBytes = await boundedRead(indexPath, policy.limits.maximumReportBytes, "report index", certification);
   const index = certification.validateReportIndex(parseJson(indexBytes, "report index"), policy.namedProfiles);
   requireCanonical(indexBytes, index, certification, "report index");
-  let candidate = null; let candidateDigest = null; let fixtureAuthority = Object.freeze({ digests: new Set(), models: new Map(), displayPatterns: new Map() });
+  let candidate = null; let candidateDigest = null; let fixtureAuthority = Object.freeze({ digests: new Set(), models: new Map(), displayPatterns: new Map(), fatalBoundaryFixtureDigests: new Set(), harnessDigests: new Set() });
   if (candidatePath !== undefined) {
     const candidateBytes = await boundedRead(candidatePath, policy.limits.maximumReportBytes, "candidate manifest", certification);
     candidate = certification.validateCandidateManifest(parseJson(candidateBytes, "candidate manifest"));
@@ -28,7 +28,9 @@ export async function reconstructReportIndex({ indexPath, candidatePath, referen
         maximumAttachmentBytes: policy.limits.maximumAttachmentBytes,
         allowedMediaTypes: new Set(policy.allowedAttachmentMediaTypes),
         allowedFixtureDigests: fixtureAuthority.digests,
-        allowedFixtureModels: fixtureAuthority.models
+        allowedFixtureModels: fixtureAuthority.models,
+        allowedFatalBoundaryFixtureDigests: fixtureAuthority.fatalBoundaryFixtureDigests,
+        allowedCertificationHarnessDigests: fixtureAuthority.harnessDigests
       });
       requireCanonical(bytes, report, certification, `runtime report ${report.reportId}`);
       if (reference.id !== report.reportId || report.candidateManifestDigest !== candidateDigest || report.commit !== candidate.commit || report.tree !== candidate.tree) throw new Error(`runtime report identity mismatch: ${reference.id}`);
@@ -51,6 +53,8 @@ export async function reconstructReportIndex({ indexPath, candidatePath, referen
         allowedMediaTypes: new Set(policy.allowedAttachmentMediaTypes),
         allowedFixtureDigests: fixtureAuthority.digests,
         allowedFixtureModels: fixtureAuthority.models,
+        allowedFatalBoundaryFixtureDigests: fixtureAuthority.fatalBoundaryFixtureDigests,
+        allowedCertificationHarnessDigests: fixtureAuthority.harnessDigests,
         allowedDisplayPatterns: fixtureAuthority.displayPatterns,
         ...displayQualificationPolicy(policy)
       }
@@ -65,9 +69,12 @@ export async function reconstructReportIndex({ indexPath, candidatePath, referen
     const display = displaysByRuntime.get(report.reportId);
     return {
       profileId, platformClass: report.environment.platformClass, browserProduct: report.environment.browser.product, browserVersion: report.environment.browser.version,
+      browserBuild: report.environment.browser.build, browserChannel: report.environment.browser.channel,
+      osProduct: report.environment.os.product, osVersion: report.environment.os.version,
+      deviceClass: report.environment.hardware.deviceClass, virtualization: report.environment.hardware.virtualization,
       refreshMilliHz: report.environment.display.refreshMilliHz, refresh120Available: report.environment.capabilities.refresh120Available === true,
       animated: report.environment.capabilities.productionAnimationSupported === true,
-      staticFallback: report.criteria.find((criterion) => criterion.id === "static-fallback")?.status ?? "not-run",
+      fatalErrorBoundary: report.criteria.find((criterion) => criterion.id === "runtime-fatal-error-boundary")?.status ?? "not-run",
       runtimeScheduling: report.status === "passed" && coverageFailures.length === 0 ? "passed" : report.status === "passed" ? "failed" : report.status,
       coverageFailures, observedDisplay: display?.display.status ?? "not-run", runtimeReportId: report.reportId, runtimeReportDigest: sha256(bytes),
       observedDisplayReportId: display?.display.reportId ?? null, observedDisplayReportDigest: display?.digest ?? null

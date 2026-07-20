@@ -20,7 +20,6 @@ import {
   createRuntimeCandidateReport,
   createRuntimeReadinessReport,
   isTransientStaticReason,
-  summarizeStaticReason,
   translateGraphReadiness
 } from "./model.js";
 
@@ -201,18 +200,9 @@ describe("runtime model boundary", () => {
     expect(Object.isFrozen(report)).toBe(true);
   });
 
-  it("uses the exact runtime static reasons and deterministic precedence", () => {
+  it("exposes only nonfatal runtime static policy reasons", () => {
     expect(STATIC_REASONS).toEqual([
       "reduced-motion",
-      "no-video-rendition",
-      "worker-unavailable",
-      "renderer-unavailable",
-      "codec-unsupported",
-      "resource-budget",
-      "readiness-failed",
-      "preparation-timeout",
-      "animation-failure",
-      "fallback-failure",
       "visibility-suspended",
       "decoder-queued"
     ]);
@@ -224,72 +214,13 @@ describe("runtime model boundary", () => {
     expect(Object.isFrozen(TRANSIENT_STATIC_REASONS)).toBe(true);
     expect(STATIC_REASON_CLASSIFICATIONS).toEqual({
       "reduced-motion": "sticky",
-      "no-video-rendition": "sticky",
-      "worker-unavailable": "sticky",
-      "renderer-unavailable": "sticky",
-      "codec-unsupported": "sticky",
-      "resource-budget": "sticky",
-      "readiness-failed": "sticky",
-      "preparation-timeout": "sticky",
-      "animation-failure": "sticky",
-      "fallback-failure": "sticky",
       "visibility-suspended": "transient",
       "decoder-queued": "transient"
     });
     expect(Object.isFrozen(STATIC_REASON_CLASSIFICATIONS)).toBe(true);
     expect(isTransientStaticReason("visibility-suspended")).toBe(true);
     expect(isTransientStaticReason("decoder-queued")).toBe(true);
-    expect(isTransientStaticReason("resource-budget")).toBe(false);
-
-    const unsupported = normalizeRuntimeFailure("unsupported-profile");
-    const resource = normalizeRuntimeFailure("resource-rejection");
-    const readiness = normalizeRuntimeFailure("readiness-failure");
-    const base = {
-      phase: "preparation" as const,
-      staticReady: true,
-      deadlineExpired: false,
-      hasVideoRendition: true,
-      workerAvailable: true,
-      rendererAvailable: true,
-      candidateFailures: [readiness]
-    };
-
-    expect(summarizeStaticReason({ ...base, phase: "recovery" })).toBe(
-      "animation-failure"
-    );
-    expect(summarizeStaticReason({ ...base, deadlineExpired: true })).toBe(
-      "preparation-timeout"
-    );
-    expect(summarizeStaticReason({
-      ...base,
-      hasVideoRendition: false,
-      workerAvailable: false,
-      rendererAvailable: false
-    })).toBe("no-video-rendition");
-    expect(summarizeStaticReason({
-      ...base,
-      workerAvailable: false,
-      rendererAvailable: false
-    })).toBe("worker-unavailable");
-    expect(summarizeStaticReason({ ...base, rendererAvailable: false })).toBe(
-      "renderer-unavailable"
-    );
-    expect(summarizeStaticReason({
-      ...base,
-      candidateFailures: [unsupported, unsupported]
-    })).toBe("codec-unsupported");
-    expect(summarizeStaticReason({
-      ...base,
-      candidateFailures: [resource, resource]
-    })).toBe("resource-budget");
-    expect(summarizeStaticReason({
-      ...base,
-      candidateFailures: [unsupported, resource]
-    })).toBe("readiness-failed");
-    expect(summarizeStaticReason({ ...base, candidateFailures: [] })).toBe(
-      "readiness-failed"
-    );
-    expect(summarizeStaticReason({ ...base, staticReady: false })).toBeNull();
+    expect(isTransientStaticReason("reduced-motion")).toBe(false);
   });
 
   it("freezes the trace capacity at 512", () => {

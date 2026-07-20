@@ -1,4 +1,7 @@
-import type { GraphPresentation } from "@pixel-point/aval-graph";
+import {
+  sameGraphPresentation,
+  type GraphPresentation
+} from "@pixel-point/aval-graph";
 
 import type {
   InteractionCacheEndpointRunway,
@@ -173,7 +176,7 @@ export class ReversiblePresentationCoordinator {
         "reversible presentation token was already drawn"
       );
     }
-    if (!samePresentation(prepared.presentation, presentation)) {
+    if (!sameGraphPresentation(prepared.presentation, presentation)) {
       throw new ReversiblePresentationInvariantError(
         "prepared reversible presentation does not match the graph"
       );
@@ -369,17 +372,6 @@ function validatePresentation(
       "reversible graph presentation is malformed"
     );
   }
-}
-
-function samePresentation(
-  left: Readonly<ReversibleGraphPresentation>,
-  right: Readonly<ReversibleGraphPresentation>
-): boolean {
-  return left.kind === right.kind &&
-    left.edgeId === right.edgeId &&
-    left.unitId === right.unitId &&
-    left.frameIndex === right.frameIndex &&
-    left.direction === right.direction;
 }
 
 function checkedIncrement(value: number, label: string): number {

@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import { assertDistributionDerived, installVerifiedDistributions } from "../../scripts/release/fresh-public-build.mjs";
 import { ensureCompilerCliExecutable } from "../../scripts/release/compiler-cli-mode.mjs";
+import { ELEMENT_RELEASE_TYPESCRIPT_ROOTS, ELEMENT_RELEASE_WORKER } from "../../scripts/release/element-release-contract.mjs";
+import { COMPILER_WORKER_REGISTRY_ENTRY } from "../../scripts/release/worker-entry-contract.mjs";
 
 describe("fresh public distribution provenance", () => {
   it("restores the executable mode on a freshly emitted compiler CLI", async () => {
@@ -25,6 +27,13 @@ describe("fresh public distribution provenance", () => {
     expect(source).not.toMatch(/\bbaseUrl\s*:/u);
   });
 
+  it("keeps the compiler worker registry in its canonical emitted form", async () => {
+    await expect(readFile(
+      `packages/compiler/src/${COMPILER_WORKER_REGISTRY_ENTRY.output}`,
+      "utf8"
+    )).resolves.toBe(COMPILER_WORKER_REGISTRY_ENTRY.contents);
+  });
+
   it("rejects stale removed output and accepts only source-derived JS/declarations", async () => {
     const root = await mkdtemp(join(tmpdir(), "aval-fresh-dist-"));
     try {
@@ -36,10 +45,13 @@ describe("fresh public distribution provenance", () => {
       await writeFile(join(distribution, "index.js"), "export const current = true;\n");
       await writeFile(join(distribution, "index.d.ts"), "export declare const current = true;\n");
       await writeFile(join(distribution, "element.release.tsbuildinfo"), "{}\n");
+      await writeFile(join(distribution, ELEMENT_RELEASE_WORKER.output), "export {};\n");
       await writeFile(join(distribution, "stale-owner.js"), "export const stale = true;\n");
-      await expect(assertDistributionDerived({ source, distribution, packageName: "@pixel-point/aval-element" })).rejects.toThrow(/stale-owner\.js/u);
+      await expect(assertDistributionDerived({ source, sourceFiles: ["index.ts"], distribution, packageName: "@pixel-point/aval-element" })).rejects.toThrow(/stale-owner\.js/u);
       await rm(join(distribution, "stale-owner.js"));
-      await expect(assertDistributionDerived({ source, distribution, packageName: "@pixel-point/aval-element" })).resolves.toMatchObject({ outputs: ["element.release.tsbuildinfo", "index.d.ts", "index.js"] });
+      await expect(assertDistributionDerived({ source, sourceFiles: ["index.ts"], distribution, packageName: "@pixel-point/aval-element" })).resolves.toMatchObject({
+        outputs: [ELEMENT_RELEASE_WORKER.output, "element.release.tsbuildinfo", "index.d.ts", "index.js"]
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -55,7 +67,7 @@ describe("fresh public distribution provenance", () => {
       await writeFile(join(source, "index.ts"), "export {};\n");
       await writeFile(join(source, "excluded-by-drift.ts"), "export const required = true;\n");
       for (const path of ["index.js", "index.js.map", "index.d.ts", "index.d.ts.map", "graph.tsbuildinfo"]) await writeFile(join(distribution, path), "{}\n");
-      await expect(assertDistributionDerived({ source, distribution, packageName: "@pixel-point/aval-graph" })).rejects.toThrow(/missing required.*excluded-by-drift/u);
+      await expect(assertDistributionDerived({ source, sourceFiles: ["excluded-by-drift.ts", "index.ts"], distribution, packageName: "@pixel-point/aval-graph" })).rejects.toThrow(/missing required.*excluded-by-drift/u);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -71,10 +83,70 @@ describe("fresh public distribution provenance", () => {
       await writeFile(join(source, "index.ts"), "export {};\n");
       await writeFile(join(source, "behavior.test.ts"), "export {};\n");
       for (const path of ["index.js", "index.d.ts", "behavior.test.js"]) await writeFile(join(distribution, path), "export {};\n");
-      await expect(assertDistributionDerived({ source, distribution, packageName: "@pixel-point/aval-graph" })).rejects.toThrow(/exact release emission contract|test output/u);
+      await expect(assertDistributionDerived({ source, sourceFiles: ["index.ts"], distribution, packageName: "@pixel-point/aval-graph" })).rejects.toThrow(/exact release emission contract|test output/u);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("accepts only the canonical compiler worker registry as JSON release source", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aval-fresh-registry-"));
+    try {
+      const source = join(root, "src");
+      const distribution = join(root, "dist");
+      const sourceCommands = join(source, "commands");
+      const distributionCommands = join(distribution, "commands");
+      await mkdir(sourceCommands, { recursive: true });
+      await mkdir(distributionCommands, { recursive: true });
+      await writeFile(join(source, "index.ts"), "export {};\n");
+      await writeFile(
+        join(source, COMPILER_WORKER_REGISTRY_ENTRY.output),
+        COMPILER_WORKER_REGISTRY_ENTRY.contents
+      );
+      for (const path of ["index.js", "index.js.map", "index.d.ts", "index.d.ts.map", "compiler.tsbuildinfo"]) {
+        await writeFile(join(distribution, path), "{}\n");
+      }
+      await writeFile(
+        join(distribution, COMPILER_WORKER_REGISTRY_ENTRY.output),
+        COMPILER_WORKER_REGISTRY_ENTRY.contents
+      );
+      await expect(assertDistributionDerived({
+        source,
+        sourceFiles: [COMPILER_WORKER_REGISTRY_ENTRY.output, "index.ts"],
+        distribution,
+        packageName: COMPILER_WORKER_REGISTRY_ENTRY.packageName
+      })).resolves.toMatchObject({
+        outputs: [
+          COMPILER_WORKER_REGISTRY_ENTRY.output,
+          "compiler.tsbuildinfo",
+          "index.d.ts",
+          "index.d.ts.map",
+          "index.js",
+          "index.js.map"
+        ]
+      });
+
+      await writeFile(join(source, "unreviewed.json"), "{}\n");
+      await expect(assertDistributionDerived({
+        source,
+        sourceFiles: [COMPILER_WORKER_REGISTRY_ENTRY.output, "index.ts", "unreviewed.json"],
+        distribution,
+        packageName: COMPILER_WORKER_REGISTRY_ENTRY.packageName
+      })).rejects.toThrow(/invalid source: unreviewed\.json/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("defines the element release from public TypeScript roots plus its URL worker", async () => {
+    expect(ELEMENT_RELEASE_TYPESCRIPT_ROOTS).toEqual(["index.ts", "auto.ts"]);
+    expect(ELEMENT_RELEASE_WORKER).toEqual({ source: "decoder-worker.ts", output: "decoder-worker.js" });
+    const config = JSON.parse(await readFile("packages/element/tsconfig.release.json", "utf8")) as {
+      files?: string[];
+      include?: string[];
+    };
+    expect(config.files).toEqual(ELEMENT_RELEASE_TYPESCRIPT_ROOTS.map((path) => `src/${path}`));
+    expect(config.include).toEqual([]);
   });
 
   it("restores every previous dist when a later verified atomic install fails", async () => {

@@ -51,8 +51,8 @@ describe("CLI argument grammar", () => {
   it.each([
     {
       codec: "h264",
-      flags: ["--crf", "0", "--preset", "placebo"],
-      expected: { codec: "h264", crf: 0, preset: "placebo" }
+      flags: ["--crf", "1", "--preset", "placebo"],
+      expected: { codec: "h264", crf: 1, preset: "placebo" }
     },
     {
       codec: "h265",
@@ -221,6 +221,7 @@ describe("CLI argument grammar", () => {
     ["AV1 deadline", direct("av1", "--deadline", "best")],
     ["row MT outside AV1", direct("vp9", "--row-mt")],
     ["H264 CRF above range", direct("h264", "--crf", "52")],
+    ["H264 lossless CRF", direct("h264", "--crf", "0")],
     ["VP9 CRF above range", direct("vp9", "--crf", "64")],
     ["bad preset", direct("h265", "--preset", "impossibly-slow")],
     ["bad deadline", direct("vp9", "--deadline", "slow")],

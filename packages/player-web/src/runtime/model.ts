@@ -1,4 +1,8 @@
+import {
+  MOTION_GRAPH_STATIC_REASONS
+} from "@pixel-point/aval-graph";
 import type {
+  MotionGraphStaticReason,
   GraphPresentation,
   MotionGraphEffect,
   MotionGraphOperation,
@@ -51,22 +55,10 @@ export const RUNTIME_READINESS_LADDER = Object.freeze({
   ] as const)
 });
 
-export const STATIC_REASONS = Object.freeze([
-  "reduced-motion",
-  "no-video-rendition",
-  "worker-unavailable",
-  "renderer-unavailable",
-  "codec-unsupported",
-  "resource-budget",
-  "readiness-failed",
-  "preparation-timeout",
-  "animation-failure",
-  "fallback-failure",
-  "visibility-suspended",
-  "decoder-queued"
-] as const);
+/** Alias of the graph-owned policy vocabulary; player-web adds no reasons. */
+export const STATIC_REASONS = MOTION_GRAPH_STATIC_REASONS;
 
-export type StaticReason = (typeof STATIC_REASONS)[number];
+export type StaticReason = MotionGraphStaticReason;
 
 export type StaticReasonClassification = "transient" | "sticky";
 
@@ -80,15 +72,6 @@ export const STATIC_REASON_CLASSIFICATIONS: Readonly<
   Record<StaticReason, StaticReasonClassification>
 > = Object.freeze({
   "reduced-motion": "sticky",
-  "no-video-rendition": "sticky",
-  "worker-unavailable": "sticky",
-  "renderer-unavailable": "sticky",
-  "codec-unsupported": "sticky",
-  "resource-budget": "sticky",
-  "readiness-failed": "sticky",
-  "preparation-timeout": "sticky",
-  "animation-failure": "sticky",
-  "fallback-failure": "sticky",
   "visibility-suspended": "transient",
   "decoder-queued": "transient"
 });
@@ -507,7 +490,7 @@ export type RuntimeMediaPresentation =
   | {
       readonly kind: "static";
       readonly state: string;
-      readonly drawSource: "fallback";
+      readonly drawSource: "state";
     }
   | {
       readonly kind: "frame";
@@ -543,16 +526,18 @@ export interface RuntimeSchedulerSnapshot {
   readonly smoothSession: boolean;
 }
 
+export type RuntimeGraphEffect = MotionGraphEffect;
+
 export interface RuntimeGraphTrace {
   readonly operation: MotionGraphOperation;
   readonly snapshot: Readonly<MotionGraphSnapshot>;
   readonly presentation: Readonly<GraphPresentation> | null;
-  readonly effects: readonly Readonly<MotionGraphEffect>[];
+  readonly effects: readonly Readonly<RuntimeGraphEffect>[];
 }
 
 export interface RuntimeTraceCounters {
   readonly underflows: number;
-  readonly fallbacks: number;
+  readonly staticTransitions: number;
   readonly settledRequests: number;
   readonly cleanedFrames: number;
 }
@@ -567,7 +552,7 @@ export interface RuntimeTraceRecord {
     | "operation"
     | "content-tick"
     | "readiness"
-    | "fallback"
+    | "static-transition"
     | "cleanup";
   readonly presentationOrdinal: bigint | null;
   readonly rationalDeadlineUs: number | null;
@@ -591,57 +576,4 @@ export interface RuntimeTraceRecord {
   readonly decodeLeadFrames: number | null;
   readonly settledRequestIds: readonly number[];
   readonly counters: Readonly<RuntimeTraceCounters>;
-}
-
-export interface StaticReasonSummaryInput {
-  readonly phase: "preparation" | "recovery";
-  /** False means failStatic: no successful static result may be summarized. */
-  readonly staticReady: boolean;
-  readonly deadlineExpired: boolean;
-  readonly hasVideoRendition: boolean;
-  readonly workerAvailable: boolean;
-  readonly rendererAvailable: boolean;
-  readonly candidateFailures: readonly Readonly<RuntimeFailure>[];
-}
-
-/**
- * Deterministic summary precedence from the M5.5 design. `null` means the
- * static installation is incomplete and the caller must enter terminal error.
- */
-export function summarizeStaticReason(
-  input: StaticReasonSummaryInput
-): StaticReason | null {
-  if (!input.staticReady) {
-    return null;
-  }
-  if (input.phase === "recovery") {
-    return "animation-failure";
-  }
-  if (input.deadlineExpired) {
-    return "preparation-timeout";
-  }
-  if (!input.hasVideoRendition) {
-    return "no-video-rendition";
-  }
-  if (!input.workerAvailable) {
-    return "worker-unavailable";
-  }
-  if (!input.rendererAvailable) {
-    return "renderer-unavailable";
-  }
-  if (allFailuresAre(input.candidateFailures, "unsupported-profile")) {
-    return "codec-unsupported";
-  }
-  if (allFailuresAre(input.candidateFailures, "resource-rejection")) {
-    return "resource-budget";
-  }
-  return "readiness-failed";
-}
-
-function allFailuresAre(
-  failures: readonly Readonly<RuntimeFailure>[],
-  code: RuntimeFailure["code"]
-): boolean {
-  return failures.length > 0 &&
-    failures.every((failure) => failure.code === code);
 }

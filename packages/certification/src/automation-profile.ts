@@ -5,7 +5,7 @@ export interface FunctionalEngineResult {
   readonly label: string;
   readonly claimLayer: "functional-engine";
   readonly animatedStatus: CertificationStatus;
-  readonly staticFallbackStatus: CertificationStatus;
+  readonly fatalErrorBoundaryStatus: CertificationStatus;
   readonly exactProbe: string;
 }
 
@@ -14,7 +14,7 @@ export function functionalEngineResult(input: {
   readonly exactProbe: string;
   readonly animationSupported: boolean;
   readonly functionalAssertionsPassed: boolean;
-  readonly staticFallbackPassed: boolean;
+  readonly fatalErrorBoundaryPassed: boolean;
 }): FunctionalEngineResult {
   if (input.exactProbe.length === 0 || input.exactProbe.length > 512) throw new RangeError("exactProbe is invalid");
   const label = ({
@@ -27,7 +27,7 @@ export function functionalEngineResult(input: {
     label,
     claimLayer: "functional-engine",
     animatedStatus: input.animationSupported ? (input.functionalAssertionsPassed ? "passed" : "failed") : "unsupported",
-    staticFallbackStatus: input.staticFallbackPassed ? "passed" : "failed",
+    fatalErrorBoundaryStatus: input.fatalErrorBoundaryPassed ? "passed" : "failed",
     exactProbe: input.exactProbe
   };
 }

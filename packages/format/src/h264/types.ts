@@ -1,4 +1,8 @@
-import type { H264LevelIdc } from "./codec.js";
+import type {
+  H264Codec,
+  H264CodecProfile,
+  H264LevelIdc
+} from "./codec.js";
 
 /** A single Annex B access unit and its container key assertion. */
 export interface H264AccessUnitInput {
@@ -17,7 +21,7 @@ export interface H264FrameRate {
   readonly denominator: number;
 }
 
-/** Non-bitstream facts that the compiler requires the High-profile stream to match. */
+/** Non-bitstream facts required to match either canonical H264 profile. */
 export interface H264Profile {
   readonly codedWidth: number;
   readonly codedHeight: number;
@@ -53,8 +57,9 @@ export interface H264ColorSummary {
 }
 
 export interface H264ParameterSetSummary {
-  readonly profileIdc: 100;
-  readonly codec: string;
+  readonly profile: H264CodecProfile;
+  readonly profileIdc: 66 | 100;
+  readonly codec: H264Codec;
   readonly levelIdc: H264LevelIdc;
   readonly codedWidth: number;
   readonly codedHeight: number;

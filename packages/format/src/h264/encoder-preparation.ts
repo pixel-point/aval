@@ -8,9 +8,11 @@ import {
   splitAnnexBAccessUnit,
   type AnnexBNalUnit
 } from "./annex-b.js";
+import { canonicalizeH264ConstraintSet2 } from "./canonicalize.js";
 import { requireH264 } from "./failure.js";
 import {
   cloneH264Profile,
+  inspectH264AnnexBEncoderCandidateRendition,
   inspectH264AnnexBRendition
 } from "./inspector.js";
 import type {
@@ -95,7 +97,27 @@ export function prepareH264EncoderRendition(
         })
       );
     }
-    const canonicalUnits = Object.freeze(normalizedUnits);
+    const candidateUnits = Object.freeze(normalizedUnits);
+    const candidateInspection = inspectH264AnnexBEncoderCandidateRendition({
+      profile,
+      units: candidateUnits
+    });
+    requireH264(
+      candidateInspection.parameterSet.profile === "constrained-baseline",
+      "units",
+      "encoder candidates must use Constrained Baseline profile"
+    );
+    const canonicalUnits = Object.freeze(
+      candidateUnits.map((unit) => Object.freeze({
+        id: unit.id,
+        accessUnits: Object.freeze(
+          unit.accessUnits.map((accessUnit) => Object.freeze({
+            key: accessUnit.key,
+            bytes: canonicalizeH264ConstraintSet2(accessUnit.bytes)
+          }))
+        )
+      }))
+    );
     const inspection = inspectH264AnnexBRendition({
       profile,
       units: canonicalUnits

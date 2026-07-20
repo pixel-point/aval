@@ -15,41 +15,41 @@
   },
   "buildReport": {
     "path": "fixtures/conformance/v1/build.json",
-    "bytes": 23898,
-    "sha256": "723c4eed97a246903aafa227ce8f3a71aae7481d1e460b99d3408498d0bd5ced"
+    "bytes": 24443,
+    "sha256": "ba41620be81fd21ba0724713f2685a36666939a9cf201ceb5e7f144ca971cc43"
   },
   "outputs": [
     {
       "path": "fixtures/conformance/v1/av1.avl",
       "bytes": 13416,
-      "sha256": "27eba60d8aa5496bd3bf3bbf7e8add55d236dcb4ad477674029a325cf42c6360"
+      "sha256": "07c13d5ec313c4b4b2d675c002948d961b31607eef8e794ba3b456ab5d36b48e"
     },
     {
       "path": "fixtures/conformance/v1/vp9.avl",
       "bytes": 13752,
-      "sha256": "4b1529835cbca758a61f82c91b833c14db1c275c14bb41eeaee19af7f990d335"
+      "sha256": "c2c56dab5fb12f109b8a096d8895530c482938a81625687aa6cab8daab3fa42d"
     },
     {
       "path": "fixtures/conformance/v1/h265.avl",
       "bytes": 12079,
-      "sha256": "f861a7d64b166ff58d705e8e4436eb90d422e0e366e4edb621275d331f1d4fcc"
+      "sha256": "06bd5755f233ba996f67c50601fc61b0748c2447540b062f887022ee702c45fe"
     },
     {
       "path": "fixtures/conformance/v1/h264.avl",
-      "bytes": 11471,
-      "sha256": "8981edcf6c105ea4d8f58165dbfed4453aff7bbd93545d73f3ddd4cd218b2984"
+      "bytes": 13675,
+      "sha256": "2c3d03e20655cb6a6fdf5c889f2d30ac0ad67ee3a7183e80286c2b38da34461b"
     }
   ],
   "codecStrings": {
     "av1": "av01.0.00M.10.0.110.01.01.01.0",
     "vp9": "vp09.00.10.08.01.01.01.01.00",
     "h265": "hvc1.1.6.L30.90",
-    "h264": "avc1.64000A"
+    "h264": "avc1.42E00B"
   },
   "toolchain": {
     "aggregateMemoryLimit": "derived",
     "ffmpeg": {
-      "calibrationSha256": "bbbae147fe7b5b4dea2c0dd333bcefa0ac31407c3b610ba685ee99c0872cf1d9",
+      "calibrationSha256": "c94bf285200b291927ebb961b1b7b46184f107aea7541bd336a4cb9fde462561",
       "configurationSha256": "b809566072f4ad92e517aaebc0a2701151e03e74a619be39a7196a37f7dc34d4",
       "encodersOutputSha256": "e76ee773e9049d67796e3b5992b5374e9969ab3b80f14af260b295adc41bbdc2",
       "executableIdentity": {

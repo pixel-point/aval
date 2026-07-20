@@ -1,29 +1,39 @@
 import { createSourceSupportProbe } from "@pixel-point/aval-player-web";
+import { AvalPlaybackError } from "@pixel-point/aval-element";
 
 import {
   BT709_LIMITED,
   CODECS,
+  INACTIVE_PLAYBACK_MESSAGE,
   PLAYBACK_FAILURE_MESSAGE,
+  RENDERED_READINESS,
   UNAVAILABLE_MESSAGE,
   UNSUPPORTED_MESSAGE,
   assertCodec,
   codecLabel,
-  isRecord,
   parseGrassRabbitReport,
-  requireMapValue
+  requireMapValue,
+  runtimeCodecFamily
 } from "./codec-demo-model.js";
 import {
   bindPlayerPresentation,
   failureCode,
-  revealPlayerWhenRendered
+  reflectPlayerRenderedState
 } from "./codec-player-presentation.js";
+
+const AUTOMATIC_ACTIVATION = Object.freeze({
+  kind: "automatic",
+  codec: CODECS[0],
+  sourceCodecs: CODECS
+});
 
 export function createCodecDemoController({
   view,
   reportUrl,
   publicBaseUrl,
   prefersReducedMotion,
-  simulatedUnsupported
+  simulatedUnsupported,
+  diagnostics = null
 }) {
   const support = new Map(CODECS.map((codec) => [codec, "unavailable"]));
   let report = null;
@@ -33,14 +43,11 @@ export function createCodecDemoController({
   let latestActivation = Promise.resolve();
   let retirementTail = Promise.resolve();
 
-  view.bindTabs((codec) => requestActivation(codec, true));
+  view.bindTabs((codec) => requestActivation(explicitActivation(codec)));
   const setup = initialize();
   const ready = setup.then(async () => {
     if (!explicitActivationRequested) {
-      const firstSupported = CODECS.find(
-        (codec) => requireMapValue(support, codec) === "supported"
-      );
-      await requestActivation(firstSupported ?? "av1", false);
+      await requestActivation(AUTOMATIC_ACTIVATION);
     }
     await waitForLatestActivation();
   });
@@ -48,7 +55,7 @@ export function createCodecDemoController({
   const api = Object.freeze({
     ready,
     activate(codec) {
-      return requestActivation(codec, true);
+      return requestActivation(explicitActivation(codec));
     },
     supportSnapshot() {
       return Object.freeze(Object.fromEntries(CODECS.map((codec) => [
@@ -77,12 +84,16 @@ export function createCodecDemoController({
     publishProbeSummary();
   }
 
-  function requestActivation(codec, explicit) {
-    assertCodec(codec);
-    if (explicit) explicitActivationRequested = true;
+  function requestActivation(activation) {
+    const { codec } = activation;
+    diagnostics?.checkpoint(
+      `before:codec-activation:${codec}`,
+      activePlayerValue ?? undefined
+    );
+    if (activation.kind === "explicit") explicitActivationRequested = true;
     const serial = ++activationSerial;
     view.selectTab(codec);
-    const operation = activateAfterSetup(codec, serial);
+    const operation = activateAfterSetup(activation, serial);
     latestActivation = operation;
     return operation;
   }
@@ -95,100 +106,198 @@ export function createCodecDemoController({
     } while (observed !== latestActivation);
   }
 
-  async function activateAfterSetup(codec, serial) {
+  async function activateAfterSetup(activation, serial) {
     await setup;
     if (serial !== activationSerial) return;
     await retireActivePlayer();
     if (serial !== activationSerial) return;
 
-    const parts = view.parts(codec);
-    view.reset(codec);
-    const state = requireMapValue(support, codec);
-    if (state === "unsupported") {
-      view.setMessage(codec, UNSUPPORTED_MESSAGE, "unsupported");
-      return;
+    const { codec } = activation;
+    let presentation = Object.freeze({ codec, parts: view.parts(codec) });
+    view.reset(presentation.codec);
+    if (activation.kind === "explicit") {
+      const state = requireMapValue(support, codec);
+      if (state === "unsupported") {
+        view.setMessage(codec, UNSUPPORTED_MESSAGE, "unsupported");
+        return;
+      }
+      if (state === "unavailable") {
+        view.setMessage(codec, UNAVAILABLE_MESSAGE);
+        return;
+      }
     }
-    if (state === "unavailable" || report === null) {
-      view.setMessage(codec, UNAVAILABLE_MESSAGE);
-      return;
+    if (report === null) {
+      throw new Error("Codec build report is unavailable after setup.");
     }
 
-    const asset = requireMapValue(report.assets, codec);
-    const player = createPlayer(codec, asset);
+    const player = createPlayer(activation.sourceCodecs);
     const hotspot = view.createHotspot();
     const isCurrent = () => serial === activationSerial && activePlayerValue === player;
+    const finishPreparedActivation = () => {
+      if (
+        !isCurrent() ||
+        player.readiness !== "interactiveReady"
+      ) return;
+      if (activation.kind === "automatic") reconcileAutomaticSelection();
+      presentation.parts.stage.dataset.state = "ready";
+      presentation.parts.stage.removeAttribute("aria-busy");
+      presentation.parts.message.textContent = "";
+      reflectPlayerRenderedState(player, hotspot, isCurrent);
+    };
+    const settlePendingActivation = (message) => {
+      if (!isCurrent()) return;
+      presentation.parts.stage.removeAttribute("aria-busy");
+      presentation.parts.stage.dataset.state = "pending";
+      presentation.parts.message.textContent = message;
+    };
+    player.addEventListener("readinesschange", () => {
+      if (player.readiness === "interactiveReady") {
+        finishPreparedActivation();
+      } else if (player.readiness === "staticReady") {
+        settlePendingActivation(INACTIVE_PLAYBACK_MESSAGE);
+      }
+    });
     bindPlayerPresentation({
       player,
       hotspot,
-      parts,
+      getStateBadge: () => presentation.parts.stateBadge,
       isCurrent,
       prefersReducedMotion,
-      onFailure: (kind) => finishFailedActivation(codec, player, parts, serial, kind)
+      onFailure(kind) {
+        const target = presentation;
+        return finishFailedActivation(
+          activation,
+          target,
+          player,
+          serial,
+          kind
+        );
+      }
     });
-    parts.mount.replaceChildren(player, hotspot);
-    parts.message.textContent = "Preparing this codec…";
-    parts.stage.dataset.state = "preparing";
-    parts.stage.setAttribute("aria-busy", "true");
+    presentation.parts.mount.replaceChildren(player, hotspot);
+    presentation.parts.message.textContent = "Preparing this codec…";
+    presentation.parts.stage.dataset.state = "preparing";
+    presentation.parts.stage.setAttribute("aria-busy", "true");
     activePlayerValue = player;
 
     try {
+      diagnostics?.checkpoint(`before:codec-prepare:${codec}`, player);
       const preparation = await player.prepare({ timeoutMs: 30_000 });
+      diagnostics?.checkpoint(`after:codec-prepare:${codec}`, player);
       if (!isCurrent()) return;
-      const failureKind = preparationFailureKind(player, preparation);
-      if (failureKind !== null) {
-        await finishFailedActivation(codec, player, parts, serial, failureKind);
+      if (preparation?.mode === "static" || player.readiness === "staticReady") {
+        settlePendingActivation(INACTIVE_PLAYBACK_MESSAGE);
         return;
       }
-      parts.stage.dataset.state = "ready";
-      parts.stage.removeAttribute("aria-busy");
-      parts.message.textContent = "";
-      revealPlayerWhenRendered(player, hotspot, isCurrent);
+      finishPreparedActivation();
     } catch (error) {
+      diagnostics?.checkpoint(`error:codec-prepare:${codec}`, player);
       if (!isCurrent()) return;
+      if (!(error instanceof AvalPlaybackError)) {
+        if (!isPreparationInterruption(error)) throw error;
+        if (player.readiness === "interactiveReady") {
+          finishPreparedActivation();
+          return;
+        }
+        settlePendingActivation("Preparation is continuing in the background…");
+        return;
+      }
       const failureKind = failureCode(error) === "unsupported-profile"
         ? "unsupported"
         : "playback";
-      await finishFailedActivation(codec, player, parts, serial, failureKind);
+      const target = presentation;
+      await finishFailedActivation(
+        activation,
+        target,
+        player,
+        serial,
+        failureKind
+      );
+    }
+
+    function reconcileAutomaticSelection() {
+      const selectedCodec = runtimeCodecFamily(
+        player.getDiagnostics().runtime.selectedCodec
+      );
+      if (selectedCodec === presentation.codec) return;
+      const previous = presentation;
+      const nextParts = view.parts(selectedCodec);
+      view.reset(selectedCodec);
+      view.selectTab(selectedCodec);
+      presentation = Object.freeze({ codec: selectedCodec, parts: nextParts });
+      player.setAttribute(
+        "aria-label",
+        playerAriaLabel(selectedCodec)
+      );
+      nextParts.mount.replaceChildren(player, hotspot);
+      view.reset(previous.codec);
+      view.renderSupport(
+        previous.codec,
+        requireMapValue(support, previous.codec)
+      );
     }
   }
 
-  function createPlayer(codec, asset) {
+  function createPlayer(codecs) {
+    const primaryCodec = codecs[0];
+    if (primaryCodec === undefined) {
+      throw new Error("A codec player requires at least one source.");
+    }
     const player = document.createElement("aval-player");
     player.className = "rabbit-player";
     player.setAttribute("width", "640");
     player.setAttribute("height", "360");
     player.setAttribute("autoplay", "visible");
     player.setAttribute("tabindex", "0");
-    player.setAttribute(
-      "aria-label",
-      `Interactive grass rabbit animation encoded with ${codecLabel(codec)}. Hover or focus to change its state.`
-    );
-    const source = document.createElement("source");
-    source.src = new URL(`grass-rabbit/${asset.path}`, publicBaseUrl).href;
-    source.type = asset.type;
-    source.setAttribute("integrity", asset.integrity);
-    player.append(source);
+    player.setAttribute("aria-label", playerAriaLabel(primaryCodec));
+    for (const codec of codecs) {
+      const asset = requireMapValue(report.assets, codec);
+      const source = document.createElement("source");
+      source.src = new URL(`grass-rabbit/${asset.path}`, publicBaseUrl).href;
+      source.type = asset.type;
+      source.setAttribute("integrity", asset.integrity);
+      player.append(source);
+    }
+    diagnostics?.attach(player, {
+      example: "grass-rabbit-codecs",
+      codec: codecs.length === 1 ? primaryCodec : "automatic-ladder",
+      sourceType: requireMapValue(report.assets, primaryCodec).type,
+      sourceTypes: codecs.map(
+        (codec) => requireMapValue(report.assets, codec).type
+      )
+    });
     return player;
   }
 
-  async function finishFailedActivation(codec, player, parts, serial, kind) {
+  async function finishFailedActivation(
+    activation,
+    target,
+    player,
+    serial,
+    kind
+  ) {
     if (serial !== activationSerial || activePlayerValue !== player) return;
-    if (kind === "unsupported") {
-      support.set(codec, "unsupported");
-      view.renderSupport(codec, "unsupported");
+    const explicitUnsupported = activation.kind === "explicit" &&
+      kind === "unsupported";
+    if (explicitUnsupported) {
+      support.set(target.codec, "unsupported");
+      view.renderSupport(target.codec, "unsupported");
       publishProbeSummary();
-      parts.stage.removeAttribute("aria-busy");
+      target.parts.stage.removeAttribute("aria-busy");
     }
     await retireActivePlayer();
-    if (activePlayerValue === null || !parts.mount.contains(activePlayerValue)) {
-      parts.mount.replaceChildren();
+    if (
+      activePlayerValue === null ||
+      !target.parts.mount.contains(activePlayerValue)
+    ) {
+      target.parts.mount.replaceChildren();
     }
     if (serial !== activationSerial) return;
-    parts.stage.removeAttribute("aria-busy");
-    if (kind === "unsupported") return;
-    parts.stage.dataset.runtimeError = "true";
-    parts.stage.dataset.state = "error";
-    parts.message.textContent = PLAYBACK_FAILURE_MESSAGE;
+    target.parts.stage.removeAttribute("aria-busy");
+    if (explicitUnsupported) return;
+    target.parts.stage.dataset.runtimeError = "true";
+    target.parts.stage.dataset.state = "error";
+    target.parts.message.textContent = PLAYBACK_FAILURE_MESSAGE;
   }
 
   async function retireActivePlayer() {
@@ -199,7 +308,9 @@ export function createCodecDemoController({
       await priorRetirement.catch(() => undefined);
       if (previous === null) return;
       try {
+        diagnostics?.checkpoint("before:codec-player-dispose", previous);
         await previous.dispose();
+        diagnostics?.checkpoint("after:codec-player-dispose", previous);
       } finally {
         previous.remove();
       }
@@ -217,6 +328,19 @@ export function createCodecDemoController({
     ).length;
     view.renderSupportSummary(supportedCount);
   }
+}
+
+function playerAriaLabel(codec) {
+  return `Interactive grass rabbit animation encoded with ${codecLabel(codec)}. Hover or focus to change its state.`;
+}
+
+function explicitActivation(codec) {
+  assertCodec(codec);
+  return Object.freeze({
+    kind: "explicit",
+    codec,
+    sourceCodecs: Object.freeze([codec])
+  });
 }
 
 async function fetchBuildReport(reportUrl) {
@@ -269,24 +393,7 @@ function exactProbeConfig(codec) {
   });
 }
 
-function preparationFailureKind(player, result) {
-  if (!isRecord(result) || result.mode !== "static") return null;
-  if (result.reason === "codec-unsupported") return "unsupported";
-  if (playerFailureCode(player) !== null) return "playback";
-  return [
-    "reduced-motion",
-    "visibility-suspended",
-    "resource-budget",
-    "decoder-queued"
-  ].includes(result.reason)
-    ? null
-    : "playback";
-}
-
-function playerFailureCode(player) {
-  try {
-    return failureCode(player.getDiagnostics().lastFailure);
-  } catch {
-    return "readiness-failure";
-  }
+function isPreparationInterruption(error) {
+  return error instanceof DOMException &&
+    (error.name === "TimeoutError" || error.name === "AbortError");
 }

@@ -7,9 +7,9 @@
       <source src="https://assets.example.test/status/vp9.avl" type='application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"' integrity="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=">
       <source src="https://assets.example.test/status/h265.avl" type='application/vnd.aval; codecs="hvc1.1.6.L93.B0"' integrity="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=">
       <source src="https://assets.example.test/status/h264.avl" type='application/vnd.aval; codecs="avc1.640028"' integrity="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=">
-      <img slot="fallback" src="/status-fallback.png" alt="Current status">
     </aval-player>
-    <output id="status">Preparing static fallback…</output>
+    <img id="motion-unavailable" src="/status-fallback.png" alt="Current status" hidden>
+    <output id="status">Preparing motion…</output>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -192,8 +192,8 @@ The codec strings above are illustrative. Authors copy the exact values and inte
 - `packages/player-web/src/runtime/video-rendition-selection.ts`: quality-ordered, resource-aware rendition selection.
 - `packages/player-web/src/runtime/browser-video-candidate.ts`: codec-neutral browser worker/renderer composition.
 - `packages/player-web/src/runtime/source-support-probe.ts`: module-worker support-probe owner.
-- `packages/element/src/element-source-candidates.ts`: direct-child source snapshot, MIME/codec parsing, and identity.
-- `packages/element/src/element-source-observer.ts`: lifecycle-bound source mutation coalescing.
+- `@pixel-point/aval-element`: direct-child source snapshots, MIME/codec
+  validation, identity, mutation coalescing, and ordered candidate selection.
 - Focused test files beside each new module.
 
 ### Rename and consolidate
@@ -208,7 +208,8 @@ The codec strings above are illustrative. Authors copy the exact values and inte
 - `packages/format/src/model.ts`, `header.ts`, `access-unit-index.ts`, `parser.ts`, `writer.ts`, `writer-normalize.ts`, manifest schemas, limits, and public exports: define one wire `1.0` decode-timeline format with unversioned names.
 - `packages/compiler/src/model.ts`, project parsing/normalization, compilation, discovery, CLI, inspection, unpacking, reports, dev server, and public exports: define one project/build `1.0` contract and one compiler pipeline.
 - `packages/player-web/src/decoder-worker/{protocol,core-validation,core,client}.ts`, catalog, integrated preparation, resource planning, and public exports: accept the codec union, decode-order chunks, presentation-order output, and source probing.
-- `packages/element/src/{public-types,element-configuration,element-desired-state,element-reconciler,element-generation-factory,asset-generation,browser-runtime-factory,aval-element}.ts`: make direct-child `<source>` elements the sole source authority and remove host `src`/`integrity` reflection.
+- `@pixel-point/aval-element`: make direct-child `<source>` elements the sole
+  source authority and remove host `src`/`integrity` reflection.
 - Docs, examples, starter output, API reports, release classifications, browser fixtures, and certification data are regenerated for the first release rather than migrated.
 
 ### Task 1: Replace project schemas with the canonical `1.0` codec-major contract
@@ -772,21 +773,8 @@ git commit -m "feat(player): decode validated multi-codec assets"
 
 ### Task 9: Add ordered HTML-like source selection to `<aval-player>`
 
-**Files:**
-- Create: `packages/element/src/element-source-candidates.ts`
-- Create: `packages/element/src/element-source-observer.ts`
-- Create: `packages/element/test/element-source-candidates.test.ts`
-- Create: `packages/element/test/element-source-observer.test.ts`
-- Modify: `packages/element/src/public-types.ts`
-- Modify: `packages/element/src/element-configuration.ts`
-- Modify: `packages/element/src/element-desired-state.ts`
-- Modify: `packages/element/src/element-reconciler.ts`
-- Modify: `packages/element/src/element-source-effects.ts`
-- Modify: `packages/element/src/element-generation-factory.ts`
-- Modify: `packages/element/src/asset-generation.ts`
-- Modify: `packages/element/src/browser-runtime-factory.ts`
-- Test: `packages/element/test/element-lifecycle.test.ts`
-- Test: `packages/element/test/security.test.ts`
+**Historical scope:** the public element contract, canonical source-selection
+runtime, lifecycle/security tests, and the player support-probe boundary.
 
 - [ ] **Step 1: Write the sole-source-model tests**
 

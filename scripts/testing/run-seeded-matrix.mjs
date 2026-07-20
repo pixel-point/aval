@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -21,10 +21,9 @@ const files = [
   "tests/mutation/release-corpus.test.ts",
   "packages/format/test/mutation-fuzz.test.ts",
   "packages/format/test/canonical-json-fuzz.test.ts",
-  "packages/format/test/avc-mutation-fuzz.test.ts",
-  "packages/graph/test/engine-fuzz.test.ts",
-  "packages/element/test/element-fuzz.test.ts"
+  "packages/graph/test/engine-fuzz.test.ts"
 ];
+await Promise.all(files.map((file) => access(resolve(root, file))));
 process.stdout.write(`${JSON.stringify({ mutationProfile: profile, seeds })}\n`);
 const result = spawnSync("npx", ["vitest", "run", "--config", "vitest.m9.config.ts", ...files], {
   cwd: root,

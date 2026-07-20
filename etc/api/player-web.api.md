@@ -14,7 +14,7 @@ import type { EncodedChunkRecord } from '@pixel-point/aval-format';
 import { FormatHeader } from '@pixel-point/aval-format';
 import { GraphBodyDefinition } from '@pixel-point/aval-graph';
 import { GraphEdgeDefinition } from '@pixel-point/aval-graph';
-import type { GraphPresentation } from '@pixel-point/aval-graph';
+import { GraphPresentation } from '@pixel-point/aval-graph';
 import type { GraphSettlementError } from '@pixel-point/aval-graph';
 import { GraphStartPolicy } from '@pixel-point/aval-graph';
 import type { GraphStateDefinition } from '@pixel-point/aval-graph';
@@ -24,6 +24,7 @@ import type { MotionGraphOperation } from '@pixel-point/aval-graph';
 import type { MotionGraphReadiness } from '@pixel-point/aval-graph';
 import type { MotionGraphResult } from '@pixel-point/aval-graph';
 import type { MotionGraphSnapshot } from '@pixel-point/aval-graph';
+import type { MotionGraphStaticReason } from '@pixel-point/aval-graph';
 import type { MotionGraphTickOptions } from '@pixel-point/aval-graph';
 import { ParsedFrontIndex } from '@pixel-point/aval-format';
 import { parseVideoCodecString } from '@pixel-point/aval-format';
@@ -1516,7 +1517,7 @@ export class EffectHost {
     constructor(options: EffectHostOptions);
     apply(result: Readonly<MotionGraphResult>, draw?: EffectHostDraw | null): Readonly<EffectHostSnapshot>;
     applyDisposal(result: Readonly<MotionGraphResult>): Readonly<MotionGraphResult>;
-    applyFailure(result: Readonly<MotionGraphResult>): Readonly<MotionGraphResult>;
+    applyFailure(result: Readonly<MotionGraphResult>, error: RuntimePlaybackError): Readonly<MotionGraphResult>;
     applyRecovery(result: Readonly<MotionGraphResult>, draw: EffectHostDraw): Readonly<MotionGraphResult>;
     applyRecoveryIntent(result: Readonly<MotionGraphResult>): Readonly<EffectHostSnapshot>;
     // (undocumented)
@@ -1912,32 +1913,6 @@ export type IntegratedContentTickResult = {
 } | {
     readonly status: "stopped";
 };
-
-// @public (undocumented)
-export interface IntegratedFallbackStore {
-    // (undocumented)
-    coverCurrent(): void;
-    currentState(): string | null;
-    // (undocumented)
-    dispose(): void;
-    // (undocumented)
-    installInitial(options: {
-        readonly state: string;
-        readonly signal: AbortSignal;
-    }): Promise<unknown>;
-    // (undocumented)
-    presentState(state: string, options: {
-        readonly signal: AbortSignal;
-        readonly cover?: boolean;
-    }): Promise<unknown>;
-    // (undocumented)
-    revealAnimated(): void;
-    settled(): Promise<void>;
-    // (undocumented)
-    validateAll(options: {
-        readonly signal: AbortSignal;
-    }): Promise<unknown>;
-}
 
 // @public (undocumented)
 export class IntegratedPlaybackInvariantError extends Error {
@@ -2475,9 +2450,6 @@ export const MIN_RESOURCE_RING_CAPACITY = 6;
 export const MOTION_POLICIES: readonly ["auto", "reduce", "full"];
 
 // @public (undocumented)
-export type MotionFailureStaticOrigin = Exclude<MotionStaticOrigin, "reduced-motion">;
-
-// @public (undocumented)
 export type MotionPolicy = (typeof MOTION_POLICIES)[number];
 
 // @public
@@ -2488,7 +2460,6 @@ export class MotionPolicyCoordinator {
     commitStatic(transition: Readonly<MotionPolicyTransition>): boolean;
     // (undocumented)
     dispose(): void;
-    failToStatic(origin: MotionFailureStaticOrigin): void;
     installAnimated(): void;
     installStatic(origin: MotionStaticOrigin): void;
     nextTransition(): Readonly<MotionPolicyTransition> | null;
@@ -2498,6 +2469,7 @@ export class MotionPolicyCoordinator {
     setPolicy(policy: MotionPolicy): Readonly<MotionPolicySnapshot>;
     // (undocumented)
     snapshot(): Readonly<MotionPolicySnapshot>;
+    suspendStatic(origin: Exclude<MotionStaticOrigin, "reduced-motion">): void;
 }
 
 // @public (undocumented)
@@ -2524,8 +2496,6 @@ export interface MotionPolicySnapshot {
     readonly policy: MotionPolicy;
     // (undocumented)
     readonly staticOrigin: MotionStaticOrigin | null;
-    // (undocumented)
-    readonly stickyFailure: boolean;
     // (undocumented)
     readonly transition: {
         readonly kind: MotionPolicyTransitionKind;
@@ -2923,11 +2893,6 @@ export function planSubmissionHorizon(input: SubmissionHorizonInput): Readonly<S
 
 // @public
 export function planUnresolvedSubmissionHorizon(input: UnresolvedSubmissionHorizonInput): Readonly<UnresolvedSubmissionHorizon>;
-
-// @public (undocumented)
-export class PlaybackFallbackError extends Error {
-    constructor(message?: string);
-}
 
 // @public
 export class PlayerResourceAccount {
@@ -3721,6 +3686,7 @@ export class RequestPromiseInvariantError extends Error {
 // @public
 export class RequestPromises {
     constructor(options?: RequestPromisesOptions);
+    bindTerminalPlaybackError(error: RuntimePlaybackError): void;
     // (undocumented)
     dispose(): void;
     // (undocumented)
@@ -4388,9 +4354,12 @@ export interface RuntimeFrameKey {
 }
 
 // @public (undocumented)
+export type RuntimeGraphEffect = MotionGraphEffect;
+
+// @public (undocumented)
 export interface RuntimeGraphTrace {
     // (undocumented)
-    readonly effects: readonly Readonly<MotionGraphEffect>[];
+    readonly effects: readonly Readonly<RuntimeGraphEffect>[];
     // (undocumented)
     readonly operation: MotionGraphOperation;
     // (undocumented)
@@ -4460,7 +4429,7 @@ export interface RuntimeMediaCursor {
 export type RuntimeMediaPresentation = {
     readonly kind: "static";
     readonly state: string;
-    readonly drawSource: "fallback";
+    readonly drawSource: "state";
 } | {
     readonly kind: "frame";
     readonly graphKind: Exclude<GraphPresentation["kind"], "static">;
@@ -4875,9 +4844,9 @@ export interface RuntimeTraceCounters {
     // (undocumented)
     readonly cleanedFrames: number;
     // (undocumented)
-    readonly fallbacks: number;
-    // (undocumented)
     readonly settledRequests: number;
+    // (undocumented)
+    readonly staticTransitions: number;
     // (undocumented)
     readonly underflows: number;
 }
@@ -4896,7 +4865,7 @@ export interface RuntimeTraceRecord {
     // (undocumented)
     readonly index: number;
     // (undocumented)
-    readonly kind: "operation" | "content-tick" | "readiness" | "fallback" | "cleanup";
+    readonly kind: "operation" | "content-tick" | "readiness" | "static-transition" | "cleanup";
     // (undocumented)
     readonly media: Readonly<RuntimeMediaPresentation> | null;
     // (undocumented)
@@ -5051,71 +5020,17 @@ export interface StartScheduledBodyInput {
     readonly state: string;
 }
 
-// @public
-export class StateFallbackStore implements IntegratedFallbackStore {
-    constructor(catalog: RuntimeAssetCatalog, options: Readonly<StateFallbackStoreOptions>);
-    // (undocumented)
-    coverCurrent(): void;
-    // (undocumented)
-    currentState(): string | null;
-    // (undocumented)
-    dispose(): void;
-    // (undocumented)
-    installInitial(options: Readonly<{
-        readonly state: string;
-        readonly signal: AbortSignal;
-    }>): Promise<void>;
-    // (undocumented)
-    presentState(state: string, options: Readonly<{
-        readonly signal: AbortSignal;
-        readonly cover?: boolean;
-    }>): Promise<void>;
-    // (undocumented)
-    revealAnimated(): void;
-    // (undocumented)
-    settled(): Promise<void>;
-    // (undocumented)
-    validateAll(options: Readonly<{
-        readonly signal: AbortSignal;
-    }>): Promise<void>;
-}
-
-// @public (undocumented)
-export interface StateFallbackStoreOptions {
-    // (undocumented)
-    readonly coverFallback: () => void;
-    // (undocumented)
-    readonly revealAnimated: () => void;
-}
-
 // @public (undocumented)
 export const STATIC_REASON_CLASSIFICATIONS: Readonly<Record<StaticReason, StaticReasonClassification>>;
 
-// @public (undocumented)
-export const STATIC_REASONS: readonly ["reduced-motion", "no-video-rendition", "worker-unavailable", "renderer-unavailable", "codec-unsupported", "resource-budget", "readiness-failed", "preparation-timeout", "animation-failure", "fallback-failure", "visibility-suspended", "decoder-queued"];
+// @public
+export const STATIC_REASONS: readonly ["reduced-motion", "visibility-suspended", "decoder-queued"];
 
 // @public (undocumented)
-export type StaticReason = (typeof STATIC_REASONS)[number];
+export type StaticReason = MotionGraphStaticReason;
 
 // @public (undocumented)
 export type StaticReasonClassification = "transient" | "sticky";
-
-// @public (undocumented)
-export interface StaticReasonSummaryInput {
-    // (undocumented)
-    readonly candidateFailures: readonly Readonly<RuntimeFailure>[];
-    // (undocumented)
-    readonly deadlineExpired: boolean;
-    // (undocumented)
-    readonly hasVideoRendition: boolean;
-    // (undocumented)
-    readonly phase: "preparation" | "recovery";
-    // (undocumented)
-    readonly rendererAvailable: boolean;
-    readonly staticReady: boolean;
-    // (undocumented)
-    readonly workerAvailable: boolean;
-}
 
 // @public (undocumented)
 export const STREAMING_TEXTURE_LAYER_COUNT = 3;
@@ -5187,9 +5102,6 @@ export interface SubmissionHorizonInput {
     readonly ringCapacity: number;
     readonly submitted: SourceBodyCursor;
 }
-
-// @public
-export function summarizeStaticReason(input: StaticReasonSummaryInput): StaticReason | null;
 
 // @public
 export function timestampForFrame(virtualFrame: number | bigint, rate: RationalFrameRate): number;

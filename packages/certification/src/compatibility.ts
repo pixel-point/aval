@@ -1,8 +1,8 @@
 export const PUBLIC_RELEASE_PACKAGES = Object.freeze([
   "@pixel-point/aval-graph",
   "@pixel-point/aval-format",
-  "@pixel-point/aval-player-web",
   "@pixel-point/aval-element",
+  "@pixel-point/aval-player-web",
   "@pixel-point/aval-compiler"
 ] as const);
 
@@ -10,7 +10,10 @@ export const PUBLIC_RELEASE_DEPENDENCIES = Object.freeze({
   "@pixel-point/aval-graph": Object.freeze([]),
   "@pixel-point/aval-format": Object.freeze(["@pixel-point/aval-graph"]),
   "@pixel-point/aval-player-web": Object.freeze(["@pixel-point/aval-graph", "@pixel-point/aval-format"]),
-  "@pixel-point/aval-element": Object.freeze(["@pixel-point/aval-player-web"]),
+  "@pixel-point/aval-element": Object.freeze([
+    "@pixel-point/aval-graph",
+    "@pixel-point/aval-format"
+  ]),
   "@pixel-point/aval-compiler": Object.freeze(["@pixel-point/aval-graph", "@pixel-point/aval-format", "@pixel-point/aval-player-web", "@pixel-point/aval-element"])
 } as const satisfies Readonly<Record<(typeof PUBLIC_RELEASE_PACKAGES)[number], readonly (typeof PUBLIC_RELEASE_PACKAGES)[number][]>>);
 

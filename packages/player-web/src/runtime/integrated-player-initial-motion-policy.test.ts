@@ -21,7 +21,7 @@ describe("IntegratedPlayer initial motion-policy supersession", () => {
     const reducing = harness.player.setMotionPolicy("reduce").finally(() => {
       policySettled = true;
     });
-    await waitForCall(harness.fallbackStore.calls, "present:idle");
+    await waitForCall(harness.stateStore.calls, "present:idle");
     expect(policySettled).toBe(false);
     expect(harness.factory.activeAttempts).toBe(0);
 
@@ -53,7 +53,7 @@ describe("IntegratedPlayer initial motion-policy supersession", () => {
     await waitForCall(harness.factory.calls, "prepare:opaque-high");
 
     const reducing = harness.player.setHostReducedMotion(true);
-    await waitForCall(harness.fallbackStore.calls, "present:idle");
+    await waitForCall(harness.stateStore.calls, "present:idle");
     staticGate.resolve(undefined);
 
     await expect(preparing).resolves.toMatchObject({
@@ -78,7 +78,7 @@ describe("IntegratedPlayer initial motion-policy supersession", () => {
       behaviors: [{ kind: "gated", gate: candidateGate }]
     });
     const preparing = harness.player.prepare();
-    await waitForCall(harness.fallbackStore.calls, "present:idle");
+    await waitForCall(harness.stateStore.calls, "present:idle");
 
     let policySettled = false;
     const restoring = harness.player.setMotionPolicy("full").finally(() => {
@@ -149,7 +149,7 @@ describe("IntegratedPlayer initial motion-policy supersession", () => {
       staticBehavior: { kind: "gate-first-present", gate: staleGate }
     });
     const preparing = harness.player.prepare();
-    await waitForCall(harness.fallbackStore.calls, "present:idle");
+    await waitForCall(harness.stateStore.calls, "present:idle");
 
     const restoring = harness.player.setMotionPolicy("full");
     const reducing = harness.player.setMotionPolicy("reduce");
@@ -163,7 +163,7 @@ describe("IntegratedPlayer initial motion-policy supersession", () => {
       expect.objectContaining({ desiredMode: "reduce", actualMode: "static" })
     ]);
     expect(harness.factory.calls).toEqual([]);
-    expect(harness.fallbackStore.calls.filter((call) =>
+    expect(harness.stateStore.calls.filter((call) =>
       call === "present:idle"
     )).toHaveLength(2);
     staleGate.resolve(undefined);

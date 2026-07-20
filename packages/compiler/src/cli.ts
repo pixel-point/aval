@@ -251,7 +251,7 @@ export const HELP_TEXT = `Usage:
   avl dev <project.json> --out <bundle-directory> [--media-timeout-ms <integer>] [--port <0-65535>] [--open] [--force] [--json]
 
 Direct encoding options:
-  --crf <integer>                constant quality (H.264/H.265 0..51; VP9/AV1 0..63)
+  --crf <integer>                constant quality (H.264 1..51; H.265 0..51; VP9/AV1 0..63)
   --preset <name>                H.264/H.265 preset, ultrafast through placebo
   --deadline <mode>              VP9 best, good, or realtime deadline
   --cpu-used <integer>           VP9 -8..8 or AV1 0..8 speed/quality control

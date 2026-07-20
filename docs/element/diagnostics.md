@@ -1,7 +1,7 @@
 # Diagnostics and DOM events
 
 Listen for `readinesschange`, `requestedstatechange`, `visualstatechange`,
-`transitionstart`, `transitionend`, `underflow`, `fallback`, and `error`.
+`transitionstart`, `transitionend`, `underflow`, and `error`.
 Events are noncancelable and contain an immutable positive source generation.
 All events except `error` bubble and are composed. Register `error` directly on
 the element so a motion load failure cannot become a page-wide error. Properties
@@ -9,22 +9,31 @@ are staged before dispatch.
 
 ```js
 motion.addEventListener("error", ({ detail }) => {
-  showMessage(detail.failure.code, detail.fatal);
+  if (detail.fatal) showMessage(detail.failure.code);
 });
 const snapshot = motion.getDiagnostics({ trace: true });
 ```
 
 Diagnostics are bounded observations and do not fetch, retry, prepare, reclaim,
 or advance the graph. Traces cap at 512 records. Snapshots omit URLs, paths,
-headers, ETags, integrity values, response text, fallback HTML, raw errors,
+headers, ETags, integrity values, response text, consumer HTML, raw errors,
 raw byte payloads, frames, workers, decoders, GL objects, and resource
 capabilities. Numeric verified/resident byte counts remain available for
 resource diagnosis.
 
-A `staticReady` prepare result means the host fallback remains usable. Inspect
-`staticReason` to distinguish reduced motion, unsupported animation, resource
-pressure, and failed readiness. Expected supersession/disconnect/disposal
-aborts are quiet.
+A `staticReady` prepare result is limited to nonfatal reduced-motion,
+visibility-suspension, or decoder-admission policy. Playback failures instead
+set readiness to `error`, reject with `AvalPlaybackError`, and remain in
+`lastFailure` until a newer source generation starts. Expected supersession,
+disconnect, and disposal aborts are quiet.
+
+`runtime.decoderDiagnostics` contains the latest terminal record for each
+`(sourceIndex, lane)` pair. The element retains two decoder lanes for up to 128
+authored sources (256 records maximum), so rejected-source evidence can coexist
+with diagnostics from the selected source. Records preserve sanitized
+phase/code/exception and first-frame metadata without asset bytes, URLs, stack
+traces, decoder configs, or frame objects. This bounded failure evidence is
+present even when verbose trace capture is disabled.
 
 `cleanup` is either `null` or the immutable receipt for the most recently
 retired source and identifies both element and source generations. A receipt is

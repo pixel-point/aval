@@ -36,6 +36,8 @@ body { margin: 0; min-width: 320px; }
 .certification-stage { min-height: 220px; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: .75rem; align-items: start; }
 
 .certification-motion { display: block; width: min(100%, 220px); aspect-ratio: 5 / 3; border: 1px solid #46506a; background: #080a0e; }
+.certification-motion-unavailable { display: grid; width: min(100%, 220px); aspect-ratio: 5 / 3; place-items: center; border: 1px solid #46506a; color: #aab2c5; background: #080a0e; }
+.certification-motion-unavailable[hidden] { display: none; }
 
 .certification-controls { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0; }
 

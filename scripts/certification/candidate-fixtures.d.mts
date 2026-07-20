@@ -16,4 +16,6 @@ export function loadCandidateFixtureAuthority(
   digests: ReadonlySet<string>;
   models: ReadonlyMap<string, RuntimeFixtureModel>;
   displayPatterns: ReadonlyMap<string, DisplayPatternDefinition>;
+  fatalBoundaryFixtureDigests: ReadonlySet<string>;
+  harnessDigests: ReadonlySet<string>;
 }>>;

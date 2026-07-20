@@ -42,7 +42,7 @@
 - `packages/player-web/src/runtime/model.ts`, `integrated-player-contracts.ts`, `integrated-player.ts`, `integrated-player-static-preparation.ts`, `integrated-player-recovery.ts`, `integrated-animated-preparation.ts`: make fallback state-only and remove the static surface-store dependency.
 - `packages/player-web/src/runtime/browser-presentation-planes.ts`, `browser-presentation-planes-support.ts`, `browser-presentation-options.ts`, `browser-canvas-backing-resources.ts`, `player-canvas-backing-host.ts`: use one animated canvas and reveal it only after a decoded draw.
 - Delete poster-only runtime modules and their dedicated tests: `browser-static-canvas-plane*`, `static-surfaces*`, `static-surface-cache*`, `static-surface-store-resources.ts`, `static-resource-plan.ts`, `strict-static-decoder.ts`, `leased-static-png-decoder.ts`, and `runtime-static-profile*`.
-- `packages/element/src/shadow-layers.ts`, `browser-runtime-factory.ts`, `browser-runtime-player.ts`, `element-runtime-effects.ts`: remove the internal static canvas while retaining the external fallback slot.
+- Public element runtime: remove the internal static canvas while retaining the external fallback slot.
 
 ### Examples, docs, fixtures, and API reports
 

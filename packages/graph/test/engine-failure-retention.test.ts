@@ -21,7 +21,7 @@ describe("MotionGraphEngine failed presentation retention", () => {
     const committed = engine.tick({ contentOrdinal: 0n });
     expect(committed.snapshot.visualState).toBe("hover");
 
-    const failed = engine.failStatic("recovery failed", {
+    const failed = engine.failPlayback("recovery failed", {
       retainedVisualState: "idle"
     });
     expect(failed).toMatchObject({
@@ -42,12 +42,12 @@ describe("MotionGraphEngine failed presentation retention", () => {
     expect(() => engine.resumeAnimated()).toThrowError(/requires phase static/);
     expect(engine.snapshot()).toEqual(failedSnapshot);
     expect(engine.getTrace()).toEqual(failedTrace);
-    expect(() => engine.failStatic("again", {
+    expect(() => engine.failPlayback("again", {
       retainedVisualState: "missing"
     })).toThrow("retained visual state");
   });
 
-  it("recovers from the pixels actually retained after a superseded failed cut", () => {
+  it("retains the pixels actually drawn after a superseded animation failure", () => {
     const engine = new MotionGraphEngine();
     engine.install({
       initialState: "idle",
@@ -63,50 +63,40 @@ describe("MotionGraphEngine failed presentation retention", () => {
     const latest = engine.request("idle");
     expect(latest.accepted).toBe(true);
 
-    const recovered = engine.recoverStatic("animation-failure", {
+    const failed = engine.failPlayback("animation-failure", {
       retainedVisualState: "idle"
     });
 
-    expect(recovered.presentation).toMatchObject({
+    expect(failed.presentation).toMatchObject({
       kind: "static",
       state: "idle"
     });
-    expect(recovered.snapshot).toMatchObject({
-      readiness: "static",
+    expect(failed.snapshot).toMatchObject({
+      readiness: "error",
+      phase: "error",
       requestedState: "idle",
       visualState: "idle",
-      isTransitioning: false
+      isTransitioning: false,
+      pendingRequestCount: 0
     });
-    expect(recovered.effects.map(({ type }) => type)).toEqual([
-      "readinesschange",
-      "fallback",
-      "settle"
-    ]);
-
-    const resumed = engine.resumeAnimated();
-    expect(resumed).toMatchObject({
-      operation: "resume-animated",
-      presentation: {
-        kind: "body",
-        state: "idle",
-        unitId: "idle-body",
-        frameIndex: 0
+    expect(failed.effects).toEqual([
+      {
+        type: "readinesschange",
+        from: "animated",
+        to: "error",
+        reason: "animation-failure"
       },
-      snapshot: {
-        readiness: "animated",
-        phase: "stable",
-        requestedState: "idle",
-        visualState: "idle",
-        contentOrdinal: recovered.snapshot.contentOrdinal,
-        inputSequence: recovered.snapshot.inputSequence,
-        inputsSinceTick: recovered.snapshot.inputsSinceTick
+      {
+        type: "settle",
+        requestIds: [latest.requestId],
+        outcome: {
+          type: "reject",
+          timing: "microtask",
+          error: "PlaybackError"
+        }
       }
-    });
-    expect(resumed.effects).toEqual([{
-      type: "readinesschange",
-      from: "static",
-      to: "animated"
-    }]);
+    ]);
+    expect(() => engine.resumeAnimated()).toThrowError(/requires phase static/);
   });
 
   it("does not resume or clear a disposed terminal graph", () => {

@@ -22,10 +22,11 @@
   "license": "MIT",
   "engines": { "node": ">=22.12.0" },
   "dependencies": {
-    "@pixel-point/aval-player-web": "1.0.0"
+    "@pixel-point/aval-format": "1.0.0",
+    "@pixel-point/aval-graph": "1.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.release.json",
+    "build": "node ../../scripts/release/build-element-package.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   }
 }

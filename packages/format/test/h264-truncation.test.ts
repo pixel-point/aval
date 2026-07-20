@@ -23,70 +23,101 @@ interface ErrorOutcome {
   readonly offset?: number;
 }
 
-describe("H264 hostile syntax boundaries", () => {
-  it("rejects every physical byte truncation of AUD, SPS, PPS, and IDR NALs", () => {
-    const components = Object.freeze({
-      aud: makeAud(0),
-      sps: makeSps(),
-      pps: makePps(),
-      idr: makeSlice({
-        idr: true,
-        frameNum: 0,
-        sliceType: "I",
-        picOrderCountType: 0,
-        picOrderCntLsb: 0
-      })
-    });
+const PARAMETER_SET_CASES = Object.freeze([
+  Object.freeze({
+    profile: "High",
+    sps: makeSps(),
+    pps: makePps()
+  }),
+  Object.freeze({
+    profile: "Constrained Baseline",
+    sps: makeSps({
+      profileIdc: 66,
+      maxNumRefFrames: 1,
+      maxNumReorderFrames: 0,
+      maxDecFrameBuffering: 1
+    }),
+    pps: makePps({ profileIdc: 66 })
+  })
+]);
 
-    for (const [target, bytes] of Object.entries(components)) {
-      for (let byteLength = 0; byteLength < bytes.byteLength; byteLength += 1) {
-        const truncated = bytes.slice(0, byteLength);
-        expectStableProfileInvalid(
-          () => inspectH264AnnexBRendition(oneFrameInput({
-            aud: target === "aud" ? truncated : components.aud,
-            sps: target === "sps" ? truncated : components.sps,
-            pps: target === "pps" ? truncated : components.pps,
-            idr: target === "idr" ? truncated : components.idr
-          })),
-          `${target} byte ${String(byteLength)}`
-        );
+describe("H264 hostile syntax boundaries", () => {
+  it.each(PARAMETER_SET_CASES)(
+    "rejects every physical byte truncation in the $profile grammar",
+    ({ profile, sps, pps }) => {
+      const components = Object.freeze({
+        aud: makeAud(0),
+        sps,
+        pps,
+        idr: makeSlice({
+          idr: true,
+          frameNum: 0,
+          sliceType: "I",
+          picOrderCountType: 0,
+          picOrderCntLsb: 0
+        })
+      });
+
+      for (const [target, bytes] of Object.entries(components)) {
+        for (let byteLength = 0; byteLength < bytes.byteLength; byteLength += 1) {
+          const truncated = bytes.slice(0, byteLength);
+          expectStableProfileInvalid(
+            () => inspectH264AnnexBRendition(oneFrameInput({
+              aud: target === "aud" ? truncated : components.aud,
+              sps: target === "sps" ? truncated : components.sps,
+              pps: target === "pps" ? truncated : components.pps,
+              idr: target === "idr" ? truncated : components.idr
+            })),
+            `${profile} ${target} byte ${String(byteLength)}`
+          );
+        }
       }
     }
-  });
+  );
 
-  it("rejects SPS syntax truncated at every bit before its trailing stop bit", () => {
-    const original = onlyNal(makeSps(), "original.sps");
-    const stopBit = trailingStopBitOffset(original.rbsp);
+  it.each(PARAMETER_SET_CASES)(
+    "rejects $profile SPS syntax truncated before its trailing stop bit",
+    ({ profile, sps }) => {
+      const original = onlyNal(sps, `${profile}.original.sps`);
+      const stopBit = trailingStopBitOffset(original.rbsp);
 
-    for (let bitOffset = 0; bitOffset < stopBit; bitOffset += 1) {
-      const candidate = withRbsp(
-        original,
-        truncateRbspAt(original.rbsp, bitOffset)
-      );
-      expectStableProfileInvalid(
-        () => parseSps(candidate, `sps[${String(bitOffset)}]`),
-        `SPS bit ${String(bitOffset)}`
-      );
+      for (let bitOffset = 0; bitOffset < stopBit; bitOffset += 1) {
+        const candidate = withRbsp(
+          original,
+          truncateRbspAt(original.rbsp, bitOffset)
+        );
+        expectStableProfileInvalid(
+          () => parseSps(candidate, `sps[${String(bitOffset)}]`),
+          `${profile} SPS bit ${String(bitOffset)}`
+        );
+      }
+      expect(() => parseSps(original, `${profile}.original.sps`)).not.toThrow();
     }
-    expect(() => parseSps(original, "original.sps")).not.toThrow();
-  });
+  );
 
-  it("rejects PPS syntax truncated at every bit before its trailing stop bit", () => {
-    const original = onlyNal(makePps(), "original.pps");
-    const stopBit = trailingStopBitOffset(original.rbsp);
+  it.each(PARAMETER_SET_CASES)(
+    "rejects $profile PPS syntax truncated before its trailing stop bit",
+    ({ profile, sps: spsBytes, pps }) => {
+      const original = onlyNal(pps, `${profile}.original.pps`);
+      const sps = parseSps(
+        onlyNal(spsBytes, `${profile}.original.sps`),
+        `${profile}.original.sps`
+      );
+      const stopBit = trailingStopBitOffset(original.rbsp);
 
-    for (let bitOffset = 0; bitOffset < stopBit; bitOffset += 1) {
-      const candidate = withRbsp(
-        original,
-        truncateRbspAt(original.rbsp, bitOffset)
-      );
-      expectStableProfileInvalid(
-        () => parsePps(candidate, `pps[${String(bitOffset)}]`),
-        `PPS bit ${String(bitOffset)}`
-      );
+      for (let bitOffset = 0; bitOffset < stopBit; bitOffset += 1) {
+        const candidate = withRbsp(
+          original,
+          truncateRbspAt(original.rbsp, bitOffset)
+        );
+        expectStableProfileInvalid(
+          () => parsePps(candidate, `pps[${String(bitOffset)}]`, sps),
+          `${profile} PPS bit ${String(bitOffset)}`
+        );
+      }
+      expect(() => parsePps(original, `${profile}.original.pps`, sps)).not.toThrow();
     }
-    expect(() => parsePps(original, "original.pps")).not.toThrow();
-  });
+  );
 
   it("keeps Annex B prefix, NAL-header, and escaped-RBSP failures deterministic", () => {
     const vectors = [

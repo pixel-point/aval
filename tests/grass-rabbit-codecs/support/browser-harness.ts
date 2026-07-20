@@ -164,6 +164,25 @@ export async function supportSnapshot(
   return snapshot;
 }
 
+export async function activateFirstInteractiveCodec(
+  page: Page,
+  support: Readonly<Record<Codec, SupportState>>
+): Promise<Codec | undefined> {
+  for (const codec of CODECS) {
+    if (support[codec] !== "supported") continue;
+    await codecTab(page, codec).click();
+    await codecPanel(page, codec).scrollIntoViewIfNeeded();
+    await page.evaluate(async (requested) => {
+      await window.grassRabbitCodecs.activate(requested);
+    }, codec);
+    const snapshot = await activePlayerSnapshot(page);
+    if (snapshot.readiness === "interactiveReady" && snapshot.lastFailure === null) {
+      return codec;
+    }
+  }
+  return undefined;
+}
+
 export async function selectedCodec(page: Page): Promise<Codec> {
   const selected = page.locator('[role="tab"][aria-selected="true"]');
   await expect(selected).toHaveCount(1);
@@ -245,6 +264,14 @@ export async function installStaticPreparationOutcome(
         })
       })
     });
+    Object.defineProperty(prototype, "readiness", {
+      configurable: true,
+      get: () => "staticReady"
+    });
+    Object.defineProperty(prototype, "staticReason", {
+      configurable: true,
+      get: () => reason
+    });
     if (failure === null) return;
     Object.defineProperty(prototype, "getDiagnostics", {
       configurable: true,
@@ -256,6 +283,34 @@ export async function installStaticPreparationOutcome(
       }
     });
   }, input);
+}
+
+export async function installRetainedNonfatalDiagnostic(
+  page: Page,
+  failure: Readonly<{
+    code: string;
+    message: string;
+    operation: string;
+  }>
+): Promise<void> {
+  await page.evaluate(async (retainedFailure) => {
+    await customElements.whenDefined("aval-player");
+    const constructor = customElements.get("aval-player");
+    if (constructor === undefined) throw new Error("aval-player is undefined");
+    const prototype = constructor.prototype;
+    const originalDiagnostics = prototype.getDiagnostics as (
+      options?: Readonly<{ trace?: boolean }>
+    ) => Readonly<Record<string, unknown>>;
+    Object.defineProperty(prototype, "getDiagnostics", {
+      configurable: true,
+      value(this: HTMLElement, options?: Readonly<{ trace?: boolean }>) {
+        return Object.freeze({
+          ...originalDiagnostics.call(this, options),
+          lastFailure: retainedFailure
+        });
+      }
+    });
+  }, failure);
 }
 
 export function expectNoBrowserFailures(failures: BrowserFailures): void {
@@ -351,6 +406,27 @@ export async function expectActiveCodecPlayer(
       '[role="tabpanel"][data-codec]'
     )?.dataset.codec === requested;
   }, codec)).toBe(true);
+}
+
+export async function activePlayerSources(page: Page): Promise<Codec[]> {
+  const codecStrings = await page.evaluate(() => {
+    const player = window.grassRabbitCodecs.activePlayer;
+    if (player === null) return [];
+    return [...player.querySelectorAll("source")].map((source) => {
+      const match = /^application\/vnd\.aval; codecs="([^"]+)"$/u.exec(
+        source.type
+      );
+      if (match === null) throw new Error("active player source type is invalid");
+      return match[1]!;
+    });
+  });
+  return codecStrings.map((codecString) => {
+    const codec = CODECS.find((candidate) =>
+      CODEC_PATTERNS[candidate].test(codecString)
+    );
+    if (codec === undefined) throw new Error("active player codec is unknown");
+    return codec;
+  });
 }
 
 export async function activePlayerSnapshot(page: Page): Promise<Readonly<{

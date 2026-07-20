@@ -5,9 +5,12 @@ import {
   writeCanonicalAsset,
   type Bitrate,
   type CanonicalAssetInput,
-  type CompiledManifestInput,
   type EncodedChunkInput,
-  type ProductionRendition,
+  type OpaqueCompiledManifestInputV1_1,
+  type OpaqueProductionRenditionV1_1,
+  type PackedAlphaCompiledManifestInputV1_1,
+  type PackedAlphaProductionRenditionV1_1,
+  type PackedAlphaWitnessV1,
   type UnitInput,
   type VideoBitDepth,
   type VideoLayout,
@@ -46,6 +49,7 @@ export interface PreparedEncodingRendition {
   readonly geometry: Readonly<VideoRenditionGeometry>;
   readonly bitrate: Readonly<Bitrate>;
   readonly units: readonly Readonly<PreparedEncodingUnit>[];
+  readonly outputQualification?: Readonly<PackedAlphaWitnessV1>;
 }
 
 export interface CompileProjectEncodingInput {
@@ -58,14 +62,18 @@ export interface CompileProjectEncodingInput {
 /** A validated, byte-complete one-codec artifact before bundle publication. */
 export interface CompiledProjectEncoding {
   readonly codec: NormalizedVideoEncoding["codec"];
-  readonly manifest: CompiledManifestInput;
+  readonly manifest: CompiledProjectManifest;
   readonly assetBytes: Uint8Array;
   readonly bytes: number;
   readonly sha256: string;
 }
 
+export type CompiledProjectManifest =
+  | OpaqueCompiledManifestInputV1_1
+  | PackedAlphaCompiledManifestInputV1_1;
+
 /**
- * Assemble exactly one codec-major project encoding into one wire-1.0 asset.
+ * Assemble exactly one codec-major project encoding into one qualified 1.1 asset.
  * Codec adapters must finish syntax inspection before crossing this boundary.
  */
 export function compileProjectEncoding(
@@ -107,18 +115,12 @@ export function compileProjectEncoding(
   const units = input.project.units.map((unit) =>
     lowerUnit(unit, Object.freeze(digestsByUnit.get(unit.id) ?? []))
   );
-  const renditions = input.renditions.map((rendition) =>
-    lowerRendition(rendition, input.layout)
-  );
-  const manifest: CompiledManifestInput = Object.freeze({
-    formatVersion: "1.0",
+  const manifestBase = Object.freeze({
     generator: ffmpegGenerator(),
     codec: input.encoding.codec,
     bitstream: VIDEO_BITSTREAM_BY_CODEC[input.encoding.codec],
-    layout: input.layout,
     canvas: input.project.canvas,
     frameRate: input.project.frameRate,
-    renditions: Object.freeze(renditions),
     units: Object.freeze(units),
     initialState: input.project.initialState,
     states: input.project.states,
@@ -127,10 +129,24 @@ export function compileProjectEncoding(
     readiness: deriveReadiness(input.project),
     limits: estimateRuntimeLimits(
       input.project,
+      input.encoding.codec,
       chunks,
       input.renditions.map(({ geometry }) => geometry)
     )
   });
+  const manifest: CompiledProjectManifest = input.layout === "opaque"
+    ? Object.freeze({
+        ...manifestBase,
+        formatVersion: "1.1" as const,
+        layout: "opaque" as const,
+        renditions: Object.freeze(input.renditions.map(lowerOpaqueRendition))
+      })
+    : Object.freeze({
+        ...manifestBase,
+        formatVersion: "1.1" as const,
+        layout: "packed-alpha" as const,
+        renditions: Object.freeze(input.renditions.map(lowerPackedRendition))
+      });
   const assetInput: CanonicalAssetInput = Object.freeze({
     manifest,
     chunks: Object.freeze(chunks)
@@ -199,6 +215,12 @@ function validateRenditionSet(
     if (!Array.isArray(actual.units)) {
       invalid(`Prepared rendition ${actual.id} has no unit set`);
     }
+    if (layout === "opaque" && actual.outputQualification !== undefined) {
+      invalid(`Prepared opaque rendition ${actual.id} cannot carry output qualification`);
+    }
+    if (layout === "packed-alpha" && actual.outputQualification === undefined) {
+      invalid(`Prepared packed-alpha rendition ${actual.id} is missing output qualification`);
+    }
   }
 }
 
@@ -247,28 +269,43 @@ function validatePreparedUnit(
   }
 }
 
-function lowerRendition(
-  rendition: Readonly<PreparedEncodingRendition>,
-  layout: VideoLayout
-): ProductionRendition {
-  const alphaLayout = layout === "opaque"
-    ? Object.freeze({
-        type: "opaque" as const,
-        colorRect: rendition.geometry.visibleColorRect
-      })
-    : Object.freeze({
-        type: "stacked" as const,
-        colorRect: rendition.geometry.visibleColorRect,
-        alphaRect: requireAlphaRect(rendition)
-      });
+function lowerOpaqueRendition(
+  rendition: Readonly<PreparedEncodingRendition>
+): OpaqueProductionRenditionV1_1 {
   return Object.freeze({
     id: rendition.id,
     codec: rendition.codec,
     bitDepth: rendition.bitDepth,
     codedWidth: rendition.geometry.codedWidth,
     codedHeight: rendition.geometry.codedHeight,
-    alphaLayout,
+    alphaLayout: Object.freeze({
+      type: "opaque" as const,
+      colorRect: rendition.geometry.visibleColorRect
+    }),
     bitrate: rendition.bitrate
+  });
+}
+
+function lowerPackedRendition(
+  rendition: Readonly<PreparedEncodingRendition>
+): PackedAlphaProductionRenditionV1_1 {
+  const outputQualification = rendition.outputQualification;
+  if (outputQualification === undefined) {
+    invalid(`Prepared rendition ${rendition.id} is missing output qualification`);
+  }
+  return Object.freeze({
+    id: rendition.id,
+    codec: rendition.codec,
+    bitDepth: rendition.bitDepth,
+    codedWidth: rendition.geometry.codedWidth,
+    codedHeight: rendition.geometry.codedHeight,
+    alphaLayout: Object.freeze({
+      type: "stacked" as const,
+      colorRect: rendition.geometry.visibleColorRect,
+      alphaRect: requireAlphaRect(rendition)
+    }),
+    bitrate: rendition.bitrate,
+    outputQualification
   });
 }
 

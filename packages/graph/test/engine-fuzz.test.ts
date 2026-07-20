@@ -82,7 +82,7 @@ function replayTape(tape: readonly TapeOperation[], seed: number): Replay {
   results.push(animated);
   previous = animated.snapshot;
 
-  const reduced = engine.recoverStatic("seeded-resume-model");
+  const reduced = engine.recoverStatic("visibility-suspended");
   assertResultProperties(reduced, previous, seed, -0.75);
   results.push(reduced);
   previous = reduced.snapshot;

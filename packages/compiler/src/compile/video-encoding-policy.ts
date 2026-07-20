@@ -116,7 +116,7 @@ function cloneH264Encoding(
   return Object.freeze({
     codec: literal(input.codec, "h264", `${path}.codec`),
     preset: oneOf(input.preset, H264_ENCODER_PRESETS, `${path}.preset`),
-    renditions: cloneRenditions(input.renditions, path, canvas, 51)
+    renditions: cloneRenditions(input.renditions, path, canvas, 51, 1)
   });
 }
 
@@ -188,7 +188,8 @@ function cloneRenditions(
   value: unknown,
   encodingPath: string,
   canvas: Readonly<Canvas> | undefined,
-  maximumCrf: number
+  maximumCrf: number,
+  minimumCrf = 0
 ): readonly NormalizedSourceRenditionTarget[] {
   const inputs = boundedArray(
     value,
@@ -204,7 +205,7 @@ function cloneRenditions(
     const id = identifier(input.id, `${path}.id`);
     if (seen.has(id)) invalid(`${path}.id`, `duplicates id ${id}`);
     seen.add(id);
-    const crf = integer(input.crf, `${path}.crf`, 0, maximumCrf);
+    const crf = integer(input.crf, `${path}.crf`, minimumCrf, maximumCrf);
     if (canvas === undefined) {
       return Object.freeze({
         id,

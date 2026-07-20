@@ -1,3 +1,7 @@
+import {
+  PACKED_ALPHA_WITNESS_MAX_INTERVAL_WIDTH,
+  PACKED_ALPHA_WITNESS_MAX_SAMPLES
+} from "./constants.js";
 import { PACKED_ALPHA_GUTTER } from "./video/geometry.js";
 import { isVideoCodecString } from "./video/codec-string.js";
 import {
@@ -18,6 +22,8 @@ import type {
   Bitrate,
   Canvas,
   FormatBudgets,
+  FormatVersion,
+  PackedAlphaWitnessV1,
   ProductionRendition,
   Rational,
   Rect,
@@ -66,6 +72,7 @@ export function cloneRenditions(
   canvas: Canvas,
   codecFamily: VideoCodec,
   layout: VideoLayout,
+  formatVersion: FormatVersion,
   budgets: FormatBudgets,
   path: string
 ): readonly ProductionRendition[] {
@@ -77,6 +84,7 @@ export function cloneRenditions(
       canvas,
       codecFamily,
       layout,
+      formatVersion,
       `${path}[${String(index)}]`
     );
     if (seen.has(rendition.id)) {
@@ -93,14 +101,24 @@ function cloneRendition(
   canvas: Canvas,
   codecFamily: VideoCodec,
   layout: VideoLayout,
+  formatVersion: FormatVersion,
   path: string
 ): ProductionRendition {
   const input = record(value, path);
-  exactKeys(
-    input,
-    ["id", "codec", "bitDepth", "codedWidth", "codedHeight", "alphaLayout", "bitrate"],
-    path
-  );
+  const commonKeys = [
+    "id",
+    "codec",
+    "bitDepth",
+    "codedWidth",
+    "codedHeight",
+    "alphaLayout",
+    "bitrate"
+  ] as const;
+  if (formatVersion === "1.1" && layout === "packed-alpha") {
+    exactKeys(input, [...commonKeys, "outputQualification"], path);
+  } else {
+    exactKeys(input, commonKeys, path);
+  }
   const id = identifier(input.id, `${path}.id`);
   const bitDepthValue = integerInRange(input.bitDepth, `${path}.bitDepth`, 8, 10);
   if (bitDepthValue !== 8 && bitDepthValue !== 10) {
@@ -127,6 +145,26 @@ function cloneRendition(
     `${path}.alphaLayout`
   );
   const bitrate = cloneBitrate(input.bitrate, `${path}.bitrate`);
+  if (formatVersion === "1.1" && layout === "packed-alpha") {
+    if (alphaLayout.type !== "stacked") {
+      invalid(`${path}.alphaLayout`, "must describe a packed-alpha rendition");
+    }
+    const outputQualification = clonePackedAlphaWitness(
+      input.outputQualification,
+      alphaLayout,
+      `${path}.outputQualification`
+    );
+    return Object.freeze({
+      id,
+      codec: input.codec,
+      bitDepth,
+      codedWidth,
+      codedHeight,
+      alphaLayout,
+      bitrate,
+      outputQualification
+    });
+  }
   return Object.freeze({
     id,
     codec: input.codec,
@@ -135,6 +173,84 @@ function cloneRendition(
     codedHeight,
     alphaLayout,
     bitrate
+  });
+}
+
+function clonePackedAlphaWitness(
+  value: unknown,
+  alphaLayout: Extract<AlphaLayout, { readonly type: "stacked" }>,
+  path: string
+): PackedAlphaWitnessV1 {
+  const input = record(value, path);
+  exactKeys(input, ["kind", "unit", "frame", "samples"], path);
+  literal(input.kind, "packed-alpha-v1", `${path}.kind`);
+  const unit = identifier(input.unit, `${path}.unit`);
+  const frame = nonNegativeInteger(input.frame, `${path}.frame`);
+  const sampleInputs = boundedArray(
+    input.samples,
+    `${path}.samples`,
+    1,
+    PACKED_ALPHA_WITNESS_MAX_SAMPLES
+  );
+  const coordinates = new Set<string>();
+  const samples = sampleInputs.map((value, index) => {
+    const samplePath = `${path}.samples[${String(index)}]`;
+    const sample = record(value, samplePath);
+    exactKeys(sample, ["x", "y", "expectedRange"], samplePath);
+    const x = integerInRange(
+      sample.x,
+      `${samplePath}.x`,
+      0,
+      alphaLayout.alphaRect[2] - 1
+    );
+    const y = integerInRange(
+      sample.y,
+      `${samplePath}.y`,
+      0,
+      alphaLayout.alphaRect[3] - 1
+    );
+    const coordinate = `${String(x)}\0${String(y)}`;
+    if (coordinates.has(coordinate)) {
+      invalid(samplePath, "duplicates an earlier sample coordinate");
+    }
+    coordinates.add(coordinate);
+    const rangeInput = tuple(
+      sample.expectedRange,
+      2,
+      `${samplePath}.expectedRange`
+    );
+    const minimum = integerInRange(
+      rangeInput[0],
+      `${samplePath}.expectedRange[0]`,
+      0,
+      255
+    );
+    const maximum = integerInRange(
+      rangeInput[1],
+      `${samplePath}.expectedRange[1]`,
+      0,
+      255
+    );
+    if (minimum > maximum) {
+      invalid(`${samplePath}.expectedRange`, "minimum must not exceed maximum");
+    }
+    if (maximum - minimum > PACKED_ALPHA_WITNESS_MAX_INTERVAL_WIDTH) {
+      invalid(
+        `${samplePath}.expectedRange`,
+        `width must not exceed ${String(PACKED_ALPHA_WITNESS_MAX_INTERVAL_WIDTH)}`
+      );
+    }
+    const expectedRange = Object.freeze([minimum, maximum]) as readonly [
+      number,
+      number
+    ];
+    return Object.freeze({ x, y, expectedRange });
+  });
+  return Object.freeze({
+    kind: "packed-alpha-v1",
+    unit,
+    frame,
+    samples: Object.freeze(samples)
   });
 }
 

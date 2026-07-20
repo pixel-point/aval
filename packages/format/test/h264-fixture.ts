@@ -82,17 +82,22 @@ export interface SpsFixtureOptions {
 }
 
 export function makeSps(options: SpsFixtureOptions = {}): Uint8Array {
+  const profileIdc = options.profileIdc ?? 100;
+  const highProfileSyntax = profileIdc !== 66;
   const writer = new BitWriter()
-    .bits(options.profileIdc ?? 100, 8)
-    .bits(options.compatibility ?? 0, 8)
+    .bits(profileIdc, 8)
+    .bits(options.compatibility ?? (profileIdc === 66 ? 0xe0 : 0), 8)
     .bits(options.levelIdc ?? 32, 8)
-    .ue(options.spsId ?? 0)
-    .ue(1) // chroma_format_idc: 4:2:0
-    .ue(0) // bit_depth_luma_minus8
-    .ue(0) // bit_depth_chroma_minus8
-    .bit(false) // qpprime_y_zero_transform_bypass_flag
-    .bit(false) // seq_scaling_matrix_present_flag
-    .ue(0);
+    .ue(options.spsId ?? 0);
+  if (highProfileSyntax) {
+    writer
+      .ue(1) // chroma_format_idc: 4:2:0
+      .ue(0) // bit_depth_luma_minus8
+      .ue(0) // bit_depth_chroma_minus8
+      .bit(false) // qpprime_y_zero_transform_bypass_flag
+      .bit(false); // seq_scaling_matrix_present_flag
+  }
+  writer.ue(0);
   const pocType = options.picOrderCountType ?? 0;
   writer.ue(pocType);
   if (pocType === 0) {
@@ -174,6 +179,7 @@ function writeHrd(
 }
 
 export interface PpsFixtureOptions {
+  readonly profileIdc?: 66 | 100;
   readonly ppsId?: number;
   readonly spsId?: number;
   readonly entropyCoding?: boolean;
@@ -192,26 +198,30 @@ export interface PpsFixtureOptions {
 }
 
 export function makePps(options: PpsFixtureOptions = {}): Uint8Array {
+  const highProfileSyntax = (options.profileIdc ?? 100) === 100;
+  const includeExtension = highProfileSyntax || options.transform8x8 !== undefined;
   const writer = new BitWriter()
     .ue(options.ppsId ?? 0)
     .ue(options.spsId ?? 0)
-    .bit(options.entropyCoding !== false)
+    .bit(options.entropyCoding ?? highProfileSyntax)
     .bit(options.bottomFieldPicOrder === true)
     .ue(options.sliceGroupsMinus1 ?? 0)
     .ue(options.refList0Minus1 ?? 0)
     .ue(0)
     .bit(options.weightedPrediction === true)
-    .bits(options.weightedBipredIdc ?? 2, 2)
+    .bits(options.weightedBipredIdc ?? (highProfileSyntax ? 2 : 0), 2)
     .se(options.picInitQpMinus26 ?? 0)
     .se(options.picInitQsMinus26 ?? 0)
     .se(options.chromaQpIndexOffset ?? -2)
     .bit(options.deblockingFilterControl !== false)
     .bit(options.constrainedIntraPrediction === true)
     .bit(options.redundantPictures === true);
-  writer
-    .bit(options.transform8x8 !== false)
-    .bit(false) // pic_scaling_matrix_present_flag
-    .se(options.chromaQpIndexOffset ?? -2);
+  if (includeExtension) {
+    writer
+      .bit(options.transform8x8 ?? highProfileSyntax)
+      .bit(false) // pic_scaling_matrix_present_flag
+      .se(options.chromaQpIndexOffset ?? -2);
+  }
   return nal(0x68, writer.trailing().toBytes(), 4);
 }
 
@@ -230,6 +240,7 @@ export interface SliceFixtureOptions {
   readonly adaptiveMarkingOperation?: 0 | 1 | 2;
   readonly longTermReference?: boolean;
   readonly sliceQpDelta?: number;
+  readonly entropyCoding?: boolean;
 }
 
 export function makeSlice(options: SliceFixtureOptions): Uint8Array {
@@ -274,7 +285,7 @@ export function makeSlice(options: SliceFixtureOptions): Uint8Array {
       }
     }
   }
-  if (normalizedType !== 2) {
+  if (normalizedType !== 2 && options.entropyCoding !== false) {
     writer.ue(0); // cabac_init_idc
   }
   writer.se(options.sliceQpDelta ?? 0).ue(0).se(0).se(0);
@@ -305,6 +316,7 @@ export function makeAccessUnit(options: {
   readonly picOrderCntLsb?: number;
   readonly sliceType?: "I" | "P" | "B";
   readonly reference?: boolean;
+  readonly entropyCoding?: boolean;
 }): H264AccessUnitInput {
   const slices =
     options.slices ??
@@ -314,6 +326,9 @@ export function makeAccessUnit(options: {
         frameNum: options.frameNum,
         sliceType: options.sliceType ?? (options.idr ? "I" : "P"),
         ...(options.reference === undefined ? {} : { reference: options.reference }),
+        ...(options.entropyCoding === undefined
+          ? {}
+          : { entropyCoding: options.entropyCoding }),
         picOrderCountType: options.picOrderCountType ?? 0,
         picOrderCntLsb: options.picOrderCntLsb ?? options.frameNum * 2
       })
@@ -349,12 +364,18 @@ export function validInspectionInput(options: {
   readonly requireBt709LimitedRange?: boolean;
   readonly units?: H264RenditionInspectionInput["units"];
 } = {}): MutableInspectionInput {
+  const profileIdc = options.spsOptions?.profileIdc ?? 100;
+  const entropyCoding = profileIdc !== 66;
   const sps = makeSps({
     ...options.spsOptions,
-    compatibility: options.spsOptions?.compatibility ?? 0,
+    compatibility:
+      options.spsOptions?.compatibility ?? (profileIdc === 66 ? 0xe0 : 0),
     bt709Limited: options.spsOptions?.bt709Limited ?? true
   });
-  const pps = makePps(options.ppsOptions);
+  const pps = makePps({
+    profileIdc: profileIdc === 66 ? 66 : 100,
+    ...options.ppsOptions
+  });
   return {
     profile: {
       codedWidth: (options.spsOptions?.widthInMacroblocks ?? 4) * 16,
@@ -372,8 +393,20 @@ export function validInspectionInput(options: {
         {
           id: "idle",
           accessUnits: [
-            makeAccessUnit({ idr: true, frameNum: 0, sps, pps, aud: makeAud(0) }),
-            makeAccessUnit({ idr: false, frameNum: 1, aud: makeAud(1) })
+            makeAccessUnit({
+              idr: true,
+              frameNum: 0,
+              sps,
+              pps,
+              aud: makeAud(0),
+              entropyCoding
+            }),
+            makeAccessUnit({
+              idr: false,
+              frameNum: 1,
+              aud: makeAud(1),
+              entropyCoding
+            })
           ]
         },
         {
@@ -384,9 +417,15 @@ export function validInspectionInput(options: {
               frameNum: 0,
               sps,
               pps,
-              aud: makeAud(0)
+              aud: makeAud(0),
+              entropyCoding
             }),
-            makeAccessUnit({ idr: false, frameNum: 1, aud: makeAud(1) })
+            makeAccessUnit({
+              idr: false,
+              frameNum: 1,
+              aud: makeAud(1),
+              entropyCoding
+            })
           ]
         }
       ]).map((unit) => ({

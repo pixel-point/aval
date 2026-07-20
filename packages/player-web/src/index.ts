@@ -438,7 +438,6 @@ export {
   MotionPolicyCoordinator,
   type ActualMotionMode,
   type EffectiveMotionMode,
-  type MotionFailureStaticOrigin,
   type MotionPolicy,
   type MotionPolicyCoordinatorOptions,
   type MotionPolicySnapshot,
@@ -544,7 +543,6 @@ export {
   createRuntimeCandidateReport,
   createRuntimeReadinessReport,
   isTransientStaticReason,
-  summarizeStaticReason,
   translateGraphReadiness,
   type GraphReadinessTranslation,
   type RuntimeAssetRequest,
@@ -567,6 +565,7 @@ export {
   type RuntimeDecoderTicketSnapshot,
   type RuntimeDecoderTicketState,
   type RuntimeFrameKey,
+  type RuntimeGraphEffect,
   type RuntimeGraphTrace,
   type RuntimeMediaCursor,
   type RuntimeMediaPresentation,
@@ -596,13 +595,11 @@ export {
   type RuntimeVisibilitySnapshot,
   type RuntimeVisibilityState,
   type StaticReason,
-  type StaticReasonClassification,
-  type StaticReasonSummaryInput
+  type StaticReasonClassification
 } from "./runtime/model.js";
 export {
   IntegratedPlayer,
   IntegratedPlaybackInvariantError,
-  PlaybackFallbackError,
   type IntegratedCandidateActivationOptions,
   type IntegratedCandidateAttempt,
   type IntegratedCandidateAttemptContext,
@@ -622,13 +619,8 @@ export {
   type IntegratedPreparedContentTick,
   type IntegratedPrepareOptions,
   type IntegratedPrepareResult,
-  type IntegratedFallbackStore,
   type IntegratedTimerHost
 } from "./runtime/integrated-player.js";
-export {
-  StateFallbackStore,
-  type StateFallbackStoreOptions
-} from "./runtime/state-fallback-store.js";
 export {
   CutPresentationCoordinator,
   CutPresentationInvariantError,

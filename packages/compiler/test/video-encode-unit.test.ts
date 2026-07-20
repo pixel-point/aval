@@ -95,7 +95,7 @@ describe("codec-major unit encoder argv", () => {
     expect(parameters).toContain("crop-rect=0,0,0,8");
   });
 
-  it("allows H.264 compression reordering without legacy low-delay flags", () => {
+  it("pins H.264 to the constrained-baseline compatibility vector after the preset", () => {
     const result = invocation({
       codec: "h264",
       preset: "veryslow",
@@ -108,10 +108,70 @@ describe("codec-major unit encoder argv", () => {
       "-g", "6", "-keyint_min", "6", "-sc_threshold", "0"
     ]);
     expect(result.arguments).not.toContain("zerolatency");
-    expect(result.arguments).not.toContain("-bf");
-    expect(result.arguments).not.toContain("-refs");
+    expectArguments(result.arguments, ["-profile:v", "baseline"]);
+    expectArguments(result.arguments, ["-level:v", "5.2"]);
+    expectArguments(result.arguments, ["-bf", "0", "-refs", "1"]);
+    expectArguments(result.arguments, ["-maxrate", "240000000"]);
+    expectArguments(result.arguments, ["-bufsize", "240000000"]);
+    const parameters = result.arguments[result.arguments.indexOf("-x264-params") + 1];
+    expect(parameters).toContain("8x8dct=0");
+    expect(parameters).toContain("bframes=0");
+    expect(parameters).toContain("cabac=0");
+    expect(parameters).toContain("ref=1");
+    expect(parameters).toContain("weightp=0");
     expect(result.arguments.at(-2)).toBe("h264");
   });
+
+  it.each([
+    {
+      width: 48, height: 112, numerator: 30, denominator: 1,
+      level: "1.1", maxrate: "192000", bufsize: "500000"
+    },
+    {
+      width: 512, height: 512, numerator: 24, denominator: 1,
+      level: "3.0", maxrate: "10000000", bufsize: "10000000"
+    },
+    {
+      width: 640, height: 368, numerator: 24, denominator: 1,
+      level: "3.0", maxrate: "10000000", bufsize: "10000000"
+    },
+    {
+      width: 1_280, height: 720, numerator: 24, denominator: 1,
+      level: "3.1", maxrate: "14000000", bufsize: "14000000"
+    }
+  ] as const)(
+    "derives H.264 Level $level for $width×$height at $numerator/$denominator",
+    ({ width, height, numerator, denominator, level, maxrate, bufsize }) => {
+      const target = { id: "compat", width, height, crf: 23 };
+      const geometry = deriveVideoRenditionGeometry({
+        canvasWidth: width,
+        canvasHeight: height,
+        layout: "opaque",
+        visibleWidth: width,
+        visibleHeight: height,
+        storage: { widthAlignment: 16, heightAlignment: 16 }
+      });
+      const result = createEncodeVideoUnitInvocation({
+        source: {
+          path: "/private/spool/render.yuv",
+          width: geometry.codedWidth,
+          height: geometry.codedHeight,
+          bitDepth: 8,
+          frameRate: { numerator, denominator },
+          frameBytes: geometry.codedWidth * geometry.codedHeight * 3 / 2
+        },
+        startFrame: 0,
+        endFrame: 6,
+        encoding: { codec: "h264", preset: "veryslow", renditions: [target] },
+        rendition: target,
+        geometry
+      });
+
+      expectArguments(result.arguments, ["-level:v", level]);
+      expectArguments(result.arguments, ["-maxrate", maxrate]);
+      expectArguments(result.arguments, ["-bufsize", bufsize]);
+    }
+  );
 
   it("lowers the requested H.265 slow preset and thread count to raw HEVC", () => {
     const result = invocation({
