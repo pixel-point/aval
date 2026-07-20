@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { DecoderLocalFailureError } from "../src/decoder.js";
 import {
-  DecodedOutputIncompatibleError,
   retryableCandidateOutcome,
   type RetryableCandidateRejection
 } from "../src/provisional-candidate-outcome.js";
+import { DecodedOutputIncompatibleError } from
+  "../src/decoded-output-qualifier.js";
 import { orchestrateProvisionalCandidates } from
   "../src/provisional-startup.js";
 

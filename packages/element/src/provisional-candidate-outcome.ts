@@ -1,4 +1,6 @@
 import { DecoderLocalFailureError } from "./decoder.js";
+import { DecodedOutputIncompatibleError } from
+  "./decoded-output-qualifier.js";
 
 export type RetryableCandidateRejection =
   | Readonly<{ stage: "probe"; cause: "unsupported-config" }>
@@ -22,13 +24,6 @@ export type ProvisionalCandidateOutcome<T> =
       kind: "retryable-rejection";
       rejection: Readonly<RetryableCandidateRejection>;
     }>;
-
-export class DecodedOutputIncompatibleError extends Error {
-  public constructor(message = "decoded output is semantically incompatible") {
-    super(message);
-    this.name = "DecodedOutputIncompatibleError";
-  }
-}
 
 export function unsupportedConfigCandidateOutcome(): Readonly<
   Extract<ProvisionalCandidateOutcome<never>, { kind: "retryable-rejection" }>
