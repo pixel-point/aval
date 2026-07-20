@@ -2,11 +2,12 @@
 
 Functional CI uses pinned Playwright engines for fast browser-path coverage; it
 is not branded-browser certification. Each release targets a rolling 24-month
-matrix: Windows 11 stable-channel Chrome current/current-1/current-2 plus the
-stable build closest to the boundary, the three latest current-generation
-Mobile Safari point releases
-plus the previous iOS major closest to the boundary, and real Android 17, 16,
-and 15 devices with exactly observed Chrome versions. The signed-in
+matrix: Windows 11 stable-channel Chrome and desktop Firefox
+current/current-1/current-2, Chrome's stable build closest to the boundary,
+the Firefox feature floor described below, the three latest current-generation
+Mobile Safari point releases plus the previous iOS major closest to the
+boundary, and real Android 17, 16, and 15 devices with exactly observed Chrome
+versions. The signed-in
 BrowserStack sessions report Chrome/Chromium 145.0.0.0 for both Pixel 9 slots
 and the Samsung Galaxy S25 slot. iOS 17 and Android 14 are useful
 beyond-policy diagnostics, not release requirements. The generated table below
@@ -18,6 +19,18 @@ For Chrome, Microsoft Edge, and Firefox, the build's leading component must
 match the reported product-version major. Safari and Mobile Safari retain the
 independently reported numeric WebKit/Safari build identifier instead of
 pretending that it shares the marketing-version major.
+
+Firefox 130 is the oldest certified desktop playback release. It is the first
+stable desktop Firefox release with AVAL's required WebCodecs interfaces.
+Firefox 129 is a one-release feature-floor exception. It remains inside the
+literal 24-month promise on 2026-07-20 but predates desktop WebCodecs. Firefox
+128 and 129 are mandatory negative sentinels: they must terminate preparation
+once with `unsupported-profile`, never hang or publish a blank nonterminal
+canvas, and never cause AVAL to render fallback content. Supporting those
+releases would require a different decoder backend; applications decide how to
+respond to the typed error. Firefox for Android remains uncertified until it is
+measured independently, and desktop Firefox results are never relabeled as
+Android evidence.
 
 Desktop Safari certification uses only provider-observable versions: Safari
 26.4 on macOS Tahoe and Safari 18.4 on macOS Sequoia in the signed-in

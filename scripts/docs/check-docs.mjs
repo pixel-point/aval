@@ -153,6 +153,17 @@ for (const claim of [
   }
 }
 const support = await readFile("docs/browser-support.md", "utf8");
+for (const claim of [
+  "Firefox 130 is the oldest certified desktop playback release",
+  "Firefox 129 is a one-release feature-floor exception",
+  "literal 24-month promise",
+  "`unsupported-profile`",
+  "Firefox for Android remains uncertified"
+]) {
+  if (!support.includes(claim)) {
+    failures.push(`docs/browser-support.md: missing Firefox support contract: ${claim}`);
+  }
+}
 const index = JSON.parse(await readFile("docs/certification/1.0.0/index.json", "utf8"));
 const generated = renderSupport(index);
 const captured = support.match(/<!-- BEGIN GENERATED SUPPORT -->\n([\s\S]*?)\n<!-- END GENERATED SUPPORT -->/u)?.[1];

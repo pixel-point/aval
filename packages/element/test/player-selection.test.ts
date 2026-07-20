@@ -472,6 +472,35 @@ describe("player rendition selection", () => {
     await player.dispose();
   });
 
+  it("raises one unsupported-profile failure before probing when WebCodecs is missing", async () => {
+    const Worker = fakeWorker([[true, true]]);
+    vi.stubGlobal("Worker", Worker);
+    const terminal = playbackError("unsupported-profile", "prepare", 3);
+    const failures: string[] = [];
+    const input = selectionInput([
+      { src: "first.avl", codec: "avc1.640028", integrity: "" },
+      { src: "second.avl", codec: "avc1.640028", integrity: "" }
+    ]);
+    const creation = createPlayer({
+      ...input,
+      platform: {
+        ...input.platform,
+        VideoDecoder: null,
+        VideoFrame: null
+      },
+      onPlaybackFailure: (code, operation) => {
+        failures.push(`${code}:${operation}`);
+        return terminal;
+      }
+    });
+
+    await expect(creation).rejects.toBe(terminal);
+    expect(failures).toEqual(["unsupported-profile:prepare"]);
+    expect(selection.opens).toBe(1);
+    expect(Worker.instances()).toHaveLength(0);
+    expect(selection.rendererCreations).toBe(0);
+  });
+
   it("raises one canonical unsupported-profile error after every rendition rejects", async () => {
     const Worker = fakeWorker([
       [false, false],
