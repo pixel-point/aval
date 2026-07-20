@@ -2,6 +2,13 @@ import type {
   RendererFailureError,
   RendererFailureDiagnostic
 } from "./renderer-diagnostics.js";
+import type {
+  MaterializedRgbaFrameReference
+} from "./rgba-materializer.js";
+
+export type RendererFrameInspector = (
+  source: Readonly<MaterializedRgbaFrameReference>
+) => void;
 
 export type RendererContextChange =
   | Readonly<{ state: "lost"; error: null }>
@@ -50,6 +57,10 @@ export interface RendererRuntime {
     fit: string
   ): void;
   draw(frame: VideoFrame): Promise<void>;
+  inspectAndPrime(
+    frame: VideoFrame,
+    inspect: RendererFrameInspector
+  ): Promise<void>;
   store(group: string, index: number, frame: VideoFrame): Promise<void>;
   drawStored(group: string, index: number): Promise<void>;
   settled(): Promise<void>;

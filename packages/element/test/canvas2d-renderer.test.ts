@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { deriveVideoRenditionGeometry } from "@pixel-point/aval-format";
 
 import { Canvas2dRenderer } from "../src/canvas2d-renderer.js";
+import { Renderer } from "../src/renderer.js";
 import {
   calculateRendererViewport,
   deriveRenderLayout,
@@ -65,6 +66,48 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     expect(() => renderer.drawStored("idle", 1)).toThrow(/unavailable/u);
   });
 
+  it("captures a rejected resize backing before rollback and cleanup", async () => {
+    const fixture = canvasFixture();
+    const changes: unknown[] = [];
+    const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas,
+      onContextChange: (change) => changes.push(change)
+    });
+    let backingWidth = fixture.output.width;
+    Object.defineProperty(fixture.output, "width", {
+      configurable: true,
+      get: () => backingWidth,
+      set: (value: number) => { backingWidth = value === 40 ? 39 : value; }
+    });
+
+    let rejected!: RendererFailureError;
+    try { renderer.resize(20, 10, 2, "contain"); }
+    catch (reason) { rejected = reason as RendererFailureError; }
+    await Promise.resolve();
+
+    expect(rejected).toBeInstanceOf(RendererFailureError);
+    expect(rejected.diagnostic).toMatchObject({
+      backend: "canvas2d",
+      operation: "runtime",
+      operationOrdinal: 1,
+      phase: "resize",
+      backing: { width: 39, height: 20 }
+    });
+    expect(changes).toEqual([{ state: "error", error: rejected }]);
+    expect(renderer.snapshot()).toMatchObject({
+      failure: rejected.diagnostic,
+      backingWidth: 0,
+      backingHeight: 0,
+      runtimeBytes: 0,
+      resourceCount: 0,
+      contextListenerCount: 0
+    });
+    expect(fixture.output.listenerCount).toBe(0);
+    await expect(renderer.draw(packedFrame([1, 2, 3])))
+      .rejects.toThrow(/unavailable/u);
+    expect(renderer.snapshot().failure).toBe(rejected.diagnostic);
+  });
+
   it("presents opaque odd-padded storage without creating an alpha scratch", async () => {
     const fixture = canvasFixture(4, 2);
     const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), opaqueLayout(), {
@@ -94,6 +137,229 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
 
     expect(renderer.snapshot().stagingBytes).toBe(bytes);
     expect(renderer.snapshot().residentBytes).toBe(0);
+  });
+
+  it("inspects and primes one cached RGBA source without presenting or allocating", async () => {
+    const fixture = canvasFixture();
+    const renderer = new Renderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas
+    });
+    let copies = 0;
+    let copiedDestination: AllowSharedBufferSource | null = null;
+    let inspectedPixels: Uint8Array | null = null;
+    const candidate = frameWithCopy(async (destination) => {
+      copies += 1;
+      copiedDestination = destination;
+      destinationBytes(destination).set(packedPixels([0, 128, 255]));
+      return [{ offset: 0, stride: 16 }];
+    });
+    const before = renderer.snapshot();
+
+    await renderer.inspectAndPrime(candidate, (source) => {
+      expect(source.frame).toBe(candidate);
+      expect(Object.isFrozen(source)).toBe(true);
+      expect(Object.keys(source)).toEqual(["frame", "rgba"]);
+      expect(source).not.toHaveProperty("release");
+      expect(Object.isFrozen(source.rgba)).toBe(true);
+      inspectedPixels = source.rgba.pixels;
+    });
+
+    const after = renderer.snapshot();
+    expect(copies).toBe(1);
+    expect(inspectedPixels).toBe(copiedDestination);
+    expect(fixture.output.context.draws).toHaveLength(0);
+    expect(after).toMatchObject({
+      stagingBytes: before.stagingBytes,
+      residentBytes: before.residentBytes,
+      runtimeBytes: before.runtimeBytes,
+      resourceCount: before.resourceCount
+    });
+
+    await renderer.draw(packedFrame([1, 2, 3]));
+    expect(fixture.output.context.draws).toHaveLength(2);
+  });
+
+  it("returns an exact inspector rejection and remains usable", async () => {
+    const fixture = canvasFixture();
+    const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas
+    });
+    const rejection = new Error("decoded output identity mismatch");
+
+    await expect(renderer.inspectAndPrime(
+      packedFrame([0, 128, 255]),
+      (source) => {
+        expect(source.rgba.pixels.byteLength).toBe(4 * 12 * 4);
+        throw rejection;
+      }
+    )).rejects.toBe(rejection);
+
+    expect(renderer.snapshot().failure).toBeNull();
+    expect(fixture.output.context.draws).toHaveLength(0);
+    await renderer.draw(packedFrame([1, 2, 3]));
+    expect(fixture.output.context.draws).toHaveLength(2);
+    const invalid = {
+      ...packedFrame([4, 5, 6]),
+      displayWidth: 3
+    } as unknown as VideoFrame;
+    await expect(renderer.draw(invalid)).rejects.toMatchObject({
+      diagnostic: { phase: "semantic-upload", operationOrdinal: 3 }
+    });
+  });
+
+  it("rejects an invalid frame before invoking the inspector", async () => {
+    const fixture = canvasFixture();
+    const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas
+    });
+    const invalid = {
+      ...packedFrame([0, 128, 255]),
+      displayWidth: 3
+    } as unknown as VideoFrame;
+    let inspected = false;
+
+    await expect(renderer.inspectAndPrime(invalid, () => {
+      inspected = true;
+    })).rejects.toMatchObject({
+      diagnostic: { phase: "semantic-upload", operationOrdinal: 1 }
+    });
+    expect(inspected).toBe(false);
+  });
+
+  it("keeps a pre-inspection materializer failure terminal", async () => {
+    const fixture = canvasFixture();
+    const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas
+    });
+    const copyReason = new DOMException("copy failed", "EncodingError");
+    let inspected = false;
+
+    await expect(renderer.inspectAndPrime(
+      frameWithCopy(async () => Promise.reject(copyReason)),
+      () => { inspected = true; }
+    )).rejects.toMatchObject({
+      diagnostic: { phase: "rgba-copy", operationOrdinal: 1 }
+    });
+    expect(inspected).toBe(false);
+    expect(renderer.snapshot()).toMatchObject({
+      failure: expect.any(Object),
+      backingWidth: 0,
+      backingHeight: 0,
+      runtimeBytes: 0,
+      contextListenerCount: 0
+    });
+    expect(fixture.output.listenerCount).toBe(0);
+    await expect(renderer.draw(packedFrame([1, 2, 3])))
+      .rejects.toThrow(/unavailable/u);
+  });
+
+  it("does not replace the presented frame or advance its stream slot", async () => {
+    const fixture = canvasFixture();
+    const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas
+    });
+    await renderer.draw(packedFrame([0, 128, 255]));
+    const draws = fixture.output.context.draws.length;
+
+    await renderer.inspectAndPrime(
+      packedFrame([255, 255, 255]),
+      (source) => { expect(source.rgba.pixels.byteLength).toBeGreaterThan(0); }
+    );
+    expect(fixture.output.context.draws).toHaveLength(draws);
+
+    renderer.resize(8, 6, 1, "contain");
+    await renderer.settled();
+    const mask = fixture.surface(3, 2, 1).context.lastImageData;
+    expect(mask?.data.filter((_value, index) => index % 4 === 3))
+      .toEqual(new Uint8ClampedArray([0, 128, 255, 0, 128, 255]));
+  });
+
+  it("serializes priming and consumes one diagnostic ordinal", async () => {
+    const fixture = canvasFixture();
+    const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas
+    });
+    let resolve!: (planes: readonly PlaneLayout[]) => void;
+    const pendingCopy = new Promise<readonly PlaneLayout[]>((done) => {
+      resolve = done;
+    });
+    let inspected = false;
+    const drawing = renderer.draw(frameWithCopy(async () => pendingCopy));
+    const priming = renderer.inspectAndPrime(
+      packedFrame([0, 128, 255]),
+      () => { inspected = true; }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(inspected).toBe(false);
+    expect(renderer.snapshot().pendingOperations).toBe(2);
+    resolve([{ offset: 0, stride: 16 }]);
+    await drawing;
+    await priming;
+
+    const invalid = {
+      ...packedFrame([1, 2, 3]),
+      displayWidth: 3
+    } as unknown as VideoFrame;
+    await expect(renderer.draw(invalid)).rejects.toMatchObject({
+      diagnostic: { phase: "semantic-upload", operationOrdinal: 3 }
+    });
+  });
+
+  it("rejects asynchronous inspectors without blocking the renderer queue", async () => {
+    const fixture = canvasFixture();
+    const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas
+    });
+
+    await expect(renderer.inspectAndPrime(
+      packedFrame([0, 128, 255]),
+      async () => undefined
+    )).rejects.toThrow("renderer frame inspector must be synchronous");
+
+    expect(renderer.snapshot().failure).toBeNull();
+    expect(fixture.output.context.draws).toHaveLength(0);
+    await renderer.draw(packedFrame([1, 2, 3]));
+    expect(fixture.output.context.draws).toHaveLength(2);
+  });
+
+  it("allows a synchronous inspector to enqueue later renderer work", async () => {
+    const fixture = canvasFixture();
+    const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas
+    });
+    let reentrantDraw: Promise<void> | undefined;
+
+    await renderer.inspectAndPrime(packedFrame([0, 128, 255]), () => {
+      reentrantDraw = renderer.draw(packedFrame([1, 2, 3]));
+    });
+    await reentrantDraw;
+
+    expect(fixture.output.context.draws).toHaveLength(2);
+    expect(renderer.snapshot().pendingOperations).toBe(0);
+  });
+
+  it("aborts boundedly when disposed synchronously during inspection", async () => {
+    const fixture = canvasFixture();
+    const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
+      createCanvas: fixture.createCanvas
+    });
+    const priming = renderer.inspectAndPrime(
+      packedFrame([0, 128, 255]),
+      (source) => {
+        expect(source.rgba.pixels.byteLength).toBeGreaterThan(0);
+        renderer.dispose();
+      }
+    );
+
+    await expect(priming).rejects.toThrow(/unavailable/u);
+    expect(renderer.snapshot()).toMatchObject({
+      pendingOperations: 0,
+      sourceCopiesInFlight: 0,
+      resourceCount: 0,
+      runtimeBytes: 0
+    });
   });
 
   it("uses the exact single-plane RGBA copyTo contract", async () => {

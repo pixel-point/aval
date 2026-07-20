@@ -28,7 +28,10 @@ export function opaqueLayout(): RenderLayout {
 }
 
 export function frame(
-  copy: () => Promise<readonly PlaneLayout[]> = async () => [
+  copy: (
+    destination: AllowSharedBufferSource,
+    options?: VideoFrameCopyToOptions
+  ) => Promise<readonly PlaneLayout[]> = async () => [
     { offset: 0, stride: 48 * 4 }
   ],
   displayWidth = 48,
@@ -139,6 +142,7 @@ export class TestGl {
   public nextProbeReadError = 0;
   public nativeUploadCount = 0;
   public rgbaUploadCount = 0;
+  public readonly rgbaUploadSources: unknown[] = [];
   public readPixelsCount = 0;
   public readonly presentationUploadKinds: ("native" | "rgba-copy")[] = [];
   public loseOnDraw = false;
@@ -240,6 +244,7 @@ export class TestGl {
     if (values.length === 9) {
       this.#lastUploadKind = "rgba-copy";
       this.rgbaUploadCount += 1;
+      this.rgbaUploadSources.push(values[8]);
       if (this.rgbaUploadError !== 0) this.#error = this.rgbaUploadError;
     }
   }

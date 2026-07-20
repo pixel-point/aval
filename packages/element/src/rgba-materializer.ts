@@ -1,4 +1,9 @@
 import { rgbaBytes } from "./renderer-geometry.js";
+import {
+  assertCanvas2dContextAvailable,
+  canvas2dContext,
+  configureCanvas2dContext
+} from "./canvas2d-context.js";
 
 export interface RgbaMaterializerOptions {
   readonly copyTimeoutMs?: number;
@@ -16,6 +21,10 @@ export interface MaterializedRgbaFrame {
 export interface RgbaFrameReference {
   readonly frame: VideoFrame;
   readonly rgba: () => Promise<Readonly<MaterializedRgbaFrame>>;
+}
+export interface MaterializedRgbaFrameReference {
+  readonly frame: VideoFrame;
+  readonly rgba: Readonly<MaterializedRgbaFrame>;
 }
 export interface RgbaMaterialization extends RgbaFrameReference {
   /** Releases the staging lease and invalidates materialized pixels. */
@@ -228,8 +237,8 @@ export class RgbaMaterializer {
       throw aborted();
     }
     const { context } = this.#readbackSurface();
-    assertContextAvailable(context);
-    configureContext(context);
+    assertCanvas2dContextAvailable(context);
+    configureCanvas2dContext(context);
     context.globalCompositeOperation = "copy";
     context.clearRect(0, 0, this.#width, this.#height);
     context.drawImage(
@@ -258,14 +267,10 @@ export class RgbaMaterializer {
       if (canvas.width !== this.#width || canvas.height !== this.#height) throw new Error(
         "Canvas2D readback surface rejected its dimensions"
       );
-      const context = canvas.getContext("2d", {
-        alpha: true,
-        desynchronized: true,
-        willReadFrequently: true
-      });
+      const context = canvas2dContext(canvas, true);
       if (context === null) throw new Error("Canvas2D readback context is unavailable");
-      assertContextAvailable(context);
-      configureContext(context);
+      assertCanvas2dContextAvailable(context);
+      configureCanvas2dContext(context);
       this.#readback = Object.freeze({ canvas, context });
       return this.#readback;
     } catch (reason) {
@@ -302,19 +307,6 @@ export function defaultCanvasFactory(output: HTMLCanvasElement):
       throw new Error("Canvas2D scratch surface factory is unavailable");
     return document.createElement("canvas");
   };
-}
-
-function configureContext(context: CanvasRenderingContext2D): void {
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "low";
-}
-
-function assertContextAvailable(context: CanvasRenderingContext2D): void {
-  const candidate = context as CanvasRenderingContext2D & Readonly<{
-    isContextLost?: () => boolean;
-  }>;
-  if (typeof candidate.isContextLost === "function" && candidate.isContextLost())
-    throw new Error("Canvas2D context is lost");
 }
 
 function isUnsupportedRgbaCopy(reason: unknown): boolean {

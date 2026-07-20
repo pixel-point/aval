@@ -6,6 +6,24 @@ import {
   type RendererDiagnosticUploadPath
 } from "./renderer-diagnostics.js";
 import {
+  canvas2dCpuFrameBytes,
+  createCanvas2dCpuFrame,
+  extractCanvas2dCpuFrame,
+  type Canvas2dCpuFrame as CpuFrame
+} from "./canvas2d-frame.js";
+import {
+  createCanvas2dSurface,
+  putCanvas2dPixels,
+  reacquireCanvas2dSurface,
+  releaseCanvas2dSurface,
+  type Canvas2dSurface
+} from "./canvas2d-surface.js";
+import {
+  assertCanvas2dContextAvailable,
+  canvas2dContext,
+  configureCanvas2dContext
+} from "./canvas2d-context.js";
+import {
   allocationBytes,
   calculateRendererBacking,
   calculateRendererViewport,
@@ -21,53 +39,42 @@ import {
 import {
   defaultCanvasFactory,
   MaterializerFailureError,
-  RgbaMaterializer
+  RgbaMaterializer,
+  type MaterializedRgbaFrame,
+  type RgbaMaterialization
 } from "./rgba-materializer.js";
+import {
+  inspectMaterializedRgbaFrame,
+  rethrowInspectionRejection
+} from "./renderer-inspection.js";
+import { RendererOperationCoordinator } from
+  "./renderer-operation-coordinator.js";
+import {
+  namedError,
+  rendererCap,
+  rendererDiagnosticScalar,
+  rendererResidentKey
+} from "./renderer-utilities.js";
 import type {
   RendererContextChange,
+  RendererFrameInspector,
+  RendererRuntime,
   RendererSnapshot
 } from "./renderer-contract.js";
+import type { RendererLimits } from "./renderer-limits.js";
 
-export interface Canvas2dRendererLimits {
-  readonly maxTextureBytes?: number;
-  readonly maxBackingBytes?: number;
-  readonly maxRuntimeBytes?: number;
-  readonly copyTimeoutMs?: number;
-  readonly setTimeout?: (callback: () => void, delay: number) => number;
-  readonly clearTimeout?: (handle: number) => void;
-  readonly onContextChange?: (change: Readonly<RendererContextChange>) => void;
-  readonly initialPresentation?: Readonly<{
-    width: number;
-    height: number;
-    dpr: number;
-    fit: string;
-  }>;
-  /** Internal deterministic surface factory; production uses ownerDocument. */
-  readonly createCanvas?: (width: number, height: number) => HTMLCanvasElement;
-}
+export type Canvas2dRendererLimits = RendererLimits;
 
 type State = "active" | "lost" | "error" | "disposed";
-
-interface CpuFrame {
-  readonly color: Uint8ClampedArray;
-  readonly alpha: Uint8ClampedArray | null;
-}
 
 type LastFrame =
   | Readonly<{ kind: "stream"; index: number }>
   | Readonly<{ kind: "resident"; key: string }>;
 
-interface Surface {
-  readonly canvas: HTMLCanvasElement;
-  context: CanvasRenderingContext2D | null;
-}
-
-const HARD_BYTES = Number.MAX_SAFE_INTEGER;
 const STREAMS = 3;
-const ID = /^[a-z][a-z0-9._-]{0,63}$/;
 
 /** Canvas2D presentation backend used only after exact-null WebGL2 creation. */
-export class Canvas2dRenderer {
+export class Canvas2dRenderer implements RendererRuntime {
   readonly #canvas: HTMLCanvasElement;
   readonly #layout: Readonly<RenderLayout>;
   readonly #frameBytes: number;
@@ -77,6 +84,7 @@ export class Canvas2dRenderer {
   readonly #maxRuntimeBytes: number;
   readonly #createCanvas: (width: number, height: number) => HTMLCanvasElement;
   readonly #materializer: RgbaMaterializer;
+  readonly #operations: RendererOperationCoordinator<RendererFailureError>;
   readonly #onContextChange:
     ((change: Readonly<RendererContextChange>) => void) | undefined;
   readonly #lost: (event: Event) => void;
@@ -87,11 +95,9 @@ export class Canvas2dRenderer {
   #nextStream = 0;
   #last: LastFrame | null = null;
   #outputContext: CanvasRenderingContext2D | null = null;
-  #colorSurface: Surface | null = null;
-  #alphaSurface: Surface | null = null;
+  #colorSurface: Canvas2dSurface | null = null;
+  #alphaSurface: Canvas2dSurface | null = null;
   #state: State = "active";
-  #tail: Promise<void> = Promise.resolve();
-  #pending = 0;
   #resizeQueued = false;
   #fit: RendererFit = "contain";
   #cssWidth = 0;
@@ -99,7 +105,6 @@ export class Canvas2dRenderer {
   #dpr = 1;
   #losses = 0;
   #recoveries = 0;
-  #operationSequence = 0;
   #failureError: RendererFailureError | null = null;
 
   public constructor(
@@ -125,9 +130,18 @@ export class Canvas2dRenderer {
       storageBytes,
       checkedProduct(STREAMS, this.#frameBytes)
     ]);
-    this.#maxTextureBytes = cap(limits.maxTextureBytes, "texture byte cap");
-    this.#maxBackingBytes = cap(limits.maxBackingBytes, "backing byte cap");
-    this.#maxRuntimeBytes = cap(limits.maxRuntimeBytes, "runtime byte cap");
+    this.#maxTextureBytes = rendererCap(
+      limits.maxTextureBytes,
+      "texture byte cap"
+    );
+    this.#maxBackingBytes = rendererCap(
+      limits.maxBackingBytes,
+      "backing byte cap"
+    );
+    this.#maxRuntimeBytes = rendererCap(
+      limits.maxRuntimeBytes,
+      "runtime byte cap"
+    );
     this.#createCanvas = limits.createCanvas ?? defaultCanvasFactory(canvas);
     this.#materializer = new RgbaMaterializer(
       this.#layout.storageWidth,
@@ -143,6 +157,13 @@ export class Canvas2dRenderer {
       }
     );
     this.#onContextChange = limits.onContextChange;
+    this.#operations = new RendererOperationCoordinator({
+      accepting: () => this.#state !== "disposed" && this.#state !== "error",
+      unavailable,
+      classify: (reason, operation, operationOrdinal) =>
+        this.#classifyOperationFailure(reason, operation, operationOrdinal),
+      terminal: (error) => this.#terminal(error)
+    });
     this.#lost = (event) => {
       event.preventDefault();
       this.#markLost();
@@ -171,7 +192,7 @@ export class Canvas2dRenderer {
       this.#fit = initial.fit;
     }
 
-    const operationOrdinal = this.#beginOperation();
+    const operationOrdinal = this.#operations.beginOperation();
     let listeners = false;
     try {
       if (initial !== undefined) {
@@ -179,7 +200,10 @@ export class Canvas2dRenderer {
       }
       const backingBytes = this.#backingBytes(width, height);
       this.#assertBudget(0, backingBytes);
-      this.#streams = Array.from({ length: STREAMS }, () => this.#newFrame());
+      this.#streams = Array.from(
+        { length: STREAMS },
+        () => createCanvas2dCpuFrame(this.#layout)
+      );
       this.#initializeContexts("construct", operationOrdinal);
       canvas.addEventListener("contextlost", this.#lost);
       canvas.addEventListener("contextrestored", this.#restored);
@@ -221,7 +245,7 @@ export class Canvas2dRenderer {
       cssHeight,
       devicePixelRatio
     );
-    const operationOrdinal = this.#beginOperation();
+    const operationOrdinal = this.#operations.beginOperation();
     const backingBytes = this.#backingBytes(backing.width, backing.height);
     this.#assertBudget(this.#resident.size + this.#reserved.size, backingBytes);
     try {
@@ -235,7 +259,9 @@ export class Canvas2dRenderer {
       this.#cssHeight = Math.max(1, cssHeight);
       this.#dpr = backing.dpr;
       this.#fit = fit;
-      if (this.#outputContext !== null) configureContext(this.#outputContext);
+      if (this.#outputContext !== null) {
+        configureCanvas2dContext(this.#outputContext);
+      }
     } catch (reason) {
       const error = reason instanceof RendererFailureError
         ? reason
@@ -245,24 +271,23 @@ export class Canvas2dRenderer {
     }
     if (this.#last !== null && !this.#resizeQueued) {
       this.#resizeQueued = true;
-      void this.#enqueue(() => {
-        if (this.#state === "active") {
-          this.#drawLast("runtime", this.#beginOperation());
-        }
-      }).catch(() => undefined).finally(() => {
+      void this.#operations.enqueueIf(
+        "runtime",
+        () => this.#state === "active",
+        (ordinal) => this.#drawLast("runtime", ordinal)
+      ).catch(() => undefined).finally(() => {
         this.#resizeQueued = false;
       });
     }
   }
 
   public draw(frame: VideoFrame): Promise<void> {
-    return this.#enqueue(async () => {
+    return this.#operations.enqueue("runtime", async (operationOrdinal) => {
       if (this.#state !== "active") throw unavailable();
-      const operationOrdinal = this.#beginOperation();
       const slot = this.#nextStream;
       const buffer = this.#streams[slot];
       if (buffer === undefined) throw unavailable();
-      await this.#materialize(frame, buffer, operationOrdinal);
+      await this.#upload(frame, buffer, operationOrdinal);
       if (this.#state !== "active") throw unavailable();
       this.#render(buffer, "runtime", operationOrdinal);
       this.#last = Object.freeze({ kind: "stream", index: slot });
@@ -270,8 +295,41 @@ export class Canvas2dRenderer {
     });
   }
 
+  public async inspectAndPrime(
+    frame: VideoFrame,
+    inspect: RendererFrameInspector
+  ): Promise<void> {
+    const outcome = await this.#operations.enqueue(
+      "runtime",
+      async (operationOrdinal) => {
+      if (this.#state !== "active") throw unavailable();
+      const materialization = this.#createMaterialization(
+        frame,
+        operationOrdinal
+      );
+      try {
+        const source = await this.#materialize(
+          materialization,
+          operationOrdinal
+        );
+        if (this.#state !== "active") throw unavailable();
+        const inspected = inspectMaterializedRgbaFrame(frame, source, inspect);
+        if (this.#state !== "active") throw unavailable();
+        if (inspected.kind === "rejected") return inspected;
+        const target = this.#streams[this.#nextStream];
+        if (target === undefined) throw unavailable();
+        this.#primeRgba(target, source, operationOrdinal);
+        return inspected;
+      } finally {
+        materialization.release();
+      }
+      }
+    );
+    rethrowInspectionRejection(outcome);
+  }
+
   public store(group: string, index: number, frame: VideoFrame): Promise<void> {
-    const key = residentKey(group, index);
+    const key = rendererResidentKey(group, index);
     if (this.#resident.has(key) || this.#reserved.has(key)) {
       throw new Error("resident frame already exists");
     }
@@ -280,10 +338,9 @@ export class Canvas2dRenderer {
       this.#backingBytes(this.#canvas.width, this.#canvas.height)
     );
     this.#reserved.add(key);
-    return this.#enqueue(async () => {
-      const operationOrdinal = this.#beginOperation();
-      const buffer = this.#newFrame();
-      await this.#materialize(frame, buffer, operationOrdinal);
+    return this.#operations.enqueue("runtime", async (operationOrdinal) => {
+      const buffer = createCanvas2dCpuFrame(this.#layout);
+      await this.#upload(frame, buffer, operationOrdinal);
       if (this.#state !== "active") throw unavailable();
       this.#resident.set(key, buffer);
     }).finally(() => {
@@ -292,13 +349,12 @@ export class Canvas2dRenderer {
   }
 
   public drawStored(group: string, index: number): Promise<void> {
-    const key = residentKey(group, index);
+    const key = rendererResidentKey(group, index);
     if (!this.#resident.has(key)) {
       throw new Error("resident frame is unavailable");
     }
-    return this.#enqueue(() => {
+    return this.#operations.enqueue("runtime", (operationOrdinal) => {
       if (this.#state !== "active") throw unavailable();
-      const operationOrdinal = this.#beginOperation();
       const buffer = this.#resident.get(key);
       if (buffer === undefined) throw unavailable();
       this.#render(buffer, "runtime", operationOrdinal);
@@ -306,7 +362,7 @@ export class Canvas2dRenderer {
     });
   }
 
-  public settled(): Promise<void> { return this.#tail; }
+  public settled(): Promise<void> { return this.#operations.settled(); }
 
   public admit(residentCount: number): Readonly<{
     textureBytes: number;
@@ -339,7 +395,7 @@ export class Canvas2dRenderer {
         residentBytes: 0,
         textureBytes: 0 as const,
         runtimeBytes: 0,
-        pendingOperations: this.#pending,
+        pendingOperations: this.#operations.pendingOperations,
         sourceCopiesInFlight: materializer.sourceCopiesInFlight,
         resourceCount: 0,
         contextListenerCount: 0,
@@ -369,10 +425,10 @@ export class Canvas2dRenderer {
       residentBytes,
       textureBytes: 0 as const,
       runtimeBytes: checkedSum([stagingBytes, residentBytes, backingBytes]),
-      pendingOperations: this.#pending,
+      pendingOperations: this.#operations.pendingOperations,
       sourceCopiesInFlight: materializer.sourceCopiesInFlight,
       resourceCount: this.#resourceCount(),
-      contextListenerCount: 2,
+      contextListenerCount: this.#state === "error" ? 0 : 2,
       failure: this.#failureError?.diagnostic ?? null
     });
   }
@@ -380,78 +436,48 @@ export class Canvas2dRenderer {
   public dispose(): void {
     if (this.#state === "disposed") return;
     this.#state = "disposed";
-    this.#canvas.removeEventListener("contextlost", this.#lost);
-    this.#canvas.removeEventListener("contextrestored", this.#restored);
+    this.#removeContextListeners();
     this.#resident.clear();
     this.#reserved.clear();
     this.#last = null;
     this.#releaseCpuStorage();
     this.#releaseSurfaces();
     this.#outputContext = null;
-    try {
-      this.#canvas.width = 0;
-      this.#canvas.height = 0;
-    } catch { /* terminal cleanup */ }
+    this.#releaseOutputBacking();
   }
 
-  #enqueue<T>(task: () => T | Promise<T>): Promise<T> {
-    if (this.#state === "disposed" || this.#state === "error") {
-      return Promise.reject(unavailable());
-    }
-    this.#pending += 1;
-    const job = this.#tail.then(async () => {
-      if (this.#state === "disposed" || this.#state === "error") {
-        throw unavailable();
-      }
-      try {
-        return await task();
-      } catch (reason) {
-        if (
-          this.#isDisposed() ||
-          this.#state === "lost" && reason instanceof RendererUnavailableError
-        ) throw unavailable();
-        const error = reason instanceof RendererFailureError
-          ? reason
-          : this.#failure(
-              "context-event",
-              "runtime",
-              this.#beginOperation(),
-              reason
-            );
-        if (this.#state === "active" || this.#state === "lost") {
-          this.#terminal(error);
-        }
-        throw error;
-      }
-    }).finally(() => {
-      this.#pending -= 1;
-    });
-    this.#tail = job.then(() => undefined, () => undefined);
-    return job;
+
+  #classifyOperationFailure(
+    reason: unknown,
+    operation: RendererDiagnosticOperation,
+    operationOrdinal: number
+  ): RendererFailureError | null {
+    if (
+      this.#state !== "active" &&
+      namedError(reason, "RendererUnavailableError")
+    ) return null;
+    if (reason instanceof RendererFailureError) return reason;
+    return this.#failure(
+      "context-event",
+      operation,
+      operationOrdinal,
+      reason
+    );
   }
 
   #queueRestore(): void {
     if (this.#state !== "lost") return;
-    this.#pending += 1;
-    const restore = this.#tail.then(() => {
-      if (this.#state !== "lost") return;
-      const operationOrdinal = this.#beginOperation();
-      try {
+    void this.#operations.enqueueIf(
+      "restore",
+      () => this.#state === "lost",
+      (operationOrdinal) => {
         this.#initializeContexts("restore", operationOrdinal, true);
         this.#state = "active";
         this.#drawLast("restore", operationOrdinal);
         this.#recoveries += 1;
         this.#notify(Object.freeze({ state: "restored", error: null }));
-      } catch (reason) {
-        const error = reason instanceof RendererFailureError
-          ? reason
-          : this.#failure("context-event", "restore", operationOrdinal, reason);
-        this.#terminal(error);
       }
-    }).finally(() => {
-      this.#pending -= 1;
-    });
-    this.#tail = restore.then(() => undefined, () => undefined);
+    ).catch(() => undefined);
   }
 
   #initializeContexts(
@@ -461,26 +487,28 @@ export class Canvas2dRenderer {
   ): void {
     try {
       if (!restore) {
-        this.#colorSurface = this.#newSurface(
+        this.#colorSurface = createCanvas2dSurface(
+          this.#createCanvas,
           this.#layout.colorRect[2],
           this.#layout.colorRect[3]
         );
         this.#alphaSurface = this.#layout.alphaRect === undefined
           ? null
-          : this.#newSurface(
+          : createCanvas2dSurface(
+              this.#createCanvas,
               this.#layout.alphaRect[2],
               this.#layout.alphaRect[3]
             );
       } else {
-        this.#reacquireSurface(this.#colorSurface);
+        reacquireCanvas2dSurface(this.#colorSurface);
         if (this.#alphaSurface !== null) {
-          this.#reacquireSurface(this.#alphaSurface);
+          reacquireCanvas2dSurface(this.#alphaSurface);
         }
       }
-      const output = canvasContext(this.#canvas);
+      const output = canvas2dContext(this.#canvas, false);
       if (output === null) throw new Error("Canvas2D output context is unavailable");
-      assertContextAvailable(output);
-      configureContext(output);
+      assertCanvas2dContextAvailable(output);
+      configureCanvas2dContext(output);
       this.#outputContext = output;
     } catch (reason) {
       throw this.#failure(
@@ -492,42 +520,25 @@ export class Canvas2dRenderer {
     }
   }
 
-  #newSurface(width: number, height: number): Surface {
-    const canvas = this.#createCanvas(width, height);
-    try {
-      canvas.width = width;
-      canvas.height = height;
-      if (canvas.width !== width || canvas.height !== height) {
-        throw new Error("Canvas2D scratch surface rejected its dimensions");
-      }
-      const context = canvasContext(canvas);
-      if (context === null) throw new Error("Canvas2D scratch context is unavailable");
-      assertContextAvailable(context);
-      configureContext(context);
-      return { canvas, context };
-    } catch (reason) {
-      try {
-        canvas.width = 0;
-        canvas.height = 0;
-      } catch { /* Preserve the context-creation cause. */ }
-      throw reason;
-    }
-  }
-
-  #reacquireSurface(surface: Surface | null): void {
-    if (surface === null) throw new Error("Canvas2D scratch surface is unavailable");
-    const context = canvasContext(surface.canvas);
-    if (context === null) throw new Error("Canvas2D scratch context is unavailable");
-    assertContextAvailable(context);
-    configureContext(context);
-    surface.context = context;
-  }
-
-  async #materialize(
+  async #upload(
     frame: VideoFrame,
     target: CpuFrame,
     operationOrdinal: number
   ): Promise<void> {
+    const materialization = this.#createMaterialization(frame, operationOrdinal);
+    try {
+      const source = await this.#materialize(materialization, operationOrdinal);
+      if (this.#state !== "active") throw unavailable();
+      this.#primeRgba(target, source, operationOrdinal);
+    } finally {
+      materialization.release();
+    }
+  }
+
+  #createMaterialization(
+    frame: VideoFrame,
+    operationOrdinal: number
+  ): Readonly<RgbaMaterialization> {
     let rect: DOMRectReadOnly;
     try {
       rect = validateRenderFrame(frame, this.#layout);
@@ -539,11 +550,15 @@ export class Canvas2dRenderer {
         reason
       );
     }
-    const materialization = this.#materializer.create(frame, rect);
+    return this.#materializer.create(frame, rect);
+  }
+
+  async #materialize(
+    materialization: Readonly<RgbaMaterialization>,
+    operationOrdinal: number
+  ): Promise<Readonly<MaterializedRgbaFrame>> {
     try {
-      const source = await materialization.rgba();
-      if (this.#state !== "active") throw unavailable();
-      this.#extract(target, source.pixels);
+      return await materialization.rgba();
     } catch (reason) {
       if (this.#state !== "active") throw unavailable();
       if (!(reason instanceof MaterializerFailureError)) throw reason;
@@ -554,37 +569,24 @@ export class Canvas2dRenderer {
         reason.reason,
         "rgba-copy"
       );
-    } finally {
-      materialization.release();
     }
   }
 
-  #extract(target: CpuFrame, pixels: Uint8Array): void {
-    const [colorX, colorY, colorWidth, colorHeight] = this.#layout.colorRect;
-    const storageStride = this.#layout.storageWidth * 4;
-    for (let row = 0; row < colorHeight; row += 1) {
-      for (let column = 0; column < colorWidth; column += 1) {
-        const source = (colorY + row) * storageStride + (colorX + column) * 4;
-        const destination = (row * colorWidth + column) * 4;
-        target.color[destination] = pixels[source] ?? 0;
-        target.color[destination + 1] = pixels[source + 1] ?? 0;
-        target.color[destination + 2] = pixels[source + 2] ?? 0;
-        target.color[destination + 3] = 255;
-      }
-    }
-    const alphaRect = this.#layout.alphaRect;
-    const alpha = target.alpha;
-    if (alphaRect === undefined || alpha === null) return;
-    const [alphaX, alphaY, alphaWidth, alphaHeight] = alphaRect;
-    for (let row = 0; row < alphaHeight; row += 1) {
-      for (let column = 0; column < alphaWidth; column += 1) {
-        const source = (alphaY + row) * storageStride + (alphaX + column) * 4;
-        const destination = (row * alphaWidth + column) * 4;
-        alpha[destination] = 255;
-        alpha[destination + 1] = 255;
-        alpha[destination + 2] = 255;
-        alpha[destination + 3] = pixels[source] ?? 0;
-      }
+  #primeRgba(
+    target: CpuFrame,
+    source: Readonly<MaterializedRgbaFrame>,
+    operationOrdinal: number
+  ): void {
+    try {
+      extractCanvas2dCpuFrame(this.#layout, target, source.pixels);
+    } catch (reason) {
+      throw this.#failure(
+        "rgba-copy",
+        "runtime",
+        operationOrdinal,
+        reason,
+        "rgba-copy"
+      );
     }
   }
 
@@ -602,12 +604,22 @@ export class Canvas2dRenderer {
       throw unavailable();
     }
     try {
-      assertContextAvailable(output);
-      assertContextAvailable(color.context);
-      putPixels(color.context, frame.color, color.canvas.width, color.canvas.height);
+      assertCanvas2dContextAvailable(output);
+      assertCanvas2dContextAvailable(color.context);
+      putCanvas2dPixels(
+        color.context,
+        frame.color,
+        color.canvas.width,
+        color.canvas.height
+      );
       if (frame.alpha !== null && alpha !== null && alpha.context !== null) {
-        assertContextAvailable(alpha.context);
-        putPixels(alpha.context, frame.alpha, alpha.canvas.width, alpha.canvas.height);
+        assertCanvas2dContextAvailable(alpha.context);
+        putCanvas2dPixels(
+          alpha.context,
+          frame.alpha,
+          alpha.canvas.width,
+          alpha.canvas.height
+        );
       }
       const viewport = calculateRendererViewport(
         this.#layout,
@@ -616,7 +628,7 @@ export class Canvas2dRenderer {
         this.#dpr,
         this.#fit
       );
-      configureContext(output);
+      configureCanvas2dContext(output);
       output.globalCompositeOperation = "source-over";
       output.clearRect(0, 0, this.#canvas.width, this.#canvas.height);
       output.drawImage(
@@ -645,7 +657,7 @@ export class Canvas2dRenderer {
         );
       }
       output.globalCompositeOperation = "source-over";
-      assertContextAvailable(output);
+      assertCanvas2dContextAvailable(output);
     } catch (reason) {
       try { output.globalCompositeOperation = "source-over"; } catch { /* evidence retained */ }
       throw this.#failure("draw", operation, operationOrdinal, reason);
@@ -664,18 +676,6 @@ export class Canvas2dRenderer {
     if (frame !== undefined) this.#render(frame, operation, operationOrdinal);
   }
 
-  #newFrame(): CpuFrame {
-    const colorBytes = rgbaBytes(
-      this.#layout.colorRect[2],
-      this.#layout.colorRect[3]
-    );
-    return {
-      color: new Uint8ClampedArray(colorBytes),
-      alpha: this.#layout.alphaRect === undefined
-        ? null : new Uint8ClampedArray(colorBytes)
-    };
-  }
-
   #markLost(): void {
     if (this.#state !== "active") return;
     this.#state = "lost";
@@ -689,13 +689,27 @@ export class Canvas2dRenderer {
     if (this.#state === "disposed" || this.#state === "error") return;
     this.#state = "error";
     this.#failureError = error;
+    this.#removeContextListeners();
     this.#resident.clear();
     this.#reserved.clear();
     this.#last = null;
     this.#releaseCpuStorage();
     this.#releaseSurfaces();
     this.#outputContext = null;
+    this.#releaseOutputBacking();
     this.#notify(Object.freeze({ state: "error", error }));
+  }
+
+  #removeContextListeners(): void {
+    this.#canvas.removeEventListener("contextlost", this.#lost);
+    this.#canvas.removeEventListener("contextrestored", this.#restored);
+  }
+
+  #releaseOutputBacking(): void {
+    try {
+      this.#canvas.width = 0;
+      this.#canvas.height = 0;
+    } catch { /* terminal cleanup */ }
   }
 
   #notify(change: Readonly<RendererContextChange>): void {
@@ -719,26 +733,18 @@ export class Canvas2dRenderer {
         throw new Error("canvas rejected its exact backing dimensions");
       }
     } catch (reason) {
-      try {
-        this.#canvas.width = oldWidth;
-        this.#canvas.height = oldHeight;
-      } catch { /* classified below */ }
-      throw this.#failure(
+      const error = this.#failure(
         operation === "construct" ? "backing-admission" : "resize",
         operation,
         operationOrdinal,
         reason
       );
+      try {
+        this.#canvas.width = oldWidth;
+        this.#canvas.height = oldHeight;
+      } catch { /* classified below */ }
+      throw error;
     }
-  }
-
-  #beginOperation(): number {
-    if (this.#operationSequence === Number.MAX_SAFE_INTEGER) {
-      throw new RangeError("renderer operation identity is exhausted");
-    }
-    const ordinal = this.#operationSequence;
-    this.#operationSequence += 1;
-    return ordinal;
   }
 
   #failure(
@@ -763,8 +769,8 @@ export class Canvas2dRenderer {
       textureOrdinal: null,
       layout: this.#layout,
       backing: {
-        width: diagnosticScalar(this.#canvas.width),
-        height: diagnosticScalar(this.#canvas.height)
+        width: rendererDiagnosticScalar(this.#canvas.width),
+        height: rendererDiagnosticScalar(this.#canvas.height)
       },
       bytes,
       limits: {
@@ -814,11 +820,11 @@ export class Canvas2dRenderer {
     } catch {
       const materializer = this.#materializer.snapshot();
       return Object.freeze({
-        stagingBytes: diagnosticScalar(materializer.stagingBytes),
+        stagingBytes: rendererDiagnosticScalar(materializer.stagingBytes),
         residentBytes: 0,
         textureBytes: 0,
         backingBytes: 0,
-        runtimeBytes: diagnosticScalar(materializer.stagingBytes),
+        runtimeBytes: rendererDiagnosticScalar(materializer.stagingBytes),
         maxTextureBytes: this.#maxTextureBytes,
         maxBackingBytes: this.#maxBackingBytes,
         maxRuntimeBytes: this.#maxRuntimeBytes
@@ -877,7 +883,7 @@ export class Canvas2dRenderer {
     if (stagingBytes === 0 && this.#streams.length === 0) return 0;
     return checkedSum([
       stagingBytes,
-      ...this.#streams.map((frame) => frameBytes(frame))
+      ...this.#streams.map((frame) => canvas2dCpuFrameBytes(frame))
     ]);
   }
 
@@ -889,8 +895,6 @@ export class Canvas2dRenderer {
       this.#materializer.snapshot().resourceCount;
   }
 
-  #isDisposed(): boolean { return this.#state === "disposed"; }
-
   #releaseCpuStorage(): void {
     this.#materializer.dispose();
     this.#streams = [];
@@ -898,90 +902,17 @@ export class Canvas2dRenderer {
   }
 
   #releaseSurfaces(): void {
-    for (const surface of [
-      this.#colorSurface,
-      this.#alphaSurface
-    ]) {
-      if (surface === null) continue;
-      surface.context = null;
-      try {
-        surface.canvas.width = 0;
-        surface.canvas.height = 0;
-      } catch { /* terminal cleanup */ }
-    }
+    releaseCanvas2dSurface(this.#colorSurface);
+    releaseCanvas2dSurface(this.#alphaSurface);
     this.#colorSurface = null;
     this.#alphaSurface = null;
   }
 }
 
-function putPixels(
-  context: CanvasRenderingContext2D,
-  pixels: Uint8ClampedArray,
-  width: number,
-  height: number
-): void {
-  const image = context.createImageData(width, height);
-  if (image.data.byteLength !== pixels.byteLength) {
-    throw new Error("Canvas2D scratch image storage is invalid");
-  }
-  image.data.set(pixels);
-  context.globalCompositeOperation = "copy";
-  context.putImageData(image, 0, 0);
-}
-
-function configureContext(context: CanvasRenderingContext2D): void {
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "low";
-}
-
-function assertContextAvailable(context: CanvasRenderingContext2D): void {
-  const candidate = context as CanvasRenderingContext2D & Readonly<{
-    isContextLost?: () => boolean;
-  }>;
-  if (typeof candidate.isContextLost === "function" && candidate.isContextLost()) {
-    throw new Error("Canvas2D context is lost");
-  }
-}
-
-function canvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
-  return canvas.getContext("2d", {
-    alpha: true,
-    desynchronized: true,
-    willReadFrequently: false
-  });
-}
-
-function frameBytes(frame: CpuFrame): number {
-  return checkedSum([
-    frame.color.byteLength,
-    frame.alpha?.byteLength ?? 0
-  ]);
-}
-
-function surfaceBytes(surface: Surface | null): number {
+function surfaceBytes(surface: Canvas2dSurface | null): number {
   return surface === null
     ? 0
     : rgbaBytes(surface.canvas.width, surface.canvas.height);
-}
-
-function residentKey(group: string, index: number): string {
-  if (!ID.test(group) || !Number.isSafeInteger(index) || index < 0) {
-    throw new RangeError("resident frame key is invalid");
-  }
-  return `${group}\0${String(index)}`;
-}
-
-function cap(value: number | undefined, label: string): number {
-  if (value === undefined) return HARD_BYTES;
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new RangeError(`${label} is invalid`);
-  }
-  return Math.min(value, HARD_BYTES);
-}
-
-function diagnosticScalar(value: unknown): number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value : 0;
 }
 
 class RendererUnavailableError extends Error {

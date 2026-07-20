@@ -22,6 +22,14 @@
       pre { overflow: auto; max-height: 36rem; margin-top: 1rem; padding: 1rem; border-radius: .5rem; background: #18181b; font: 12px/1.45 ui-monospace, monospace; }
       #renderer-canvases { position: fixed; inset: auto auto 0 0; width: 1px; height: 1px; overflow: hidden; opacity: .001; pointer-events: none; }
     </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "@pixel-point/aval-format": "/probe/modules/format/index.js",
+          "@pixel-point/aval-graph": "/probe/modules/graph/index.js"
+        }
+      }
+    </script>
     <script type="module" src="/isolators/renderer/renderer-isolator.js"></script>
   </head>
   <body>

@@ -253,16 +253,19 @@ function readCapabilities(gl) {
 }
 
 function boundedRendererSnapshot(value) {
+  const backend = value.backendDetails;
+  const webgl = backend?.kind === "webgl2" ? backend : null;
   return deepFreeze({
-    backend: value.backend === "canvas2d" ? "canvas2d" : "webgl2",
+    backend: backend?.kind === "canvas2d" ? "canvas2d" : "webgl2",
     backingWidth: safeNonNegativeInteger(value.backingWidth),
     backingHeight: safeNonNegativeInteger(value.backingHeight),
     stagingBytes: safeNonNegativeInteger(value.stagingBytes),
     textureBytes: safeNonNegativeInteger(value.textureBytes),
     runtimeBytes: safeNonNegativeInteger(value.runtimeBytes),
-    uploadMode: value.uploadMode,
-    nativeProbeAttempts: safeNonNegativeInteger(value.nativeProbeAttempts),
-    probeReadbackBytes: safeNonNegativeInteger(value.probeReadbackBytes),
+    uploadMode: webgl?.uploadMode ??
+      (backend?.kind === "canvas2d" ? "rgba-copy" : null),
+    nativeProbeAttempts: safeNonNegativeInteger(webgl?.nativeProbeAttempts),
+    probeReadbackBytes: safeNonNegativeInteger(webgl?.probeReadbackBytes),
     resourceCount: safeNonNegativeInteger(value.resourceCount),
     contextListenerCount: safeNonNegativeInteger(value.contextListenerCount),
     failure: value.failure

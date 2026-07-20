@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -45,18 +45,11 @@ describe("element trust boundary", () => {
 
   it("does not use generated markup, dynamic code, video seeking, or console hooks", async () => {
     const root = resolve(process.cwd(), "packages/element/src");
-    const files = [
-      "aval-element.ts",
-      "player.ts",
-      "decoder.ts",
-      "decoder-worker.ts",
-      "renderer.ts",
-      "shadow-layers.ts",
-      "shadow-style.ts"
-    ];
+    const files = await productionTypescriptFiles(root);
     const source = (await Promise.all(files.map((file) =>
-      readFile(resolve(root, file), "utf8")
+      readFile(file, "utf8")
     ))).join("\n");
+    expect(files.length).toBeGreaterThan(50);
     for (const prohibited of [
       "innerHTML",
       "insertAdjacentHTML",
@@ -69,3 +62,13 @@ describe("element trust boundary", () => {
     ]) expect(source).not.toContain(prohibited);
   });
 });
+
+async function productionTypescriptFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = await Promise.all(entries.map(async (entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return productionTypescriptFiles(path);
+    return entry.isFile() && entry.name.endsWith(".ts") ? [path] : [];
+  }));
+  return files.flat().sort();
+}
