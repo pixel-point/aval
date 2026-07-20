@@ -211,7 +211,7 @@ describe("WebGL resident upload policy", () => {
     expect(fixture.gl.presentationUploadKinds).toEqual(["rgba-copy"]);
     expect(renderer.snapshot().backendDetails).toMatchObject({
       kind: "webgl2",
-      uploadMode: "native-probing",
+      uploadMode: "rgba-copy",
       nativeProbeAttempts: 0
     });
     renderer.dispose();
@@ -258,7 +258,7 @@ describe("WebGL provisional output priming", () => {
     });
     expect(after.backendDetails).toMatchObject({
       kind: "webgl2",
-      uploadMode: "native-probing",
+      uploadMode: "rgba-copy",
       nativeProbeAttempts: 0
     });
 

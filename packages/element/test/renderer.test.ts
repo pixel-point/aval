@@ -13,6 +13,8 @@ import { deriveRenderLayout } from "../src/renderer-geometry.js";
 import { RendererFailureError } from "../src/renderer-diagnostics.js";
 import {
   blackProbePixels,
+  compactOpaqueFrame,
+  compactOpaqueLayout,
   frame,
   frameWithGeometry,
   informativeProbePixels,
@@ -291,15 +293,15 @@ describe("renderer failure diagnostics", () => {
 
 describe("renderer runtime ownership", () => {
   it("qualifies native upload against Canvas readback when RGBA copy is unsupported", async () => {
-    const fixture = webglCanvas();
+    const fixture = webglCanvas(48, 48);
     const pixels = informativeProbePixels();
     fixture.gl.nativeReadback = pixels;
     fixture.gl.rgbaReadback = pixels;
     const readback = rgbaReadbackFixture();
-    const candidate = frame(() => {
+    const candidate = compactOpaqueFrame(() => {
       throw new TypeError("layout size is invalid");
     });
-    const renderer = new Renderer(fixture.canvas, layout(), {
+    const renderer = new Renderer(fixture.canvas, compactOpaqueLayout(), {
       createCanvas: readback.createCanvas
     });
 
@@ -325,14 +327,14 @@ describe("renderer runtime ownership", () => {
   });
 
   it("locks and reuses bounded Canvas readback after a native mismatch", async () => {
-    const fixture = webglCanvas();
+    const fixture = webglCanvas(48, 48);
     fixture.gl.nativeReadback = blackProbePixels();
     fixture.gl.rgbaReadback = informativeProbePixels();
     const readback = rgbaReadbackFixture();
-    const renderer = new Renderer(fixture.canvas, layout(), {
+    const renderer = new Renderer(fixture.canvas, compactOpaqueLayout(), {
       createCanvas: readback.createCanvas
     });
-    const candidate = frame(() => Promise.reject(
+    const candidate = compactOpaqueFrame(() => Promise.reject(
       new TypeError("layout size is invalid")
     ));
 
@@ -426,12 +428,12 @@ describe("renderer runtime ownership", () => {
   });
 
   it("keeps the first frame correct and selects RGBA after silent native corruption", async () => {
-    const fixture = webglCanvas();
+    const fixture = webglCanvas(48, 48);
     fixture.gl.nativeReadback = blackProbePixels();
     fixture.gl.rgbaReadback = informativeProbePixels();
-    const renderer = new Renderer(fixture.canvas, layout());
+    const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await expect(renderer.draw(frame())).resolves.toBeUndefined();
+    await expect(renderer.draw(compactOpaqueFrame())).resolves.toBeUndefined();
 
     expect(fixture.gl.nativeUploadCount).toBe(1);
     expect(fixture.gl.rgbaUploadCount).toBe(1);
@@ -447,7 +449,7 @@ describe("renderer runtime ownership", () => {
       }
     });
 
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
     expect(fixture.gl.nativeUploadCount).toBe(1);
     expect(fixture.gl.rgbaUploadCount).toBe(2);
     expect(fixture.gl.presentationUploadKinds).toEqual([
@@ -457,12 +459,12 @@ describe("renderer runtime ownership", () => {
   });
 
   it("rejects a native mismatch even when the RGBA reference is uninformative", async () => {
-    const fixture = webglCanvas();
+    const fixture = webglCanvas(48, 48);
     fixture.gl.nativeReadback = informativeProbePixels();
     fixture.gl.rgbaReadback = blackProbePixels();
-    const renderer = new Renderer(fixture.canvas, layout());
+    const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
 
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
@@ -474,17 +476,17 @@ describe("renderer runtime ownership", () => {
     });
     expect(fixture.gl.presentationUploadKinds).toEqual(["rgba-copy"]);
 
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
     expect(fixture.gl.nativeUploadCount).toBe(1);
     expect(fixture.gl.rgbaUploadCount).toBe(2);
   });
 
   it("selects RGBA permanently when native probe readback reports a GL error", async () => {
-    const fixture = webglCanvas();
+    const fixture = webglCanvas(48, 48);
     fixture.gl.nextProbeReadError = 0x0502;
-    const renderer = new Renderer(fixture.canvas, layout());
+    const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
 
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
@@ -496,20 +498,20 @@ describe("renderer runtime ownership", () => {
     });
     expect(fixture.gl.presentationUploadKinds).toEqual(["rgba-copy"]);
 
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
     expect(fixture.gl.nativeUploadCount).toBe(1);
     expect(fixture.gl.rgbaUploadCount).toBe(2);
     expect(fixture.gl.readPixelsCount).toBe(1);
   });
 
   it("falls back permanently when a later proven native upload reports a GL error", async () => {
-    const fixture = webglCanvas();
+    const fixture = webglCanvas(48, 48);
     const pixels = informativeProbePixels();
     fixture.gl.nativeReadback = pixels;
     fixture.gl.rgbaReadback = pixels;
-    const renderer = new Renderer(fixture.canvas, layout());
+    const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
         kind: "webgl2",
@@ -520,8 +522,8 @@ describe("renderer runtime ownership", () => {
     expect(fixture.gl.presentationUploadKinds).toEqual(["rgba-copy"]);
 
     fixture.gl.nextNativeUploadError = 0x0502;
-    await renderer.draw(frame());
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame());
 
     expect(webGlDetails(renderer).uploadMode).toBe("rgba-copy");
     expect(fixture.gl.nativeUploadCount).toBe(2);
@@ -535,7 +537,7 @@ describe("renderer runtime ownership", () => {
   });
 
   it("uses the exact premultiplied probe tolerances", async () => {
-    const within = webglCanvas();
+    const within = webglCanvas(48, 48);
     const reference = informativeProbePixels();
     reference[3] = 0;
     const native = reference.slice();
@@ -546,30 +548,30 @@ describe("renderer runtime ownership", () => {
     native[7] = (reference[7] ?? 0) - 1;
     within.gl.nativeReadback = native;
     within.gl.rgbaReadback = reference;
-    const accepted = new Renderer(within.canvas, layout());
+    const accepted = new Renderer(within.canvas, compactOpaqueLayout());
 
-    await accepted.draw(frame());
+    await accepted.draw(compactOpaqueFrame());
     expect(webGlDetails(accepted).uploadMode).toBe("native");
 
-    const outside = webglCanvas();
+    const outside = webglCanvas(48, 48);
     const mismatched = reference.slice();
     mismatched[4] = (reference[4] ?? 0) + 4;
     outside.gl.nativeReadback = mismatched;
     outside.gl.rgbaReadback = reference;
-    const rejected = new Renderer(outside.canvas, layout());
+    const rejected = new Renderer(outside.canvas, compactOpaqueLayout());
 
-    await rejected.draw(frame());
+    await rejected.draw(compactOpaqueFrame());
     expect(webGlDetails(rejected).uploadMode).toBe("rgba-copy");
   });
 
   it("bounds uninformative native qualification and resets only after restore", async () => {
-    const fixture = webglCanvas();
+    const fixture = webglCanvas(48, 48);
     fixture.gl.nativeReadback = blackProbePixels();
     fixture.gl.rgbaReadback = blackProbePixels();
-    const renderer = new Renderer(fixture.canvas, layout());
+    const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await renderer.draw(frame());
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame());
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
         kind: "webgl2",
@@ -577,7 +579,7 @@ describe("renderer runtime ownership", () => {
         nativeProbeAttempts: 2
       }
     });
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
         kind: "webgl2",
@@ -585,7 +587,7 @@ describe("renderer runtime ownership", () => {
         nativeProbeAttempts: 3
       }
     });
-    await renderer.draw(frame());
+    await renderer.draw(compactOpaqueFrame());
     expect(fixture.gl.nativeUploadCount).toBe(3);
     expect(fixture.gl.readPixelsCount).toBe(6);
 
@@ -613,10 +615,10 @@ describe("renderer runtime ownership", () => {
   });
 
   it("releases qualification accounting when context loss interrupts a copy", async () => {
-    const fixture = webglCanvas();
+    const fixture = webglCanvas(48, 48);
     const copy = deferred<readonly PlaneLayout[]>();
-    const renderer = new Renderer(fixture.canvas, layout());
-    const drawing = renderer.draw(frame(() => copy.promise));
+    const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
+    const drawing = renderer.draw(compactOpaqueFrame(() => copy.promise));
     await eventually(() => webGlDetails(renderer).nativeProbeInFlight);
 
     fixture.dispatch("webglcontextlost");
@@ -711,7 +713,7 @@ describe("renderer runtime ownership", () => {
       resourceCount: 4,
       backendDetails: {
         kind: "webgl2",
-        probeReadbackBytes: 8 * 8 * 4 * 2
+        probeReadbackBytes: 0
       },
       sourceCopiesInFlight: 0
     });
@@ -722,7 +724,7 @@ describe("renderer runtime ownership", () => {
     const stagingBytes = 48 * 104 * 4;
     const ownedBackingBytes = Math.ceil(stagingBytes * 5 / 4);
     const admittedBackingBytes = Math.ceil(stagingBytes * 2 * 5 / 4);
-    const probeReadbackBytes = 8 * 8 * 4 * 2;
+    const probeReadbackBytes = 0;
     const ownedRuntimeBytes = textureBytes + ownedBackingBytes + stagingBytes +
       probeReadbackBytes;
     const admittedRuntimeBytes = textureBytes + admittedBackingBytes +
@@ -824,10 +826,10 @@ describe("renderer runtime ownership", () => {
   });
 
   it("keeps an unresolved raw frame copy visible after disposal", async () => {
-    const fixture = webglCanvas();
+    const fixture = webglCanvas(48, 48);
     const copy = deferred<readonly PlaneLayout[]>();
-    const renderer = new Renderer(fixture.canvas, layout());
-    const drawing = renderer.draw(frame(() => copy.promise));
+    const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
+    const drawing = renderer.draw(compactOpaqueFrame(() => copy.promise));
     await eventually(() =>
       renderer.snapshot().sourceCopiesInFlight === 1 &&
       webGlDetails(renderer).nativeProbeInFlight);

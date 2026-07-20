@@ -27,6 +27,19 @@ export function opaqueLayout(): RenderLayout {
   };
 }
 
+export function compactOpaqueLayout(): RenderLayout {
+  return {
+    codedWidth: 48,
+    codedHeight: 48,
+    storageWidth: 48,
+    storageHeight: 48,
+    logicalWidth: 48,
+    logicalHeight: 48,
+    pixelAspect: [1, 1],
+    colorRect: [0, 0, 48, 48]
+  };
+}
+
 export function frame(
   copy: (
     destination: AllowSharedBufferSource,
@@ -50,9 +63,14 @@ export function frame(
 export function frameWithGeometry(
   renderLayout: Readonly<RenderLayout>,
   displayWidth: number,
-  displayHeight: number
+  displayHeight: number,
+  copy: (
+    destination: AllowSharedBufferSource,
+    options?: VideoFrameCopyToOptions
+  ) => Promise<readonly PlaneLayout[]> = async () => [
+    { offset: 0, stride: renderLayout.storageWidth * 4 }
+  ]
 ): VideoFrame {
-  const stride = renderLayout.storageWidth * 4;
   return {
     codedWidth: renderLayout.codedWidth,
     codedHeight: renderLayout.codedHeight,
@@ -64,8 +82,19 @@ export function frameWithGeometry(
       width: renderLayout.storageWidth,
       height: renderLayout.storageHeight
     },
-    copyTo: async () => [{ offset: 0, stride }]
+    copyTo: copy
   } as unknown as VideoFrame;
+}
+
+export function compactOpaqueFrame(
+  copy: (
+    destination: AllowSharedBufferSource,
+    options?: VideoFrameCopyToOptions
+  ) => Promise<readonly PlaneLayout[]> = async () => [
+    { offset: 0, stride: 48 * 4 }
+  ]
+): VideoFrame {
+  return frameWithGeometry(compactOpaqueLayout(), 48, 48, copy);
 }
 
 export function webglCanvas(): Readonly<{
@@ -316,7 +345,7 @@ export function informativeProbePixels(): Uint8Array {
 }
 
 export function rgbaReadbackFixture(
-  pixels = new Uint8ClampedArray(48 * 104 * 4)
+  pixels?: Uint8ClampedArray
 ): Readonly<{
   createCanvas: (width: number, height: number) => HTMLCanvasElement;
   state: {
@@ -338,7 +367,11 @@ export function rgbaReadbackFixture(
     drawImage(...args: unknown[]) { state.drawCalls.push(args); },
     getImageData(_x: number, _y: number, width: number, height: number) {
       if (state.readError !== null) throw state.readError;
-      return { width, height, data: pixels } as ImageData;
+      return {
+        width,
+        height,
+        data: pixels ?? new Uint8ClampedArray(width * height * 4)
+      } as ImageData;
     },
     isContextLost() { return false; }
   };

@@ -79,6 +79,7 @@ export class WebGl2RendererBackend implements RendererBackend {
   ) {
     this.#canvas = canvas;
     this.#layout = layout;
+    this.#native = initialNativeUploadState(layout);
     this.#sink = sink;
     this.#textureBytes = rgbaBytes(layout.codedWidth, layout.codedHeight);
     this.#storageBytes = rgbaBytes(layout.storageWidth, layout.storageHeight);
@@ -438,6 +439,7 @@ export class WebGl2RendererBackend implements RendererBackend {
   }
 
   #initialize(construct: boolean): void {
+    const native = initialNativeUploadState(this.#layout);
     let gl: WebGL2RenderingContext | null;
     try {
       gl = this.#canvas.getContext("webgl2", {
@@ -468,8 +470,10 @@ export class WebGl2RendererBackend implements RendererBackend {
       gl.clearColor(0, 0, 0, 0);
       gl.disable(gl.BLEND);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      nativeProbe = new Uint8Array(PROBE_BYTES);
-      referenceProbe = new Uint8Array(PROBE_BYTES);
+      nativeProbe = native === 0
+        ? new Uint8Array(0) : new Uint8Array(PROBE_BYTES);
+      referenceProbe = native === 0
+        ? new Uint8Array(0) : new Uint8Array(PROBE_BYTES);
     } catch (reason) {
       const failure = backendFailure("context-event", reason, {
         glError: capturedGlError(reason, gl), contextLost: contextLost(gl)
@@ -480,7 +484,7 @@ export class WebGl2RendererBackend implements RendererBackend {
     this.#gl = gl;
     this.#program = program;
     this.#state = "active";
-    this.#native = 1;
+    this.#native = native;
     this.#nativeProbeAttempts = 0;
     this.#nativeProbeInFlight = false;
     this.#nativeProbe = nativeProbe;
@@ -614,7 +618,7 @@ export function planWebGl2Memory(
       plannedTargetCount
     )),
     rgbaBytes(backingWidth, backingHeight),
-    PROBE_ACCOUNTED_BYTES
+    initialNativeUploadState(layout) === 1 ? PROBE_ACCOUNTED_BYTES : 0
   );
 }
 
@@ -622,6 +626,13 @@ function nativeUploadMode(value: number): RendererUploadMode {
   if (value === 0) return "rgba-copy";
   if (value === 2) return "native";
   return "native-probing";
+}
+
+function initialNativeUploadState(layout: Readonly<RenderLayout>): 0 | 1 {
+  // Packed alpha turns decoded luma into output transparency. Some native
+  // VideoFrame texture paths preserve a coarse probe while corrupting that
+  // spatial relationship, so use the already-bounded RGBA path end to end.
+  return layout.alphaRect === undefined ? 1 : 0;
 }
 
 function failedProbe(

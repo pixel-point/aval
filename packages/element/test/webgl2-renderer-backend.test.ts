@@ -7,11 +7,78 @@ import {
 import { allocationBytes, rgbaBytes } from "../src/renderer-geometry.js";
 import { WebGl2RendererBackend } from "../src/webgl2-renderer-backend.js";
 import {
+  compactOpaqueFrame,
+  compactOpaqueLayout,
+  frame,
   layout,
   webglCanvas
 } from "./renderer-webgl-test-support.js";
 
 describe("WebGl2RendererBackend", () => {
+  it("keeps packed-alpha streaming on deterministic RGBA uploads", async () => {
+    const fixture = webglCanvas();
+    const backend = new WebGl2RendererBackend(
+      fixture.canvas,
+      layout(),
+      () => undefined
+    );
+    const target = backend.allocateTarget("stream", 0);
+    const pixels = new Uint8Array(48 * 104 * 4);
+
+    await backend.upload(target, Object.freeze({
+      frame: frame(),
+      rgba: async () => Object.freeze({
+        width: 48,
+        height: 104,
+        stride: 48 * 4,
+        pixels
+      })
+    }));
+
+    expect(fixture.gl.nativeUploadCount).toBe(0);
+    expect(fixture.gl.readPixelsCount).toBe(0);
+    expect(fixture.gl.rgbaUploadCount).toBe(1);
+    expect(fixture.gl.rgbaUploadSources).toEqual([pixels]);
+    expect(backend.snapshot(0, 48, 104).details).toMatchObject({
+      uploadMode: "rgba-copy",
+      nativeProbeAttempts: 0,
+      probeReadbackBytes: 0,
+      nativeProbeInFlight: false
+    });
+    backend.dispose();
+  });
+
+  it("retains bounded native qualification for opaque streaming", async () => {
+    const fixture = webglCanvas(48, 48);
+    const backend = new WebGl2RendererBackend(
+      fixture.canvas,
+      compactOpaqueLayout(),
+      () => undefined
+    );
+    const target = backend.allocateTarget("stream", 0);
+
+    await backend.upload(target, Object.freeze({
+      frame: compactOpaqueFrame(),
+      rgba: async () => Object.freeze({
+        width: 48,
+        height: 48,
+        stride: 48 * 4,
+        pixels: new Uint8Array(48 * 48 * 4)
+      })
+    }));
+
+    expect(fixture.gl.nativeUploadCount).toBe(1);
+    expect(fixture.gl.readPixelsCount).toBe(2);
+    expect(fixture.gl.rgbaUploadCount).toBe(1);
+    expect(backend.snapshot(0, 48, 48).details).toMatchObject({
+      uploadMode: "native",
+      nativeProbeAttempts: 1,
+      probeReadbackBytes: 8 * 8 * 4 * 2,
+      nativeProbeInFlight: false
+    });
+    backend.dispose();
+  });
+
   it("uploads explicit RGBA without attempting or mutating native qualification", async () => {
     const fixture = webglCanvas();
     const backend = new WebGl2RendererBackend(
@@ -31,7 +98,7 @@ describe("WebGl2RendererBackend", () => {
     expect(fixture.gl.nativeUploadCount).toBe(0);
     expect(fixture.gl.rgbaUploadCount).toBe(1);
     expect(backend.snapshot(1, 48, 104).details).toMatchObject({
-      uploadMode: "native-probing",
+      uploadMode: "rgba-copy",
       nativeProbeAttempts: 0
     });
     backend.dispose();
