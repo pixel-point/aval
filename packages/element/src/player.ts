@@ -54,6 +54,7 @@ import {
   type RendererContextChange,
   type RendererSnapshot
 } from "./renderer.js";
+import { deriveRenderLayout } from "./renderer-geometry.js";
 import {
   RendererFailureError,
   type RendererFailureDiagnostic
@@ -2358,14 +2359,9 @@ function renderLayout(
   const color = rendition.alphaLayout.colorRect;
   const alpha = rendition.alphaLayout.type === "stacked"
     ? rendition.alphaLayout.alphaRect : undefined;
-  const width = color[2] + color[2] % 2;
-  const paneHeight = color[3] + color[3] % 2;
-  const height = alpha === undefined ? paneHeight : paneHeight * 2 + 8;
-  return Object.freeze({
+  return deriveRenderLayout({
     codedWidth: rendition.codedWidth,
     codedHeight: rendition.codedHeight,
-    storageWidth: width,
-    storageHeight: height,
     logicalWidth: manifest.canvas.width,
     logicalHeight: manifest.canvas.height,
     pixelAspect: manifest.canvas.pixelAspect,

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { deriveVideoRenditionGeometry } from "@pixel-point/aval-format";
+
 import { Canvas2dRenderer } from "../src/canvas2d-renderer.js";
 import {
   calculateRendererViewport,
+  deriveRenderLayout,
   type RenderLayout
 } from "../src/renderer-geometry.js";
 import { RendererFailureError } from "../src/renderer-diagnostics.js";
@@ -380,17 +383,23 @@ describe("Canvas2dRenderer geometry and lifecycle", () => {
 });
 
 function packedLayout(): RenderLayout {
-  return {
-    codedWidth: 4,
-    codedHeight: 12,
-    storageWidth: 4,
-    storageHeight: 12,
+  const geometry = deriveVideoRenditionGeometry({
+    canvasWidth: 3,
+    canvasHeight: 2,
+    layout: "packed-alpha",
+    visibleWidth: 3,
+    visibleHeight: 2,
+    storage: { widthAlignment: 2, heightAlignment: 2 }
+  });
+  return deriveRenderLayout({
+    codedWidth: geometry.codedWidth,
+    codedHeight: geometry.codedHeight,
     logicalWidth: 3,
     logicalHeight: 2,
     pixelAspect: [1, 1],
-    colorRect: [0, 0, 3, 2],
-    alphaRect: [0, 10, 3, 2]
-  };
+    colorRect: geometry.visibleColorRect,
+    alphaRect: geometry.visibleAlphaRect!
+  });
 }
 
 function packedFrame(alpha: readonly [number, number, number]): VideoFrame {

@@ -1,12 +1,59 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  deriveVideoRenditionGeometry,
+  PACKED_ALPHA_GUTTER
+} from "@pixel-point/aval-format";
+
+import {
   Renderer,
   type RenderLayout
 } from "../src/renderer.js";
+import { deriveRenderLayout } from "../src/renderer-geometry.js";
 import { RendererFailureError } from "../src/renderer-diagnostics.js";
 
 describe("renderer geometry admission", () => {
+  it.each([
+    ["odd", 47, 47],
+    ["even", 48, 32]
+  ] as const)("derives %s packed storage from format geometry", (
+    _parity,
+    visibleWidth,
+    visibleHeight
+  ) => {
+    const geometry = deriveVideoRenditionGeometry({
+      canvasWidth: visibleWidth,
+      canvasHeight: visibleHeight,
+      layout: "packed-alpha",
+      visibleWidth,
+      visibleHeight,
+      storage: { widthAlignment: 16, heightAlignment: 16 }
+    });
+
+    const result = deriveRenderLayout({
+      codedWidth: geometry.codedWidth,
+      codedHeight: geometry.codedHeight,
+      logicalWidth: visibleWidth,
+      logicalHeight: visibleHeight,
+      pixelAspect: [1, 1],
+      colorRect: geometry.visibleColorRect,
+      alphaRect: geometry.visibleAlphaRect!
+    });
+
+    expect(result.colorRect).toEqual(geometry.visibleColorRect);
+    expect(result.alphaRect).toEqual(geometry.visibleAlphaRect);
+    expect([
+      result.storageWidth,
+      result.storageHeight
+    ]).toEqual(geometry.decodedStorageRect.slice(2));
+    expect([result.codedWidth, result.codedHeight]).toEqual([
+      geometry.codedWidth,
+      geometry.codedHeight
+    ]);
+    expect(result.alphaRect![1] - (visibleHeight + visibleHeight % 2))
+      .toBe(PACKED_ALPHA_GUTTER);
+  });
+
   it("accepts canonical even-padded odd packed storage", () => {
     expect(() => new Renderer(canvas(), layout())).toThrow(/WebGL2/u);
   });

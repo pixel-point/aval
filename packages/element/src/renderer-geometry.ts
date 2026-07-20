@@ -1,3 +1,9 @@
+import {
+  deriveVideoRenditionGeometry,
+  FormatError,
+  type VideoRenditionGeometry
+} from "@pixel-point/aval-format";
+
 import { sameAspectRatio } from "./media-geometry.js";
 
 export interface RenderLayout {
@@ -11,6 +17,11 @@ export interface RenderLayout {
   readonly colorRect: readonly [number, number, number, number];
   readonly alphaRect?: readonly [number, number, number, number];
 }
+
+export type RenderLayoutInput = Omit<
+  RenderLayout,
+  "storageWidth" | "storageHeight"
+>;
 
 export type RendererFit = "contain" | "cover" | "fill" | "none";
 
@@ -27,7 +38,28 @@ export interface RendererBackingSize {
   readonly dpr: number;
 }
 
+export function deriveRenderLayout(
+  value: Readonly<RenderLayoutInput>
+): RenderLayout {
+  const geometry = canonicalRenderGeometry(value);
+  return checkedRenderLayoutAgainstGeometry({
+    ...value,
+    storageWidth: geometry.decodedStorageRect[2],
+    storageHeight: geometry.decodedStorageRect[3]
+  }, geometry);
+}
+
 export function checkedRenderLayout(value: Readonly<RenderLayout>): RenderLayout {
+  return checkedRenderLayoutAgainstGeometry(
+    value,
+    canonicalRenderGeometry(value)
+  );
+}
+
+function checkedRenderLayoutAgainstGeometry(
+  value: Readonly<RenderLayout>,
+  geometry: Readonly<VideoRenditionGeometry>
+): RenderLayout {
   const codedWidth = rendererDimension(value.codedWidth);
   const codedHeight = rendererDimension(value.codedHeight);
   const storageWidth = rendererDimension(value.storageWidth);
@@ -47,17 +79,16 @@ export function checkedRenderLayout(value: Readonly<RenderLayout>): RenderLayout
   const colorRect = checkedRect(value.colorRect, storageWidth, storageHeight);
   const alphaRect = value.alphaRect === undefined
     ? undefined : checkedRect(value.alphaRect, storageWidth, storageHeight);
-  const paneWidth = colorRect[2] + colorRect[2] % 2;
-  const paneHeight = colorRect[3] + colorRect[3] % 2;
-  const expectedHeight = alphaRect === undefined
-    ? paneHeight : paneHeight * 2 + 8;
+  const expectedColor = geometry.visibleColorRect;
+  const expectedAlpha = geometry.visibleAlphaRect;
+  const expectedStorage = geometry.decodedStorageRect;
   if (
-    colorRect[0] !== 0 || colorRect[1] !== 0 ||
-    storageWidth !== paneWidth || storageHeight !== expectedHeight ||
-    alphaRect !== undefined && (
-      alphaRect[0] !== 0 || alphaRect[1] !== paneHeight + 8 ||
-      alphaRect[2] !== colorRect[2] || alphaRect[3] !== colorRect[3]
-    )
+    !sameRect(colorRect, expectedColor) ||
+    storageWidth !== expectedStorage[2] ||
+    storageHeight !== expectedStorage[3] ||
+    alphaRect === undefined !== (expectedAlpha === undefined) ||
+    alphaRect !== undefined && expectedAlpha !== undefined &&
+      !sameRect(alphaRect, expectedAlpha)
   ) {
     throw new RangeError("renderer storage rectangle is not canonical");
   }
@@ -73,6 +104,45 @@ export function checkedRenderLayout(value: Readonly<RenderLayout>): RenderLayout
     colorRect,
     ...(alphaRect === undefined ? {} : { alphaRect })
   });
+}
+
+function canonicalRenderGeometry(
+  value: Readonly<Pick<
+    RenderLayout,
+    "colorRect" | "alphaRect"
+  >>
+): Readonly<VideoRenditionGeometry> {
+  if (value.colorRect.length !== 4) {
+    throw new RangeError("renderer rectangle is invalid");
+  }
+  const visibleWidth = rendererDimension(value.colorRect[2]);
+  const visibleHeight = rendererDimension(value.colorRect[3]);
+  try {
+    return deriveVideoRenditionGeometry({
+      canvasWidth: visibleWidth,
+      canvasHeight: visibleHeight,
+      layout: value.alphaRect === undefined ? "opaque" : "packed-alpha",
+      visibleWidth,
+      visibleHeight,
+      storage: { widthAlignment: 1, heightAlignment: 1 }
+    });
+  } catch (error) {
+    if (error instanceof FormatError) {
+      throw new RangeError(
+        "renderer storage rectangle is not canonical",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+}
+
+function sameRect(
+  left: readonly [number, number, number, number],
+  right: readonly [number, number, number, number]
+): boolean {
+  return left[0] === right[0] && left[1] === right[1] &&
+    left[2] === right[2] && left[3] === right[3];
 }
 
 export function validateRenderFrame(
