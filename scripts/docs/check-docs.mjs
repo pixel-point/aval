@@ -19,6 +19,7 @@ const required = [
   "docs/network-and-integrity.md",
   "docs/accessibility-and-motion.md", "docs/performance-and-budgets.md",
   "docs/troubleshooting.md", "docs/browser-support.md", "docs/format/1.0.md",
+  "docs/format/1.1.md",
   "docs/project/1.0.md", "docs/security.md", "docs/versioning.md",
   "docs/releases/1.0.0.md",
   "docs/certification/method.md", "SECURITY.md", "THREAT-MODEL.md",

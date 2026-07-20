@@ -5,9 +5,10 @@ loops, named application states, authored triggers, bounded transitions,
 reversals, and packed transparency.
 
 One logical animation is published as a codec bundle. Each codec gets its own
-AVAL 1.0 file—AV1, VP9, H.265/HEVC, or H.264—and the browser selects the first
-ordered `<source>` that decodes, validates, and presents an initial frame. The
-state graph and authored timing are identical in every file.
+AVAL wire 1.1 file—AV1, VP9, H.265/HEVC, or H.264—and the browser selects the
+first ordered `<source>` that decodes and passes pre-readiness output
+qualification. The state graph and authored timing are identical in every
+file.
 
 ## Five-minute start
 
@@ -138,7 +139,7 @@ obligations remain the publisher's responsibility.
 ## Packages
 
 - `@pixel-point/aval-graph`: deterministic state and route engine.
-- `@pixel-point/aval-format`: strict AVAL wire 1.0 parser, validator, and writer.
+- `@pixel-point/aval-format`: strict AVAL wire 1.0/1.1 parser, validator, and writer.
 - `@pixel-point/aval-compiler`: project 1.0 authoring API and bundle compiler.
 - `@pixel-point/aval-player-web`: bounded loader, codec probing, decoder
   scheduling, renderer, and page resource management.

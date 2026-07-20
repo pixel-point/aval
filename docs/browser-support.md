@@ -59,18 +59,19 @@ present a real initial frame. It does not sniff the user agent or call media
 element `canPlayType()`.
 
 A deterministically unsupported codec/configuration advances to the next
-authored rendition or source. A pre-commit decoder failure also advances when
-its bounded diagnostic evidence identifies a codec qualification failure:
-unsupported configuration, invalid decoded output, or an `EncodingError`/
-`NotSupportedError` during configure, decode, flush, or output validation.
-One renderer qualification failure also advances before commit: an exact,
-candidate-scoped `NotSupportedError` from the RGBA-copy runtime path with no GL,
-context-loss, or cleanup failure. Network, CORS/CSP, integrity, malformed-asset,
-worker transport, every other WebGL/resource or renderer/context failure,
-cleanup, abort, and watchdog failures remain terminal for that generation. They
-reject `prepare()` with `AvalPlaybackError` and raise one fatal `error` event;
-the application decides how to respond. Within a file, renditions remain in
-authored quality order.
+authored rendition or source. During provisional startup, only the closed typed
+decoder cases—unsupported configuration and explicit `NotSupportedError` or
+`EncodingError` from configure, decode, or flush—plus decoded metadata mismatch
+and a wire-1.1 packed-alpha witness mismatch may advance. Diagnostics retain
+evidence but are never parsed to reconstruct this policy.
+
+Renderer and RGBA-materializer failures are terminal, including an unsupported
+`VideoFrame.copyTo({ format: "RGBA" })` followed by an unavailable or failed
+Canvas2D readback. Network, CORS/CSP, integrity, malformed assets, legacy `1.0`
+packed-alpha assets, worker transport, resources, contexts, cleanup, abort, and
+watchdog failures are also terminal. They reject `prepare()` with
+`AvalPlaybackError` and raise one fatal `error` event; the application decides
+how to respond. Within a file, renditions remain in authored quality order.
 After `interactiveReady`, a fatal decoder failure is terminal and never
 re-enters source selection. The runtime never silently changes canvas size,
 frame rate, or active codec.

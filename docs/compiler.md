@@ -1,7 +1,7 @@
 # Compiler
 
 The CLI supports `init`, `compile`, `dev`, `inspect`, `validate`, and `unpack`.
-Project schema `1.0` produces one wire-format `1.0` file per requested codec.
+Project schema `1.0` produces one wire-format `1.1` file per requested codec.
 
 ```sh
 npx avl init my-motion
@@ -13,7 +13,9 @@ npx avl validate dist/my-motion/av1.avl
 Inputs are strict JSON projects and author-sized video or PNG sequences. The
 compiler normalizes timing, creates independently decodable video units,
 validates exact geometry and alpha policy, and atomically publishes the whole
-codec bundle. An
+codec bundle. Packed-alpha renditions include a bounded witness verified by
+decoding the exact emitted unit; compilation fails if the emitted pixels cannot
+support that proof. An
 AVAL contains no embedded poster, static image, or host fallback bytes.
 Build reports record the resolved FFmpeg/FFprobe fingerprints and quality
 results. In explicit projects, visual-seam heuristic misses are reported for
@@ -57,5 +59,6 @@ tools. Codec patent/licensing obligations are not bundled or cleared by this
 project. Use a reviewed local toolchain and obtain legal review for production
 distribution.
 
-See [project 1.0](project/1.0.md) and [wire format 1.0](format/1.0.md) for the
-exact authoring and payload contracts.
+See [project 1.0](project/1.0.md), [wire format 1.1](format/1.1.md), and the
+[legacy wire 1.0 contract](format/1.0.md) for the exact authoring and payload
+contracts.
