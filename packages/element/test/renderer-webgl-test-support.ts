@@ -89,7 +89,10 @@ export function webglCanvas(width = 48, height = 104): Readonly<{
       listeners.set(type, listener);
     },
     removeEventListener(type: string) { listeners.delete(type); },
-    getContext() { return gl as unknown as WebGL2RenderingContext; }
+    getContext() {
+      gl.contextRequestCount += 1;
+      return gl as unknown as WebGL2RenderingContext;
+    }
   } as unknown as HTMLCanvasElement;
   const dispatch = (type: "webglcontextlost" | "webglcontextrestored"): void => {
     gl.contextLost = type === "webglcontextlost";
@@ -123,6 +126,8 @@ export class TestGl {
   public readonly UNSIGNED_BYTE = 20;
   public readonly UNPACK_ALIGNMENT = 21;
   public readonly BLEND = 22;
+  public readonly UNMASKED_VENDOR_WEBGL = 23;
+  public readonly UNMASKED_RENDERER_WEBGL = 24;
   public readonly OUT_OF_MEMORY = 0x0505;
 
   public readonly createdTextures: WebGLTexture[] = [];
@@ -144,9 +149,12 @@ export class TestGl {
   public programLinked = true;
   public programLinkError = 0;
   public deleteProgramError = 0;
+  public deletedPrograms = 0;
+  public setupError: unknown = null;
   public storageError = 0;
   public rgbaUploadError = 0;
   public contextLost = false;
+  public contextRequestCount = 0;
   #bound: WebGLTexture | null = null;
   #lastUploadKind: "native" | "rgba-copy" = "rgba-copy";
   #viewportWidth = 0;
@@ -154,12 +162,14 @@ export class TestGl {
   #error = 0;
   #lost = false;
 
-  public getParameter(parameter: number): number | readonly number[] {
+  public getParameter(parameter: number): number | string | readonly number[] {
     if (parameter === this.MAX_TEXTURE_SIZE) return this.maxTextureSize;
     if (parameter === this.MAX_ARRAY_TEXTURE_LAYERS) return this.maxResidentTextures;
     if (parameter === this.MAX_VIEWPORT_DIMS) {
       return [this.maxViewportWidth, this.maxViewportHeight];
     }
+    if (parameter === this.UNMASKED_VENDOR_WEBGL) return "Synthetic Vendor";
+    if (parameter === this.UNMASKED_RENDERER_WEBGL) return "Synthetic Renderer";
     return 8_192;
   }
 
@@ -177,7 +187,15 @@ export class TestGl {
     } as WebGLContextAttributes;
   }
 
-  public getExtension(): null { return null; }
+  public getExtension(name: string): Readonly<{
+    UNMASKED_VENDOR_WEBGL: number;
+    UNMASKED_RENDERER_WEBGL: number;
+  }> | null {
+    return name === "WEBGL_debug_renderer_info" ? Object.freeze({
+      UNMASKED_VENDOR_WEBGL: this.UNMASKED_VENDOR_WEBGL,
+      UNMASKED_RENDERER_WEBGL: this.UNMASKED_RENDERER_WEBGL
+    }) : null;
+  }
   public createShader(): WebGLShader { return {} as WebGLShader; }
   public shaderSource(): void {}
   public compileShader(): void {}
@@ -193,6 +211,7 @@ export class TestGl {
     return this.programLinked;
   }
   public deleteProgram(): void {
+    this.deletedPrograms += 1;
     if (this.deleteProgramError !== 0) this.#error = this.deleteProgramError;
   }
   public createTexture(): WebGLTexture {
@@ -227,7 +246,9 @@ export class TestGl {
   public getUniformLocation(): WebGLUniformLocation {
     return {} as WebGLUniformLocation;
   }
-  public clearColor(): void {}
+  public clearColor(): void {
+    if (this.setupError !== null) throw this.setupError;
+  }
   public disable(): void {}
   public pixelStorei(): void {}
   public viewport(_x: number, _y: number, width: number, height: number): void {

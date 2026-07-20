@@ -42,7 +42,7 @@ export interface RendererSnapshot {
   readonly failure: Readonly<RendererFailureDiagnostic> | null;
 }
 
-export interface RendererBackend {
+export interface RendererRuntime {
   resize(
     cssWidth: number,
     cssHeight: number,
