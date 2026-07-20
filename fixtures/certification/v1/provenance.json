@@ -1,0 +1,49 @@
+{
+  "provenanceVersion": "1.0",
+  "formatVersion": "1.1",
+  "fixture": "aval-qualified-certification-four-codec-bundle",
+  "license": "CC0-1.0 generated fixture sources",
+  "rebuild": "node fixtures/certification/v1/update-fixture.mjs",
+  "source": {
+    "path": "fixtures/compiler/v1/source/motion.json",
+    "bytes": 2214,
+    "sha256": "ea216a51b643f66b2ccf676451766a78e8a6f5863641b7d02300026a0fbd4528"
+  },
+  "sourceProvenance": {
+    "provenancePath": "fixtures/compiler/v1/provenance.json",
+    "provenanceSha256": "73a9c3dfdf8243e75b1bc8dd7753aadd03e901d23086101d3ac0ae4fe0e01047"
+  },
+  "buildReport": {
+    "path": "fixtures/certification/v1/build.json",
+    "bytes": 26131,
+    "sha256": "12905824be2cc8f231a7762ff3f67f316c140140115b4d8d3963f31380e83188"
+  },
+  "outputs": [
+    {
+      "path": "fixtures/certification/v1/av1.avl",
+      "bytes": 13808,
+      "sha256": "5166bf214af9442719bd44691aa4f4025ed051b4bd85af8c741058994b496cd8"
+    },
+    {
+      "path": "fixtures/certification/v1/vp9.avl",
+      "bytes": 14144,
+      "sha256": "d97cfc8c7014ec46cf635cbcdb11d69cfd520dbd3cd136a920e23ac76d74c478"
+    },
+    {
+      "path": "fixtures/certification/v1/h265.avl",
+      "bytes": 12479,
+      "sha256": "4f97fe5ba8fe71ded4dc0839eb9820f2d75a92c58d9e44d3a42f58af0ba05c8c"
+    },
+    {
+      "path": "fixtures/certification/v1/h264.avl",
+      "bytes": 14067,
+      "sha256": "20cc28540a087f680539c1fdc9d5c5ebee5b80d7483c545d6ed243ebbda3a9ca"
+    }
+  ],
+  "codecStrings": {
+    "av1": "av01.0.00M.10.0.110.01.01.01.0",
+    "vp9": "vp09.00.10.08.01.01.01.01.00",
+    "h265": "hvc1.1.6.L30.90",
+    "h264": "avc1.42E00B"
+  }
+}

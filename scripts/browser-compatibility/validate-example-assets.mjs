@@ -93,11 +93,10 @@ const BUNDLE_CONTRACTS = Object.freeze([
  * Validate every checked-in browser demo asset against its compiler report,
  * generated page markup, authored state graph, and wire/output profile.
  *
- * The end-user Playground intentionally compiles the current wire-1.1
- * packed-alpha profile. `fixtures/conformance/v1` remains the frozen wire-1.0
- * compatibility authority, so byte equality between those independently
- * versioned artifacts would prevent the browser example from adopting the
- * output-qualification contract this gate is responsible for validating.
+ * The end-user Playground consumes the canonical wire-1.1 packed-alpha
+ * certification bundle byte-for-byte. `fixtures/conformance/v1` remains the
+ * independent frozen wire-1.0 compatibility authority used only to verify the
+ * typed unsupported-profile boundary.
  */
 export async function validateExampleAssets({
   repositoryRoot = DEFAULT_REPOSITORY_ROOT

@@ -36,8 +36,10 @@ export interface ProvisionalOutputQualificationInput {
 }
 
 export class UnsupportedPlaybackProfileError extends Error {
-  public constructor() {
-    super("legacy packed-alpha output is outside the qualified playback profile");
+  public constructor(
+    message = "legacy packed-alpha output is outside the qualified playback profile"
+  ) {
+    super(message);
     this.name = "NotSupportedError";
   }
 }

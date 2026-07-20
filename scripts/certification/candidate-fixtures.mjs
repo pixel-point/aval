@@ -1,10 +1,14 @@
 import { dirname, resolve } from "node:path";
 
+import { FATAL_BOUNDARY_FIXTURE_PATH } from "./certification-fixture-authority.mjs";
+
 /** Extract trusted graph models from the exact `.avl` artifacts in a validated candidate. */
 export async function loadCandidateFixtureAuthority(candidate, candidateManifestPath, certification, options = {}) {
   const format = await import(resolve("packages/format/dist/index.js"));
   const candidateRoot = dirname(resolve(candidateManifestPath));
-  const digests = new Set(candidate.artifacts.filter(({ path }) => path.startsWith("fixtures/")).map(({ sha256 }) => sha256));
+  const digests = new Set(candidate.artifacts
+    .filter(({ path }) => path.startsWith("fixtures/"))
+    .map(({ sha256 }) => sha256));
   const fatalBoundaryFixtureDigests = new Set();
   const harnessDigests = new Set();
   const models = new Map();
@@ -29,7 +33,7 @@ export async function loadCandidateFixtureAuthority(candidate, candidateManifest
     const bytes = await readCandidateArtifact(candidateRoot, artifact, Math.min(maximumArtifactBytes, format.FORMAT_DEFAULT_BUDGETS.maxFileBytes), certification, options.verificationHook);
     const validated = format.validateCompleteAsset({ bytes });
     models.set(artifact.sha256, certification.runtimeFixtureModelFromManifest(validated.frontIndex.manifest));
-    if (artifact.path === "fixtures/conformance/v1/h264.avl") fatalBoundaryFixtureDigests.add(artifact.sha256);
+    if (artifact.path === FATAL_BOUNDARY_FIXTURE_PATH) fatalBoundaryFixtureDigests.add(artifact.sha256);
   }
   return Object.freeze({
     digests,

@@ -5,6 +5,8 @@ import {
   type VideoCodec
 } from "@pixel-point/aval-format";
 
+import { QUALIFIED_FIXTURE_PREFIX } from "../fixture-routes.js";
+
 type Codec = VideoCodec;
 
 interface SourcePlaygroundApi {
@@ -77,7 +79,7 @@ Object.defineProperty(window, "avalSourcePlayground", {
 async function initialize(): Promise<void> {
   status.textContent = "Loading the AVAL 1.0 bundle report…";
   try {
-    const response = await fetch("/__aval_v1__/build.json", {
+    const response = await fetch(`${QUALIFIED_FIXTURE_PREFIX}build.json`, {
       cache: "no-store",
       headers: { "X-Aval-Session": session }
     });
@@ -92,7 +94,7 @@ async function initialize(): Promise<void> {
       if (source === null || asset === undefined) {
         throw new Error(`bundle report is missing the ordered ${codec} source`);
       }
-      const url = new URL(`/__aval_v1__/${asset.path}`, location.href);
+      const url = new URL(`${QUALIFIED_FIXTURE_PREFIX}${asset.path}`, location.href);
       url.searchParams.set("session", session);
       source.src = url.href;
       source.type = asset.type;

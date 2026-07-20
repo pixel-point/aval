@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 
 import { canonicalJsonBytes } from "../../packages/certification/src/canonical-json.js";
 import { evaluateFatalErrorBoundaryLedger } from "../../packages/certification/src/fatal-error-boundary-ledger.js";
-import { FUNCTIONAL_FIXTURE_DIGEST } from "../../apps/playground/src/certification/functional-fixture.js";
+import {
+  FUNCTIONAL_FIXTURE_DIGEST,
+  FUNCTIONAL_SOURCE_URL
+} from "../../apps/playground/src/certification/functional-fixture.js";
 
 interface BrowserCertificationApi {
   readonly ready: Promise<void>;
@@ -159,7 +162,7 @@ async function installRunConfig(page: Page): Promise<void> {
         commit: "a".repeat(40),
         tree: "b".repeat(40),
         operatorRole: "automated-candidate-boundary-check",
-        sourceUrl: "/__aval_v1__/h264.avl?session=m9-functional",
+        sourceUrl: FUNCTIONAL_SOURCE_URL,
         profileClean: false,
         expectedRepetitions: 1,
         environment

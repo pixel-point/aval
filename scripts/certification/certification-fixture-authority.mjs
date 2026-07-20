@@ -1,0 +1,3 @@
+export const CERTIFICATION_FIXTURE_DIRECTORY = "fixtures/certification/v1";
+export const FATAL_BOUNDARY_FIXTURE_PATH =
+  `${CERTIFICATION_FIXTURE_DIRECTORY}/h264.avl`;

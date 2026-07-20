@@ -16,6 +16,7 @@ describe("repository fixture provenance composition", () => {
     };
     expect(result.status).toBe("passed");
     expect(result.files.map(({ path }) => path)).toEqual([
+      "fixtures/certification/v1/provenance.json",
       "fixtures/compiler/v1/provenance.json",
       "fixtures/conformance/v1/provenance.json",
       "fixtures/starter/v1-idle-hover/provenance.json"

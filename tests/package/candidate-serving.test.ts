@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +11,7 @@ import {
   readCandidateAsset,
   startCandidateServer
 } from "../../scripts/certification/serve-candidate.mjs";
+import { FATAL_BOUNDARY_FIXTURE_PATH } from "../../scripts/certification/certification-fixture-authority.mjs";
 
 const FATAL_BOUNDARY_PATH = "/__aval_certification__/fatal-boundary-network.avl";
 const CANDIDATE_RUN_CONFIG_PATH = "/__aval_certification__/run-config.json";
@@ -68,12 +69,15 @@ describe("candidate server byte authority", () => {
     try {
       const harness = Buffer.from("<!doctype html><title>certification</title>\n");
       const fixture = Buffer.alloc(160, 0x61);
-      await mkdir(join(root, "fixtures", "conformance", "v1"), { recursive: true });
+      const fixturePath = FATAL_BOUNDARY_FIXTURE_PATH;
+      await mkdir(join(root, dirname(fixturePath)), {
+        recursive: true
+      });
       await writeFile(join(root, "certification.html"), harness);
-      await writeFile(join(root, "fixtures", "conformance", "v1", "h264.avl"), fixture);
+      await writeFile(join(root, fixturePath), fixture);
       const artifacts = [
         { path: "certification.html", sha256: sha256(harness), byteLength: harness.byteLength, mediaType: "text/html" },
-        { path: "fixtures/conformance/v1/h264.avl", sha256: sha256(fixture), byteLength: fixture.byteLength, mediaType: "application/octet-stream" }
+        { path: fixturePath, sha256: sha256(fixture), byteLength: fixture.byteLength, mediaType: "application/octet-stream" }
       ];
       const manifest = Buffer.from(`${JSON.stringify({
         schemaVersion: "1.0",
@@ -107,7 +111,7 @@ describe("candidate server byte authority", () => {
         harnessDigest: sha256(harness),
         commit: "a".repeat(40),
         tree: "b".repeat(40),
-        sourceUrl: "/fixtures/conformance/v1/h264.avl"
+        sourceUrl: `/${fixturePath}`
       });
 
       const fault = await fetch(`${origin}${FATAL_BOUNDARY_PATH}`);

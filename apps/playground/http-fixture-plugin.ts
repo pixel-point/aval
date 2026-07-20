@@ -11,6 +11,11 @@ import {
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, PreviewServer, ViteDevServer } from "vite";
 
+import {
+  LEGACY_UNSUPPORTED_FIXTURE_PREFIX,
+  QUALIFIED_FIXTURE_PREFIX
+} from "./fixture-routes.js";
+
 type Codec = VideoCodec;
 
 interface FixtureAsset {
@@ -33,23 +38,43 @@ interface RequestRecord {
   readonly status: number;
 }
 
-const PREFIX = "/__aval_v1__/";
+interface FixtureAuthority {
+  readonly prefix: string;
+  readonly load: () => Promise<FixtureSet>;
+  readonly sessions: Map<string, RequestRecord[]>;
+}
+
 const FATAL_BOUNDARY_PATH = "/__aval_certification__/fatal-boundary-network.avl";
 const SESSION = /^[A-Za-z0-9_-]{1,64}$/u;
 const CODECS = Object.freeze([...VIDEO_CODECS].reverse());
-const FIXTURE_ROOT = fileURLToPath(new URL("../../fixtures/conformance/v1/", import.meta.url));
+const QUALIFIED_FIXTURE_ROOT = fileURLToPath(new URL(
+  "../../fixtures/certification/v1/",
+  import.meta.url
+));
+const LEGACY_UNSUPPORTED_FIXTURE_ROOT = fileURLToPath(new URL(
+  "../../fixtures/conformance/v1/",
+  import.meta.url
+));
 const MAX_SESSIONS = 256;
 const MAX_RECORDS = 512;
 
-/** Serves the canonical wire-1.0 codec bundle with deterministic range metrics. */
-export function v1HttpFixturePlugin(): Plugin {
-  let fixturePromise: Promise<FixtureSet> | null = null;
-  const sessions = new Map<string, RequestRecord[]>();
-  const load = (): Promise<FixtureSet> => fixturePromise ??= loadFixtureSet()
-    .catch((error: unknown) => {
-      fixturePromise = null;
-      throw error;
-    });
+/**
+ * Serves distinct qualified and legacy-unsupported fixture authorities with
+ * deterministic ranges. Fatal-boundary certification uses qualified bytes so
+ * the injected resource failure, rather than profile rejection, is observed.
+ */
+export function playgroundFixturePlugin(): Plugin {
+  const qualified = createFixtureAuthority(
+    QUALIFIED_FIXTURE_PREFIX,
+    QUALIFIED_FIXTURE_ROOT
+  );
+  const authorities = Object.freeze([
+    qualified,
+    createFixtureAuthority(
+      LEGACY_UNSUPPORTED_FIXTURE_PREFIX,
+      LEGACY_UNSUPPORTED_FIXTURE_ROOT
+    )
+  ]);
 
   function install(server: ViteDevServer | PreviewServer): void {
     server.middlewares.use((request, response, next) => {
@@ -58,7 +83,7 @@ export function v1HttpFixturePlugin(): Plugin {
           response.destroy(error instanceof Error ? error : undefined);
           return;
         }
-        writeJson(response, 500, { error: "v1-fixture-failure" });
+        writeJson(response, 500, { error: "fixture-authority-failure" });
       });
     });
   }
@@ -71,7 +96,7 @@ export function v1HttpFixturePlugin(): Plugin {
     const url = new URL(request.url ?? "/", "http://aval.invalid");
     if (url.pathname === FATAL_BOUNDARY_PATH) {
       if (request.method !== "GET") return methodNotAllowed(response);
-      const fixture = await load();
+      const fixture = await qualified.load();
       const asset = fixture.assets.get("h264.avl");
       if (asset === undefined) throw new Error("fatal-boundary fixture is unavailable");
       const rangeHeader = header(request, "range");
@@ -86,29 +111,34 @@ export function v1HttpFixturePlugin(): Plugin {
       writeJson(response, 503, { error: "injected-network-failure" });
       return;
     }
-    if (!url.pathname.startsWith(PREFIX)) {
+    const authority = authorities.find(({ prefix }) =>
+      url.pathname.startsWith(prefix)
+    );
+    if (authority === undefined) {
       next();
       return;
     }
-    if (url.pathname === `${PREFIX}metrics`) {
+    if (url.pathname === `${authority.prefix}metrics`) {
       if (request.method !== "GET") return methodNotAllowed(response);
       const session = requireSession(url.searchParams.get("session"));
-      writeJson(response, 200, { requests: sessions.get(session) ?? [] });
+      writeJson(response, 200, {
+        requests: authority.sessions.get(session) ?? []
+      });
       return;
     }
-    if (url.pathname === `${PREFIX}reset`) {
+    if (url.pathname === `${authority.prefix}reset`) {
       if (request.method !== "POST") return methodNotAllowed(response);
-      sessions.delete(requireSession(url.searchParams.get("session")));
+      authority.sessions.delete(requireSession(url.searchParams.get("session")));
       response.statusCode = 204;
       response.end();
       return;
     }
     if (request.method !== "GET") return methodNotAllowed(response);
-    const fixture = await load();
-    const relativePath = url.pathname.slice(PREFIX.length);
+    const relativePath = url.pathname.slice(authority.prefix.length);
     if (relativePath === "build.json") {
+      const fixture = await authority.load();
       const session = optionalSession(request.headers["x-aval-session"]);
-      record(sessions, session, Object.freeze({
+      record(authority.sessions, session, Object.freeze({
         path: relativePath,
         range: null,
         status: 200
@@ -116,15 +146,16 @@ export function v1HttpFixturePlugin(): Plugin {
       sendBytes(response, 200, fixture.report, "application/json; charset=utf-8", null);
       return;
     }
+    const session = requireSession(url.searchParams.get("session"));
+    const fixture = await authority.load();
     const asset = fixture.assets.get(relativePath);
     if (asset === undefined) {
       writeJson(response, 404, { error: "fixture-not-found" });
       return;
     }
-    const session = requireSession(url.searchParams.get("session"));
     const rangeHeader = header(request, "range");
     if (url.searchParams.get("failure") === "network") {
-      record(sessions, session, Object.freeze({
+      record(authority.sessions, session, Object.freeze({
         path: relativePath,
         range: rangeHeader,
         status: 503
@@ -134,7 +165,7 @@ export function v1HttpFixturePlugin(): Plugin {
     }
     const range = rangeHeader === null ? null : parseRange(rangeHeader, asset.bytes.byteLength);
     if (rangeHeader !== null && range === null) {
-      record(sessions, session, Object.freeze({
+      record(authority.sessions, session, Object.freeze({
         path: relativePath,
         range: rangeHeader,
         status: 416
@@ -147,7 +178,7 @@ export function v1HttpFixturePlugin(): Plugin {
     const end = range?.end ?? asset.bytes.byteLength - 1;
     const body = asset.bytes.subarray(start, end + 1);
     const status = range === null ? 200 : 206;
-    record(sessions, session, Object.freeze({
+    record(authority.sessions, session, Object.freeze({
       path: relativePath,
       range: rangeHeader,
       status
@@ -169,7 +200,7 @@ export function v1HttpFixturePlugin(): Plugin {
   }
 
   return {
-    name: "aval-v1-http-fixture",
+    name: "aval-http-fixture-authorities",
     enforce: "pre",
     configureServer(server) {
       install(server);
@@ -180,20 +211,33 @@ export function v1HttpFixturePlugin(): Plugin {
   };
 }
 
-async function loadFixtureSet(): Promise<FixtureSet> {
-  const report = await readFile(join(FIXTURE_ROOT, "build.json"));
+function createFixtureAuthority(prefix: string, root: string): FixtureAuthority {
+  let fixturePromise: Promise<FixtureSet> | null = null;
+  return Object.freeze({
+    prefix,
+    load: (): Promise<FixtureSet> => fixturePromise ??=
+      loadFixtureSet(root).catch((error: unknown) => {
+        fixturePromise = null;
+        throw error;
+      }),
+    sessions: new Map<string, RequestRecord[]>()
+  });
+}
+
+async function loadFixtureSet(root: string): Promise<FixtureSet> {
+  const report = await readFile(join(root, "build.json"));
   const parsed = parseCompileBundleReport(JSON.parse(report.toString("utf8")));
   const reportAssets = new Map(parsed.assets.map((asset) => [asset.codec, asset]));
   const assets = new Map<string, FixtureAsset>();
   for (const codec of CODECS) {
     const record = reportAssets.get(codec);
     if (record === undefined || record.path !== `${codec}.avl`) {
-      throw new TypeError(`v1 fixture report is missing ${codec}`);
+      throw new TypeError(`fixture authority report is missing ${codec}`);
     }
-    const bytes = await readFile(join(FIXTURE_ROOT, record.path));
+    const bytes = await readFile(join(root, record.path));
     const digest = createHash("sha256").update(bytes).digest("base64");
     if (record.integrity !== `sha256-${digest}`) {
-      throw new Error(`v1 fixture integrity mismatch for ${codec}`);
+      throw new Error(`fixture authority integrity mismatch for ${codec}`);
     }
     assets.set(record.path, Object.freeze({
       codec,

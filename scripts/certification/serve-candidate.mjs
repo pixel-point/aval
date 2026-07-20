@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 
 import { mediaType, readVerifiedRegularFile } from "../release/candidate-artifacts.mjs";
 import { verifyCandidateRoot } from "../release/candidate-root.mjs";
+import { FATAL_BOUNDARY_FIXTURE_PATH } from "./certification-fixture-authority.mjs";
 
 const FATAL_BOUNDARY_PATH = "/__aval_certification__/fatal-boundary-network.avl";
-const FATAL_BOUNDARY_SOURCE = "fixtures/conformance/v1/h264.avl";
 const CANDIDATE_RUN_CONFIG_PATH = "/__aval_certification__/run-config.json";
 const INJECTED_NETWORK_FAILURE = Buffer.from('{"error":"injected-network-failure"}');
 
@@ -63,7 +63,7 @@ export function startCandidateServer(store, { port = 4174, host = "127.0.0.1" } 
         return;
       }
       if (url.pathname === FATAL_BOUNDARY_PATH) {
-        const source = await readCandidateAsset(store, FATAL_BOUNDARY_SOURCE);
+        const source = await readCandidateAsset(store, FATAL_BOUNDARY_FIXTURE_PATH);
         serveFatalBoundaryRequest(request, response, store.manifestDigest, source);
         return;
       }
@@ -96,9 +96,9 @@ function createCandidateRunConfigBytes(manifestBytes, manifestDigest, allowlist)
   }
   if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return null;
   if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(candidate.commit) || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(candidate.tree)) return null;
-  const fixture = allowlist.get(FATAL_BOUNDARY_SOURCE);
+  const fixture = allowlist.get(FATAL_BOUNDARY_FIXTURE_PATH);
   const harness = allowlist.get("certification.html");
-  if (!exactManifestArtifact(candidate.artifacts, fixture, FATAL_BOUNDARY_SOURCE) ||
+  if (!exactManifestArtifact(candidate.artifacts, fixture, FATAL_BOUNDARY_FIXTURE_PATH) ||
     !exactManifestArtifact(candidate.artifacts, harness, "certification.html")) return null;
   return Buffer.from(`${JSON.stringify({
     schemaVersion: "1.0",
@@ -111,7 +111,7 @@ function createCandidateRunConfigBytes(manifestBytes, manifestDigest, allowlist)
     commit: candidate.commit,
     tree: candidate.tree,
     operatorRole: "automated-candidate-boundary-check",
-    sourceUrl: `/${FATAL_BOUNDARY_SOURCE}`,
+    sourceUrl: `/${FATAL_BOUNDARY_FIXTURE_PATH}`,
     profileClean: false,
     expectedRepetitions: 1,
     environment: {

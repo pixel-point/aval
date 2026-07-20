@@ -83,6 +83,7 @@ import {
 import {
   orchestrateProvisionalCandidates,
   qualifyProvisionalOutput,
+  UnsupportedPlaybackProfileError,
   withProvisionalCandidateFrame
 } from "./provisional-startup.js";
 
@@ -2776,10 +2777,15 @@ function resourceBudgetError(): Error {
   return error;
 }
 
-function unsupportedProfileError(): Error {
-  const error = new Error("AVAL has no supported animated rendition");
-  error.name = "NotSupportedError";
-  return error;
+function unsupportedProfileError(): UnsupportedPlaybackProfileError {
+  return new UnsupportedPlaybackProfileError(
+    "AVAL has no supported animated rendition"
+  );
+}
+
+function unsupportedProfileFailure(reason: unknown): boolean {
+  return reason instanceof UnsupportedPlaybackProfileError ||
+    errorString(reason, "name") === "NotSupportedError";
 }
 
 function admissionFailure(error: unknown): boolean {
@@ -2798,7 +2804,11 @@ function playbackFailureCode(reason: unknown): "renderer-failure" | "worker-deco
 }
 
 function preparationFailureCode(reason: unknown):
-  "readiness-failure" | "renderer-failure" | "worker-decode-failure" {
+  | "readiness-failure"
+  | "renderer-failure"
+  | "unsupported-profile"
+  | "worker-decode-failure" {
+  if (unsupportedProfileFailure(reason)) return "unsupported-profile";
   if (reason instanceof RendererFailureError) return "renderer-failure";
   const message = errorString(reason, "message") ?? "";
   if (/canvas|context|draw|renderer|texture|viewport|webgl/i.test(message)) {
@@ -2817,10 +2827,9 @@ function selectionFailureCode(reason: unknown):
   | "worker-decode-failure"
   | "readiness-failure"
   | "unsupported-profile" {
-  const name = errorString(reason, "name") ?? "";
   const message = errorString(reason, "message") ?? "";
   if (reason instanceof RendererFailureError) return "renderer-failure";
-  if (name === "NotSupportedError") return "unsupported-profile";
+  if (unsupportedProfileFailure(reason)) return "unsupported-profile";
   if (admissionFailure(reason)) return "resource-rejection";
   if (/canvas|context|draw|renderer|texture|viewport|webgl/i.test(message)) {
     return "renderer-failure";

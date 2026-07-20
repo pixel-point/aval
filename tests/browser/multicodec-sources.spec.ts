@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+import { QUALIFIED_FIXTURE_PREFIX } from
+  "../../apps/playground/fixture-routes.js";
+
 const CODEC_ORDER = ["av1", "vp9", "h265", "h264"] as const;
 
 interface BrowserOutcome {
@@ -73,7 +76,9 @@ test("publishes four ordered direct-child sources and no host source authority",
   expect(snapshot.sources.map(({ codec }) => codec)).toEqual(CODEC_ORDER);
   for (const [index, source] of snapshot.sources.entries()) {
     const codec = CODEC_ORDER[index]!;
-    expect(new URL(source.src!).pathname).toBe(`/__aval_v1__/${codec}.avl`);
+    expect(new URL(source.src!).pathname).toBe(
+      `${QUALIFIED_FIXTURE_PREFIX}${codec}.avl`
+    );
     expect(source.type).toMatch(/^application\/vnd\.aval; codecs="[A-Za-z0-9.]+"$/u);
     expect(source.integrity).toBeNull();
   }
@@ -120,7 +125,7 @@ test("uses the first exact supported source and never probes a later file", asyn
   });
 
   const metricsResponse = await request.get(
-    `/__aval_v1__/metrics?session=${session}`
+    `${QUALIFIED_FIXTURE_PREFIX}metrics?session=${session}`
   );
   expect(metricsResponse.ok()).toBe(true);
   const metrics = await metricsResponse.json() as FixtureMetrics;
@@ -283,7 +288,9 @@ test("retires a positively configured AV1 startup failure before selecting VP9",
   )).toEqual([]);
   expect(outcome.probe.animatedReveals).toBe(1);
 
-  const metricsResponse = await request.get(`/__aval_v1__/metrics?session=${session}`);
+  const metricsResponse = await request.get(
+    `${QUALIFIED_FIXTURE_PREFIX}metrics?session=${session}`
+  );
   expect(metricsResponse.ok()).toBe(true);
   const metrics = await metricsResponse.json() as FixtureMetrics;
   const requestedAssets = [...new Set(metrics.requests
@@ -317,7 +324,7 @@ test("lets the user move a codec to the front of the source list", async ({
     return api.player.getDiagnostics?.().sourceGeneration ?? 0;
   });
 
-  const fatalReadiness = await page.evaluate(async () => {
+  const fatalReadiness = await page.evaluate(async (qualifiedPrefix) => {
     const player = (window as unknown as {
       avalSourcePlayground: {
         readonly player: HTMLElement & {
@@ -330,14 +337,14 @@ test("lets the user move a codec to the front of the source list", async ({
       ':scope > source[data-aval-codec="av1"]'
     );
     if (source === null) throw new Error("AV1 source is unavailable");
-    source.src = `/__aval_v1__/missing.avl?failure=${String(Date.now())}`;
+    source.src = `${qualifiedPrefix}missing.avl?failure=${String(Date.now())}`;
     try {
       await player.prepare?.({ timeoutMs: 10_000 });
     } catch {
       // The retained public state and consumer alternate are asserted below.
     }
     return player.readiness ?? "unavailable";
-  });
+  }, QUALIFIED_FIXTURE_PREFIX);
   expect(fatalReadiness).toBe("error");
   await expect(page.locator("aval-player")).toBeVisible();
   await expect(page.locator(".fallback")).toBeVisible();
@@ -517,7 +524,9 @@ test("per-source integrity uses full-file requests", async ({ page, request }) =
     await api.ready.catch(() => undefined);
   });
 
-  const response = await request.get(`/__aval_v1__/metrics?session=${session}`);
+  const response = await request.get(
+    `${QUALIFIED_FIXTURE_PREFIX}metrics?session=${session}`
+  );
   const metrics = await response.json() as FixtureMetrics;
   const assetRequests = metrics.requests.filter(({ path }) => path.endsWith(".avl"));
   expect(assetRequests.length).toBeGreaterThan(0);
