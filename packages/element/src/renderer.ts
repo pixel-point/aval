@@ -21,6 +21,13 @@ import {
   type RendererFit
 } from "./renderer-geometry.js";
 import {
+  defaultCanvasFactory,
+  MaterializerFailureError,
+  RgbaMaterializer,
+  type MaterializedRgbaFrame,
+  type RgbaMaterialization
+} from "./rgba-materializer.js";
+import {
   selectRendererBackend,
   WebGlUnavailableError
 } from "./renderer-selection.js";
@@ -46,14 +53,6 @@ export interface RendererLimits {
   readonly copyTimeoutMs?: number;
   readonly setTimeout?: (callback: () => void, delay: number) => number;
   readonly clearTimeout?: (handle: number) => void;
-  readonly createImageBitmap?: (
-    frame: VideoFrame,
-    sx: number,
-    sy: number,
-    sw: number,
-    sh: number,
-    options: ImageBitmapOptions
-  ) => Promise<ImageBitmap>;
   readonly createCanvas?: (width: number, height: number) => HTMLCanvasElement;
   readonly onContextChange?: (change: Readonly<RendererContextChange>) => void;
   readonly initialPresentation?: Readonly<{
@@ -68,7 +67,6 @@ type State = "active" | "lost" | "error" | "disposed";
 // The manifest and caller own admission policy. Keep the renderer default at
 // the runtime's exact-arithmetic boundary instead of inventing a 64 MiB cap.
 const HARD_BYTES = Number.MAX_SAFE_INTEGER;
-const COPY_TIMEOUT = 5_000;
 const STREAMS = 3;
 const NATIVE_PROBE_EDGE = 8;
 const NATIVE_PROBE_PIXELS = NATIVE_PROBE_EDGE * NATIVE_PROBE_EDGE;
@@ -142,22 +140,11 @@ class WebGl2Renderer {
   readonly #maxTextureBytes: number;
   readonly #maxBackingBytes: number;
   readonly #maxRuntimeBytes: number;
-  readonly #copyTimeoutMs: number;
-  readonly #setTimeout: (callback: () => void, delay: number) => number;
-  readonly #clearTimeout: (handle: number) => void;
-  readonly #createImageBitmap: ((
-    frame: VideoFrame,
-    sx: number,
-    sy: number,
-    sw: number,
-    sh: number,
-    options: ImageBitmapOptions
-  ) => Promise<ImageBitmap>) | null;
+  readonly #materializer: RgbaMaterializer;
   readonly #onContextChange:
     ((change: Readonly<RendererContextChange>) => void) | undefined;
   readonly #resident = new Map<string, WebGLTexture>();
   readonly #reserved = new Set<string>();
-  #staging: Uint8Array;
   #gl: WebGL2RenderingContext | null = null;
   #program: WebGLProgram | null = null;
   #streams: WebGLTexture[] = [];
@@ -183,7 +170,6 @@ class WebGl2Renderer {
   #maxResidentTextures = 0;
   #losses = 0;
   #recoveries = 0;
-  #sourceCopiesInFlight = 0;
   #operationSequence = 0;
   #initializingTextureCount = 0;
   #failureError: RendererFailureError | null = null;
@@ -209,19 +195,20 @@ class WebGl2Renderer {
     this.#maxTextureBytes = cap(limits.maxTextureBytes, "texture byte cap");
     this.#maxBackingBytes = cap(limits.maxBackingBytes, "backing byte cap");
     this.#maxRuntimeBytes = cap(limits.maxRuntimeBytes, "runtime byte cap");
-    this.#copyTimeoutMs = limits.copyTimeoutMs ?? COPY_TIMEOUT;
-    this.#setTimeout = limits.setTimeout ?? ((callback, delay) =>
-      globalThis.setTimeout(callback, delay) as unknown as number);
-    this.#clearTimeout = limits.clearTimeout ?? ((handle) => globalThis.clearTimeout(handle));
-    this.#createImageBitmap = limits.createImageBitmap ??
-      defaultImageBitmapFactory();
+    this.#materializer = new RgbaMaterializer(
+      this.#layout.storageWidth,
+      this.#layout.storageHeight,
+      {
+        ...(limits.copyTimeoutMs === undefined
+          ? {} : { copyTimeoutMs: limits.copyTimeoutMs }),
+        ...(limits.setTimeout === undefined
+          ? {} : { setTimeout: limits.setTimeout }),
+        ...(limits.clearTimeout === undefined
+          ? {} : { clearTimeout: limits.clearTimeout }),
+        createCanvas: limits.createCanvas ?? defaultCanvasFactory(canvas)
+      }
+    );
     this.#onContextChange = limits.onContextChange;
-    if (
-      !Number.isSafeInteger(this.#copyTimeoutMs) ||
-      this.#copyTimeoutMs < 1 ||
-      this.#copyTimeoutMs > 60_000
-    ) throw new RangeError("renderer copy timeout is invalid");
-    this.#staging = new Uint8Array(0);
     this.#lost = (event) => {
       event.preventDefault();
       this.#markLost();
@@ -270,7 +257,6 @@ class WebGl2Renderer {
         this.#fit = initial.fit;
       }
       this.#assertBudget(0, this.#backingBytes(canvas.width, canvas.height));
-      this.#staging = new Uint8Array(this.#storageBytesPerFrame);
       canvas.addEventListener("webglcontextlost", this.#lost);
       canvas.addEventListener("webglcontextrestored", this.#restored);
       this.#initialize("construct", operationOrdinal);
@@ -279,7 +265,7 @@ class WebGl2Renderer {
       canvas.removeEventListener("webglcontextrestored", this.#restored);
       this.#destroy();
       this.#state = "error";
-      this.#staging = new Uint8Array(0);
+      this.#materializer.dispose();
       this.#releaseNativeProbe();
       try {
         canvas.width = oldWidth;
@@ -403,8 +389,12 @@ class WebGl2Renderer {
           reason
         );
       }
-      const source = await this.#materialize(frame, rect, operationOrdinal);
+      const materialization = this.#materializer.create(frame, rect);
       try {
+        const source = await this.#materialize(
+          materialization,
+          operationOrdinal
+        );
         if (this.#state === "disposed" || this.#state === "error") {
           throw unavailable();
         }
@@ -435,7 +425,7 @@ class WebGl2Renderer {
             { contextLost: true, uploadPath: "rgba-copy" }
           );
         }
-        try { this.#uploadSource(gl, texture, source); }
+        try { this.#uploadPixels(gl, texture, source.pixels); }
         catch (reason) {
           const glError = capturedGlError(reason, gl);
           try { gl.deleteTexture(texture); } catch { /* preserve upload cause */ }
@@ -463,7 +453,7 @@ class WebGl2Renderer {
         }
         this.#resident.set(key, texture);
       } finally {
-        releaseSource(source);
+        materialization.release();
       }
     }).finally(() => {
       this.#reserved.delete(key);
@@ -505,8 +495,9 @@ class WebGl2Renderer {
   }
 
   public snapshot(): Readonly<RendererSnapshot> {
+    const materializer = this.#materializer.snapshot();
     const backingBytes = this.#state === "disposed"
-      ? 0 : this.#backingBytes(this.#canvas.width, this.#canvas.height);
+      ? 0 : this.#ownedBackingBytes(this.#canvas.width, this.#canvas.height);
     const residentCount = this.#resident.size;
     const textureBytes = this.#state === "active"
       ? allocationBytes(checkedProduct(
@@ -531,21 +522,22 @@ class WebGl2Renderer {
       effectiveDprY: this.#cssHeight > 0 ? this.#canvas.height / this.#cssHeight : 0,
       contextLossCount: this.#losses,
       contextRecoveryCount: this.#recoveries,
-      stagingBytes: this.#staging.byteLength,
+      stagingBytes: materializer.stagingBytes,
       residentBytes,
       textureBytes,
       runtimeBytes: checkedSum([
         backingBytes,
-        this.#staging.byteLength,
+        materializer.stagingBytes,
         this.#probeReadbackBytes(),
         residentBytes,
         textureBytes
       ]),
       pendingOperations: this.#pending,
-      sourceCopiesInFlight: this.#sourceCopiesInFlight,
+      sourceCopiesInFlight: materializer.sourceCopiesInFlight,
       resourceCount: Number(this.#program !== null) +
         this.#streams.length +
-        this.#resident.size,
+        this.#resident.size +
+        materializer.resourceCount,
       contextListenerCount: this.#state === "disposed" ? 0 : 2,
       failure: this.#failureError?.diagnostic ?? null
     });
@@ -560,7 +552,7 @@ class WebGl2Renderer {
     this.#resident.clear();
     this.#reserved.clear();
     this.#last = null;
-    this.#staging = new Uint8Array(0);
+    this.#materializer.dispose();
     this.#releaseNativeProbe();
     try {
       this.#canvas.width = 0;
@@ -824,69 +816,68 @@ class WebGl2Renderer {
     if (this.#state !== "active") return false;
     const gl = this.#gl;
     if (gl === null) return false;
-    if (this.#native !== 0) {
-      drainErrors(gl);
-      let nativeError: number | null = null;
-      let nativeReason: unknown = null;
-      try {
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.texSubImage2D(
-          gl.TEXTURE_2D,
-          0,
-          0,
-          0,
-          gl.RGBA,
-          gl.UNSIGNED_BYTE,
-          frame
-        );
-        nativeError = readGlError(gl);
-      } catch (reason) {
-        nativeReason = reason;
-        nativeError = readGlError(gl);
-      }
-      if (contextLost(gl)) {
-        throw this.#failure(
-          "native-upload",
-          "runtime",
-          operationOrdinal,
-          nativeReason ?? new Error(
-            "WebGL context was lost during native frame upload"
-          ),
-          {
-            glError: nativeError,
-            contextLost: true,
-            uploadPath: "native"
-          }
-        );
-      }
-      if (nativeReason === null && nativeError === null) {
-        if (this.#native === 2) return true;
-        return this.#qualifyNativeUpload(
-          gl,
-          texture,
-          frame,
-          rect,
-          operationOrdinal
-        );
-      }
-      this.#native = 0;
-    }
-    drainErrors(gl);
-    const source = await this.#materialize(frame, rect, operationOrdinal);
+    const materialization = this.#materializer.create(frame, rect);
     try {
+      if (this.#native !== 0) {
+        drainErrors(gl);
+        let nativeError: number | null = null;
+        let nativeReason: unknown = null;
+        try {
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          gl.texSubImage2D(
+            gl.TEXTURE_2D,
+            0,
+            0,
+            0,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            frame
+          );
+          nativeError = readGlError(gl);
+        } catch (reason) {
+          nativeReason = reason;
+          nativeError = readGlError(gl);
+        }
+        if (contextLost(gl)) {
+          throw this.#failure(
+            "native-upload",
+            "runtime",
+            operationOrdinal,
+            nativeReason ?? new Error(
+              "WebGL context was lost during native frame upload"
+            ),
+            {
+              glError: nativeError,
+              contextLost: true,
+              uploadPath: "native"
+            }
+          );
+        }
+        if (nativeReason === null && nativeError === null) {
+          if (this.#native === 2) return true;
+          return await this.#qualifyNativeUpload(
+            gl,
+            texture,
+            materialization,
+            operationOrdinal
+          );
+        }
+        this.#native = 0;
+      }
+      drainErrors(gl);
+      const source = await this.#materialize(materialization, operationOrdinal);
       if (this.#state !== "active" || this.#gl !== gl) return false;
       this.#uploadRgbaFrame(gl, texture, source, operationOrdinal);
       return true;
     } finally {
-      releaseSource(source);
+      materialization.release();
     }
   }
 
   async #qualifyNativeUpload(
     gl: WebGL2RenderingContext,
     texture: WebGLTexture,
-    frame: VideoFrame,
-    rect: DOMRectReadOnly,
+    materialization: Readonly<RgbaMaterialization>,
     operationOrdinal: number
   ): Promise<boolean> {
     if (
@@ -897,14 +888,10 @@ class WebGl2Renderer {
     ) {
       this.#native = 0;
       drainErrors(gl);
-      const source = await this.#materialize(frame, rect, operationOrdinal);
-      try {
-        if (this.#state !== "active" || this.#gl !== gl) return false;
-        this.#uploadRgbaFrame(gl, texture, source, operationOrdinal);
-        return true;
-      } finally {
-        releaseSource(source);
-      }
+      const source = await this.#materialize(materialization, operationOrdinal);
+      if (this.#state !== "active" || this.#gl !== gl) return false;
+      this.#uploadRgbaFrame(gl, texture, source, operationOrdinal);
+      return true;
     }
 
     this.#nativeProbeAttempts += 1;
@@ -913,66 +900,62 @@ class WebGl2Renderer {
       // Resolve the CPU copy before touching the main framebuffer. Native and
       // reference probe draws can then run back-to-back in one microtask, and
       // the caller's full presentation draw never exposes unproven pixels.
-      const source = await this.#materialize(frame, rect, operationOrdinal);
-      try {
-        if (this.#state !== "active" || this.#gl !== gl) return false;
+      const source = await this.#materialize(materialization, operationOrdinal);
+      if (this.#state !== "active" || this.#gl !== gl) return false;
 
-        const nativeProbe = this.#readNativeProbe(
-          gl,
-          texture,
-          this.#nativeProbeReadback
+      const nativeProbe = this.#readNativeProbe(
+        gl,
+        texture,
+        this.#nativeProbeReadback
+      );
+      if (nativeProbe.contextLost) {
+        throw this.#failure(
+          "native-upload",
+          "runtime",
+          operationOrdinal,
+          nativeProbe.reason,
+          {
+            glError: nativeProbe.glError,
+            contextLost: true,
+            uploadPath: "native"
+          }
         );
-        if (nativeProbe.contextLost) {
-          throw this.#failure(
-            "native-upload",
-            "runtime",
-            operationOrdinal,
-            nativeProbe.reason,
-            {
-              glError: nativeProbe.glError,
-              contextLost: true,
-              uploadPath: "native"
-            }
-          );
-        }
-
-        drainErrors(gl);
-        this.#uploadRgbaFrame(gl, texture, source, operationOrdinal);
-        const referenceProbe = nativeProbe.ok
-          ? this.#readNativeProbe(gl, texture, this.#referenceProbeReadback)
-          : failedProbe(new Error("native probe readback was unavailable"));
-        if (referenceProbe.contextLost) {
-          throw this.#failure(
-            "draw",
-            "runtime",
-            operationOrdinal,
-            referenceProbe.reason,
-            {
-              glError: referenceProbe.glError,
-              contextLost: true,
-              uploadPath: "rgba-copy"
-            }
-          );
-        }
-
-        if (
-          !nativeProbe.ok ||
-          !referenceProbe.ok ||
-          !equivalentProbe(
-            this.#nativeProbeReadback,
-            this.#referenceProbeReadback
-          )
-        ) {
-          this.#native = 0;
-        } else if (informativeProbe(this.#referenceProbeReadback)) {
-          this.#native = 2;
-        } else if (this.#nativeProbeAttempts >= MAX_NATIVE_PROBE_ATTEMPTS) {
-          this.#native = 0;
-        }
-        return true;
-      } finally {
-        releaseSource(source);
       }
+
+      drainErrors(gl);
+      this.#uploadRgbaFrame(gl, texture, source, operationOrdinal);
+      const referenceProbe = nativeProbe.ok
+        ? this.#readNativeProbe(gl, texture, this.#referenceProbeReadback)
+        : failedProbe(new Error("native probe readback was unavailable"));
+      if (referenceProbe.contextLost) {
+        throw this.#failure(
+          "draw",
+          "runtime",
+          operationOrdinal,
+          referenceProbe.reason,
+          {
+            glError: referenceProbe.glError,
+            contextLost: true,
+            uploadPath: "rgba-copy"
+          }
+        );
+      }
+
+      if (
+        !nativeProbe.ok ||
+        !referenceProbe.ok ||
+        !equivalentProbe(
+          this.#nativeProbeReadback,
+          this.#referenceProbeReadback
+        )
+      ) {
+        this.#native = 0;
+      } else if (informativeProbe(this.#referenceProbeReadback)) {
+        this.#native = 2;
+      } else if (this.#nativeProbeAttempts >= MAX_NATIVE_PROBE_ATTEMPTS) {
+        this.#native = 0;
+      }
+      return true;
     } finally {
       this.#nativeProbeInFlight = false;
       if (this.#gl === gl && !contextLost(gl)) {
@@ -986,10 +969,10 @@ class WebGl2Renderer {
   #uploadRgbaFrame(
     gl: WebGL2RenderingContext,
     texture: WebGLTexture,
-    source: RgbaSource,
+    source: Readonly<MaterializedRgbaFrame>,
     operationOrdinal: number
   ): void {
-    try { this.#uploadSource(gl, texture, source); }
+    try { this.#uploadPixels(gl, texture, source.pixels); }
     catch (reason) {
       throw this.#failure(
         "rgba-upload",
@@ -1065,144 +1048,21 @@ class WebGl2Renderer {
   }
 
   async #materialize(
-    frame: VideoFrame,
-    rect: DOMRectReadOnly,
+    materialization: Readonly<RgbaMaterialization>,
     operationOrdinal: number
-  ): Promise<RgbaSource> {
-    let copyReason: unknown;
+  ): Promise<Readonly<MaterializedRgbaFrame>> {
     try {
-      return Object.freeze({
-        kind: "pixels" as const,
-        pixels: await this.#copy(frame, rect)
-      });
+      return await materialization.rgba();
     } catch (reason) {
-      copyReason = reason;
-    }
-    if (
-      this.#state !== "active" ||
-      isNamedError(copyReason, "AbortError")
-    ) throw unavailable();
-    if (
-      this.#createImageBitmap === null ||
-      copyReason instanceof RgbaCopyContractError ||
-      isNamedError(copyReason, "TimeoutError")
-    ) {
+      if (this.#state !== "active") throw unavailable();
+      if (!(reason instanceof MaterializerFailureError)) throw reason;
       throw this.#failure(
         "rgba-copy",
         "runtime",
         operationOrdinal,
-        copyReason,
+        reason.reason,
         { uploadPath: "rgba-copy" }
       );
-    }
-    let bitmap: ImageBitmap;
-    try {
-      bitmap = await this.#bitmap(frame);
-      if (
-        bitmap.width !== this.#layout.storageWidth ||
-        bitmap.height !== this.#layout.storageHeight
-      ) {
-        releaseBitmap(bitmap);
-        throw new RgbaCopyContractError(
-          "decoded frame ImageBitmap geometry is invalid"
-        );
-      }
-    } catch (reason) {
-      throw this.#failure(
-        "rgba-copy",
-        "runtime",
-        operationOrdinal,
-        reason,
-        { uploadPath: "rgba-copy" }
-      );
-    }
-    return Object.freeze({ kind: "bitmap" as const, bitmap });
-  }
-
-  async #copy(
-    frame: VideoFrame,
-    rect: DOMRectReadOnly
-  ): Promise<Uint8Array> {
-    const staging = this.#staging;
-    if (staging.byteLength !== this.#storageBytesPerFrame) throw unavailable();
-    staging.fill(0);
-    const stride = this.#layout.storageWidth * 4;
-    let raw: Promise<readonly PlaneLayout[]>;
-    try {
-      raw = frame.copyTo(staging, {
-        format: "RGBA",
-        rect,
-        layout: [{ offset: 0, stride }]
-      });
-    } catch (reason) {
-      throw reason;
-    }
-    this.#sourceCopiesInFlight += 1;
-    void raw.then(
-      () => { this.#sourceCopiesInFlight -= 1; },
-      () => { this.#sourceCopiesInFlight -= 1; }
-    );
-    let planes: readonly PlaneLayout[];
-    try {
-      planes = await timed(
-        raw,
-        this.#copyTimeoutMs,
-        this.#setTimeout,
-        this.#clearTimeout
-      );
-    } catch (reason) {
-      throw reason;
-    }
-    const plane = planes[0];
-    if (
-      planes.length !== 1 ||
-      plane === undefined ||
-      plane.offset !== 0 ||
-      plane.stride !== stride
-    ) {
-      throw new RgbaCopyContractError("decoded frame copy layout is invalid");
-    }
-    return staging;
-  }
-
-  async #bitmap(frame: VideoFrame): Promise<ImageBitmap> {
-    const factory = this.#createImageBitmap;
-    if (factory === null) throw new Error("ImageBitmap conversion is unavailable");
-    let raw: Promise<ImageBitmap>;
-    try {
-      raw = factory(
-        frame,
-        0,
-        0,
-        frame.displayWidth,
-        frame.displayHeight,
-        {
-          resizeWidth: this.#layout.storageWidth,
-          resizeHeight: this.#layout.storageHeight
-        }
-      );
-    } catch (reason) {
-      throw reason;
-    }
-    let abandoned = false;
-    this.#sourceCopiesInFlight += 1;
-    void raw.then(
-      (bitmap) => {
-        this.#sourceCopiesInFlight -= 1;
-        if (abandoned) releaseBitmap(bitmap);
-      },
-      () => { this.#sourceCopiesInFlight -= 1; }
-    );
-    try {
-      return await timed(
-        raw,
-        this.#copyTimeoutMs,
-        this.#setTimeout,
-        this.#clearTimeout
-      );
-    } catch (reason) {
-      abandoned = true;
-      throw reason;
     }
   }
 
@@ -1265,31 +1125,6 @@ class WebGl2Renderer {
     const glError = readGlError(gl);
     if (glError !== null) {
       throw new RendererGlOperationError("WebGL RGBA upload failed", glError);
-    }
-  }
-
-  #uploadSource(
-    gl: WebGL2RenderingContext,
-    texture: WebGLTexture,
-    source: RgbaSource
-  ): void {
-    if (source.kind === "pixels") {
-      this.#uploadPixels(gl, texture, source.pixels);
-      return;
-    }
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texSubImage2D(
-      gl.TEXTURE_2D,
-      0,
-      0,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      source.bitmap
-    );
-    const glError = readGlError(gl);
-    if (glError !== null) {
-      throw new RendererGlOperationError("WebGL ImageBitmap upload failed", glError);
     }
   }
 
@@ -1382,6 +1217,7 @@ class WebGl2Renderer {
     this.#last = null;
     this.#resident.clear();
     this.#releaseNativeProbe();
+    this.#materializer.reset();
     this.#notify(Object.freeze({ state: "lost", error: null }));
   }
 
@@ -1398,7 +1234,7 @@ class WebGl2Renderer {
     this.#resident.clear();
     this.#reserved.clear();
     this.#last = null;
-    this.#staging = new Uint8Array(0);
+    this.#materializer.dispose();
     this.#releaseNativeProbe();
     this.#notify(Object.freeze({ state: "error", error: terminalError }));
   }
@@ -1474,7 +1310,8 @@ class WebGl2Renderer {
     maxRuntimeBytes: number;
   }> {
     try {
-      const backingBytes = this.#backingBytes(
+      const materializer = this.#materializer.snapshot();
+      const backingBytes = this.#ownedBackingBytes(
         this.#canvas.width,
         this.#canvas.height
       );
@@ -1490,12 +1327,12 @@ class WebGl2Renderer {
           ));
       const residentBytes = 0;
       return Object.freeze({
-        stagingBytes: this.#staging.byteLength,
+        stagingBytes: materializer.stagingBytes,
         residentBytes,
         textureBytes,
         backingBytes,
         runtimeBytes: checkedSum([
-          this.#staging.byteLength,
+          materializer.stagingBytes,
           this.#probeReadbackBytes(),
           residentBytes,
           textureBytes,
@@ -1506,13 +1343,14 @@ class WebGl2Renderer {
         maxRuntimeBytes: this.#maxRuntimeBytes
       });
     } catch {
+      const materializer = this.#materializer.snapshot();
       return Object.freeze({
-        stagingBytes: diagnosticScalar(this.#staging.byteLength),
+        stagingBytes: diagnosticScalar(materializer.stagingBytes),
         residentBytes: 0,
         textureBytes: 0,
         backingBytes: 0,
         runtimeBytes: diagnosticScalar(
-          this.#staging.byteLength + this.#probeReadbackBytes()
+          materializer.stagingBytes + this.#probeReadbackBytes()
         ),
         maxTextureBytes: this.#maxTextureBytes,
         maxBackingBytes: this.#maxBackingBytes,
@@ -1552,7 +1390,17 @@ class WebGl2Renderer {
   }
 
   #backingBytes(width: number, height: number): number {
-    return allocationBytes(rgbaBytes(width, height));
+    return allocationBytes(checkedSum([
+      rgbaBytes(width, height),
+      this.#materializer.budget().maximumFallbackBackingBytes
+    ]));
+  }
+
+  #ownedBackingBytes(width: number, height: number): number {
+    return allocationBytes(checkedSum([
+      rgbaBytes(width, height),
+      this.#materializer.snapshot().readbackBackingBytes
+    ]));
   }
 
   #assertBudget(
@@ -1566,9 +1414,11 @@ class WebGl2Renderer {
       this.#textureBytesPerFrame,
       residentCount + STREAMS
     ));
+    const materializer = this.#materializer.budget();
     const runtimeBytes = checkedSum([
       textureBytes,
-      this.#storageBytesPerFrame,
+      materializer.stagingBytes,
+      materializer.maximumTransientReadbackBytes,
       NATIVE_PROBE_ACCOUNTED_BYTES,
       backingBytes
     ]);
@@ -1616,34 +1466,6 @@ class RendererGlOperationError extends Error {
 }
 
 class RendererArithmeticError extends RangeError {}
-
-class RgbaCopyContractError extends Error {}
-
-type RgbaSource =
-  | Readonly<{ kind: "pixels"; pixels: Uint8Array }>
-  | Readonly<{ kind: "bitmap"; bitmap: ImageBitmap }>;
-
-function defaultImageBitmapFactory(): ((
-  frame: VideoFrame,
-  sx: number,
-  sy: number,
-  sw: number,
-  sh: number,
-  options: ImageBitmapOptions
-) => Promise<ImageBitmap>) | null {
-  const factory = globalThis.createImageBitmap;
-  if (typeof factory !== "function") return null;
-  return (frame, sx, sy, sw, sh, options) =>
-    factory(frame, sx, sy, sw, sh, options);
-}
-
-function releaseSource(source: RgbaSource): void {
-  if (source.kind === "bitmap") releaseBitmap(source.bitmap);
-}
-
-function releaseBitmap(bitmap: ImageBitmap): void {
-  try { bitmap.close(); } catch { /* Browser-owned conversion cleanup is terminal-safe. */ }
-}
 
 interface NativeProbeResult {
   readonly ok: boolean;
@@ -1830,42 +1652,6 @@ function isAbortError(reason: unknown): boolean {
   if (typeof reason !== "object" || reason === null) return false;
   try { return (reason as Readonly<{ name?: unknown }>).name === "AbortError"; }
   catch { return false; }
-}
-
-function isNamedError(reason: unknown, name: string): boolean {
-  if (typeof reason !== "object" || reason === null) return false;
-  try { return (reason as Readonly<{ name?: unknown }>).name === name; }
-  catch { return false; }
-}
-
-function timed<T>(
-  operation: Promise<T>,
-  milliseconds: number,
-  setTimeout: (callback: () => void, delay: number) => number,
-  clearTimeout: (handle: number) => void
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new DOMException("decoded frame copy timed out", "TimeoutError"));
-    }, milliseconds);
-    operation.then(
-      (value) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(error);
-      }
-    );
-  });
 }
 
 function createProgram(

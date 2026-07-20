@@ -210,18 +210,12 @@ export class TestGl {
   }
   public texSubImage2D(...values: readonly unknown[]): void {
     if (values.length === 7) {
-      if (isTestImageBitmap(values[6])) {
-        this.#lastUploadKind = "rgba-copy";
-        this.rgbaUploadCount += 1;
-        if (this.rgbaUploadError !== 0) this.#error = this.rgbaUploadError;
-      } else {
-        this.#lastUploadKind = "native";
-        this.nativeUploadCount += 1;
-        if (this.rejectNativeUpload) this.#error = 1;
-        if (this.nextNativeUploadError !== 0) {
-          this.#error = this.nextNativeUploadError;
-          this.nextNativeUploadError = 0;
-        }
+      this.#lastUploadKind = "native";
+      this.nativeUploadCount += 1;
+      if (this.rejectNativeUpload) this.#error = 1;
+      if (this.nextNativeUploadError !== 0) {
+        this.#error = this.nextNativeUploadError;
+        this.nextNativeUploadError = 0;
       }
     }
     if (values.length === 9) {
@@ -295,22 +289,46 @@ export function informativeProbePixels(): Uint8Array {
   return pixels;
 }
 
-export interface TestImageBitmap extends ImageBitmap {
-  readonly __testImageBitmap: true;
-  closeCount: number;
-}
-
-export function testImageBitmap(width = 48, height = 104): TestImageBitmap {
-  return {
-    __testImageBitmap: true,
-    width,
-    height,
-    closeCount: 0,
-    close() { this.closeCount += 1; }
-  } as TestImageBitmap;
-}
-
-function isTestImageBitmap(value: unknown): value is TestImageBitmap {
-  return typeof value === "object" && value !== null &&
-    (value as Readonly<{ __testImageBitmap?: unknown }>).__testImageBitmap === true;
+export function rgbaReadbackFixture(
+  pixels = new Uint8ClampedArray(48 * 104 * 4)
+): Readonly<{
+  createCanvas: (width: number, height: number) => HTMLCanvasElement;
+  state: {
+    creations: number;
+    drawCalls: unknown[][];
+    readError: unknown;
+  };
+}> {
+  const state = {
+    creations: 0,
+    drawCalls: [] as unknown[][],
+    readError: null as unknown
+  };
+  const context = {
+    globalCompositeOperation: "source-over",
+    imageSmoothingEnabled: false,
+    imageSmoothingQuality: "high" as ImageSmoothingQuality,
+    clearRect() {},
+    drawImage(...args: unknown[]) { state.drawCalls.push(args); },
+    getImageData(_x: number, _y: number, width: number, height: number) {
+      if (state.readError !== null) throw state.readError;
+      return { width, height, data: pixels } as ImageData;
+    },
+    isContextLost() { return false; }
+  };
+  return Object.freeze({
+    state,
+    createCanvas(width, height) {
+      state.creations += 1;
+      return {
+        width,
+        height,
+        getContext(type: string) {
+          return type === "2d"
+            ? context as unknown as CanvasRenderingContext2D
+            : null;
+        }
+      } as unknown as HTMLCanvasElement;
+    }
+  });
 }

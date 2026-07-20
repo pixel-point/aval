@@ -18,10 +18,9 @@ import {
   informativeProbePixels,
   layout,
   opaqueLayout,
-  testImageBitmap,
+  rgbaReadbackFixture,
   webglCanvas,
-  type TestGl,
-  type TestImageBitmap
+  type TestGl
 } from "./renderer-webgl-test-support.js";
 
 describe("renderer geometry admission", () => {
@@ -291,25 +290,17 @@ describe("renderer failure diagnostics", () => {
 });
 
 describe("renderer runtime ownership", () => {
-  it("qualifies native upload against ImageBitmap when RGBA copy is unsupported", async () => {
+  it("qualifies native upload against Canvas readback when RGBA copy is unsupported", async () => {
     const fixture = webglCanvas();
     const pixels = informativeProbePixels();
     fixture.gl.nativeReadback = pixels;
     fixture.gl.rgbaReadback = pixels;
-    const created: TestImageBitmap[] = [];
+    const readback = rgbaReadbackFixture();
     const candidate = frame(() => {
       throw new TypeError("layout size is invalid");
     });
     const renderer = new Renderer(fixture.canvas, layout(), {
-      createImageBitmap: async (source, sx, sy, sw, sh, options) => {
-        expect([source, sx, sy, sw, sh, options]).toEqual([
-          candidate, 0, 0, 48, 104,
-          { resizeWidth: 48, resizeHeight: 104 }
-        ]);
-        const bitmap = testImageBitmap();
-        created.push(bitmap);
-        return bitmap;
-      }
+      createCanvas: readback.createCanvas
     });
 
     await renderer.draw(candidate);
@@ -325,49 +316,21 @@ describe("renderer runtime ownership", () => {
     expect(fixture.gl.nativeUploadCount).toBe(1);
     expect(fixture.gl.rgbaUploadCount).toBe(1);
     expect(fixture.gl.presentationUploadKinds).toEqual(["rgba-copy"]);
-    expect(created.map((bitmap) => bitmap.closeCount)).toEqual([1]);
+    expect(readback.state.creations).toBe(1);
+    expect(readback.state.drawCalls).toHaveLength(1);
 
     await renderer.draw(candidate);
-    expect(created).toHaveLength(1);
+    expect(readback.state.drawCalls).toHaveLength(1);
     expect(fixture.gl.nativeUploadCount).toBe(2);
   });
 
-  it("maps ImageBitmap fallback through display space into packed storage", async () => {
-    const fixture = webglCanvas();
-    fixture.gl.rejectNativeUpload = true;
-    const candidate = frame(
-      () => Promise.reject(new TypeError("layout size is invalid")),
-      96,
-      208
-    );
-    const bitmap = testImageBitmap();
-    const renderer = new Renderer(fixture.canvas, layout(), {
-      createImageBitmap: async (source, sx, sy, sw, sh, options) => {
-        expect([source, sx, sy, sw, sh, options]).toEqual([
-          candidate, 0, 0, 96, 208,
-          { resizeWidth: 48, resizeHeight: 104 }
-        ]);
-        return bitmap;
-      }
-    });
-
-    await renderer.draw(candidate);
-
-    expect(fixture.gl.rgbaUploadCount).toBe(1);
-    expect(bitmap.closeCount).toBe(1);
-  });
-
-  it("locks and releases ImageBitmap fallback after a native mismatch", async () => {
+  it("locks and reuses bounded Canvas readback after a native mismatch", async () => {
     const fixture = webglCanvas();
     fixture.gl.nativeReadback = blackProbePixels();
     fixture.gl.rgbaReadback = informativeProbePixels();
-    const created: TestImageBitmap[] = [];
+    const readback = rgbaReadbackFixture();
     const renderer = new Renderer(fixture.canvas, layout(), {
-      createImageBitmap: async () => {
-        const bitmap = testImageBitmap();
-        created.push(bitmap);
-        return bitmap;
-      }
+      createCanvas: readback.createCanvas
     });
     const candidate = frame(() => Promise.reject(
       new TypeError("layout size is invalid")
@@ -383,19 +346,22 @@ describe("renderer runtime ownership", () => {
       "rgba-copy",
       "rgba-copy"
     ]);
-    expect(created.map((bitmap) => bitmap.closeCount)).toEqual([1, 1]);
+    expect(readback.state.creations).toBe(1);
+    expect(readback.state.drawCalls).toHaveLength(2);
   });
 
-  it("reports ImageBitmap conversion failure without preserving a provisional copy error", async () => {
+  it("reports Canvas readback failure without preserving a provisional copy error", async () => {
     const fixture = webglCanvas();
     fixture.gl.rejectNativeUpload = true;
     const copyReason = new TypeError("layout size is invalid");
-    const bitmapReason = new DOMException(
-      "decoded frame cannot become an ImageBitmap",
+    const readbackReason = new DOMException(
+      "decoded frame cannot be read from Canvas2D",
       "InvalidStateError"
     );
+    const readback = rgbaReadbackFixture();
+    readback.state.readError = readbackReason;
     const renderer = new Renderer(fixture.canvas, layout(), {
-      createImageBitmap: async () => Promise.reject(bitmapReason)
+      createCanvas: readback.createCanvas
     });
 
     await expect(renderer.draw(frame(() => Promise.reject(copyReason))))
@@ -405,19 +371,19 @@ describe("renderer runtime ownership", () => {
           uploadPath: "rgba-copy",
           exception: {
             name: "InvalidStateError",
-            message: "decoded frame cannot become an ImageBitmap"
+            message: "decoded frame cannot be read from Canvas2D"
           }
         }
       });
   });
 
-  it("closes ImageBitmap when its WebGL upload fails", async () => {
+  it("maps a materialized Canvas source upload failure to RGBA upload", async () => {
     const fixture = webglCanvas();
     fixture.gl.rejectNativeUpload = true;
     fixture.gl.rgbaUploadError = 0x0505;
-    const bitmap = testImageBitmap();
+    const readback = rgbaReadbackFixture();
     const renderer = new Renderer(fixture.canvas, layout(), {
-      createImageBitmap: async () => bitmap
+      createCanvas: readback.createCanvas
     });
 
     await expect(renderer.draw(frame(() => {
@@ -429,17 +395,14 @@ describe("renderer runtime ownership", () => {
         glError: 0x0505
       }
     });
-    expect(bitmap.closeCount).toBe(1);
   });
 
-  it("closes an ImageBitmap that resolves after conversion timeout", async () => {
+  it("keeps a raw copy visible until it settles after a terminal timeout", async () => {
     const fixture = webglCanvas();
     fixture.gl.rejectNativeUpload = true;
-    const pending = deferred<ImageBitmap>();
+    const pending = deferred<readonly PlaneLayout[]>();
     let expire = (): void => undefined;
-    const bitmap = testImageBitmap();
     const renderer = new Renderer(fixture.canvas, layout(), {
-      createImageBitmap: async () => pending.promise,
       setTimeout: (callback) => {
         expire = callback;
         return 1;
@@ -447,9 +410,7 @@ describe("renderer runtime ownership", () => {
       clearTimeout: () => undefined,
       copyTimeoutMs: 1
     });
-    const drawing = renderer.draw(frame(() => {
-      throw new TypeError("layout size is invalid");
-    }));
+    const drawing = renderer.draw(frame(() => pending.promise));
     await eventually(() => renderer.snapshot().sourceCopiesInFlight === 1);
 
     expire();
@@ -459,8 +420,8 @@ describe("renderer runtime ownership", () => {
         exception: { name: "TimeoutError" }
       }
     });
-    pending.resolve(bitmap);
-    await eventually(() => bitmap.closeCount === 1);
+    pending.resolve([{ offset: 0, stride: 48 * 4 }]);
+    await eventually(() => renderer.snapshot().sourceCopiesInFlight === 0);
     expect(renderer.snapshot().sourceCopiesInFlight).toBe(0);
   });
 
@@ -758,37 +719,44 @@ describe("renderer runtime ownership", () => {
 
   it("admits the exact rounded GPU allocation boundary", () => {
     const textureBytes = Math.ceil(48 * 112 * 4 * 3 * 5 / 4);
-    const backingBytes = Math.ceil(48 * 104 * 4 * 5 / 4);
     const stagingBytes = 48 * 104 * 4;
+    const ownedBackingBytes = Math.ceil(stagingBytes * 5 / 4);
+    const admittedBackingBytes = Math.ceil(stagingBytes * 2 * 5 / 4);
     const probeReadbackBytes = 8 * 8 * 4 * 2;
-    const runtimeBytes = textureBytes + backingBytes + stagingBytes +
+    const ownedRuntimeBytes = textureBytes + ownedBackingBytes + stagingBytes +
       probeReadbackBytes;
+    const admittedRuntimeBytes = textureBytes + admittedBackingBytes +
+      stagingBytes * 2 + probeReadbackBytes;
     const exact = new Renderer(webglCanvas().canvas, layout(), {
       maxTextureBytes: textureBytes,
-      maxBackingBytes: backingBytes,
-      maxRuntimeBytes: runtimeBytes
+      maxBackingBytes: admittedBackingBytes,
+      maxRuntimeBytes: admittedRuntimeBytes
     });
     expect(exact.snapshot()).toMatchObject({
       textureBytes,
       backendDetails: { kind: "webgl2", probeReadbackBytes },
-      runtimeBytes
+      runtimeBytes: ownedRuntimeBytes
+    });
+    expect(exact.admit(0)).toEqual({
+      textureBytes,
+      runtimeBytes: admittedRuntimeBytes
     });
     exact.dispose();
 
     expect(() => new Renderer(webglCanvas().canvas, layout(), {
       maxTextureBytes: textureBytes - 1,
-      maxBackingBytes: backingBytes,
-      maxRuntimeBytes: runtimeBytes
+      maxBackingBytes: admittedBackingBytes,
+      maxRuntimeBytes: admittedRuntimeBytes
     })).toThrow(/resource byte cap/u);
     expect(() => new Renderer(webglCanvas().canvas, layout(), {
       maxTextureBytes: textureBytes,
-      maxBackingBytes: backingBytes - 1,
-      maxRuntimeBytes: runtimeBytes
+      maxBackingBytes: admittedBackingBytes - 1,
+      maxRuntimeBytes: admittedRuntimeBytes
     })).toThrow(/resource byte cap/u);
     expect(() => new Renderer(webglCanvas().canvas, layout(), {
       maxTextureBytes: textureBytes,
-      maxBackingBytes: backingBytes,
-      maxRuntimeBytes: runtimeBytes - 1
+      maxBackingBytes: admittedBackingBytes,
+      maxRuntimeBytes: admittedRuntimeBytes - 1
     })).toThrow(/resource byte cap/u);
   });
 

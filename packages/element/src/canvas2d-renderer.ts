@@ -18,6 +18,11 @@ import {
   type RenderLayout,
   type RendererFit
 } from "./renderer-geometry.js";
+import {
+  defaultCanvasFactory,
+  MaterializerFailureError,
+  RgbaMaterializer
+} from "./rgba-materializer.js";
 import type {
   RendererContextChange,
   RendererSnapshot
@@ -58,7 +63,6 @@ interface Surface {
 }
 
 const HARD_BYTES = Number.MAX_SAFE_INTEGER;
-const COPY_TIMEOUT = 5_000;
 const STREAMS = 3;
 const ID = /^[a-z][a-z0-9._-]{0,63}$/;
 
@@ -67,29 +71,24 @@ export class Canvas2dRenderer {
   readonly #canvas: HTMLCanvasElement;
   readonly #layout: Readonly<RenderLayout>;
   readonly #frameBytes: number;
-  readonly #storageBytes: number;
   readonly #plannedStagingBytes: number;
   readonly #maxTextureBytes: number;
   readonly #maxBackingBytes: number;
   readonly #maxRuntimeBytes: number;
-  readonly #copyTimeoutMs: number;
-  readonly #setTimeout: (callback: () => void, delay: number) => number;
-  readonly #clearTimeout: (handle: number) => void;
   readonly #createCanvas: (width: number, height: number) => HTMLCanvasElement;
+  readonly #materializer: RgbaMaterializer;
   readonly #onContextChange:
     ((change: Readonly<RendererContextChange>) => void) | undefined;
   readonly #lost: (event: Event) => void;
   readonly #restored: () => void;
   readonly #resident = new Map<string, CpuFrame>();
   readonly #reserved = new Set<string>();
-  #staging: Uint8Array = new Uint8Array(0);
   #streams: CpuFrame[] = [];
   #nextStream = 0;
   #last: LastFrame | null = null;
   #outputContext: CanvasRenderingContext2D | null = null;
   #colorSurface: Surface | null = null;
   #alphaSurface: Surface | null = null;
-  #readbackSurface: Surface | null = null;
   #state: State = "active";
   #tail: Promise<void> = Promise.resolve();
   #pending = 0;
@@ -100,7 +99,6 @@ export class Canvas2dRenderer {
   #dpr = 1;
   #losses = 0;
   #recoveries = 0;
-  #sourceCopiesInFlight = 0;
   #operationSequence = 0;
   #failureError: RendererFailureError | null = null;
 
@@ -119,28 +117,32 @@ export class Canvas2dRenderer {
       colorBytes,
       this.#layout.alphaRect === undefined ? 1 : 2
     );
-    this.#storageBytes = rgbaBytes(
+    const storageBytes = rgbaBytes(
       this.#layout.storageWidth,
       this.#layout.storageHeight
     );
     this.#plannedStagingBytes = checkedSum([
-      this.#storageBytes,
+      storageBytes,
       checkedProduct(STREAMS, this.#frameBytes)
     ]);
     this.#maxTextureBytes = cap(limits.maxTextureBytes, "texture byte cap");
     this.#maxBackingBytes = cap(limits.maxBackingBytes, "backing byte cap");
     this.#maxRuntimeBytes = cap(limits.maxRuntimeBytes, "runtime byte cap");
-    this.#copyTimeoutMs = limits.copyTimeoutMs ?? COPY_TIMEOUT;
-    this.#setTimeout = limits.setTimeout ?? ((callback, delay) =>
-      globalThis.setTimeout(callback, delay) as unknown as number);
-    this.#clearTimeout = limits.clearTimeout ?? ((handle) =>
-      globalThis.clearTimeout(handle));
     this.#createCanvas = limits.createCanvas ?? defaultCanvasFactory(canvas);
+    this.#materializer = new RgbaMaterializer(
+      this.#layout.storageWidth,
+      this.#layout.storageHeight,
+      {
+        ...(limits.copyTimeoutMs === undefined
+          ? {} : { copyTimeoutMs: limits.copyTimeoutMs }),
+        ...(limits.setTimeout === undefined
+          ? {} : { setTimeout: limits.setTimeout }),
+        ...(limits.clearTimeout === undefined
+          ? {} : { clearTimeout: limits.clearTimeout }),
+        createCanvas: this.#createCanvas
+      }
+    );
     this.#onContextChange = limits.onContextChange;
-    if (
-      !Number.isSafeInteger(this.#copyTimeoutMs) ||
-      this.#copyTimeoutMs < 1 || this.#copyTimeoutMs > 60_000
-    ) throw new RangeError("renderer copy timeout is invalid");
     this.#lost = (event) => {
       event.preventDefault();
       this.#markLost();
@@ -177,7 +179,6 @@ export class Canvas2dRenderer {
       }
       const backingBytes = this.#backingBytes(width, height);
       this.#assertBudget(0, backingBytes);
-      this.#staging = new Uint8Array(this.#storageBytes);
       this.#streams = Array.from({ length: STREAMS }, () => this.#newFrame());
       this.#initializeContexts("construct", operationOrdinal);
       canvas.addEventListener("contextlost", this.#lost);
@@ -322,6 +323,7 @@ export class Canvas2dRenderer {
   }
 
   public snapshot(): Readonly<RendererSnapshot> {
+    const materializer = this.#materializer.snapshot();
     if (this.#state === "disposed") {
       return Object.freeze({
         backendDetails: Object.freeze({ kind: "canvas2d" as const }),
@@ -338,7 +340,7 @@ export class Canvas2dRenderer {
         textureBytes: 0 as const,
         runtimeBytes: 0,
         pendingOperations: this.#pending,
-        sourceCopiesInFlight: this.#sourceCopiesInFlight,
+        sourceCopiesInFlight: materializer.sourceCopiesInFlight,
         resourceCount: 0,
         contextListenerCount: 0,
         failure: this.#failureError?.diagnostic ?? null
@@ -368,7 +370,7 @@ export class Canvas2dRenderer {
       textureBytes: 0 as const,
       runtimeBytes: checkedSum([stagingBytes, residentBytes, backingBytes]),
       pendingOperations: this.#pending,
-      sourceCopiesInFlight: this.#sourceCopiesInFlight,
+      sourceCopiesInFlight: materializer.sourceCopiesInFlight,
       resourceCount: this.#resourceCount(),
       contextListenerCount: 2,
       failure: this.#failureError?.diagnostic ?? null
@@ -469,19 +471,13 @@ export class Canvas2dRenderer {
               this.#layout.alphaRect[2],
               this.#layout.alphaRect[3]
             );
-        this.#readbackSurface = this.#newSurface(
-          this.#layout.storageWidth,
-          this.#layout.storageHeight,
-          true
-        );
       } else {
-        this.#reacquireSurface(this.#colorSurface, false);
+        this.#reacquireSurface(this.#colorSurface);
         if (this.#alphaSurface !== null) {
-          this.#reacquireSurface(this.#alphaSurface, false);
+          this.#reacquireSurface(this.#alphaSurface);
         }
-        this.#reacquireSurface(this.#readbackSurface, true);
       }
-      const output = canvasContext(this.#canvas, false);
+      const output = canvasContext(this.#canvas);
       if (output === null) throw new Error("Canvas2D output context is unavailable");
       assertContextAvailable(output);
       configureContext(output);
@@ -496,7 +492,7 @@ export class Canvas2dRenderer {
     }
   }
 
-  #newSurface(width: number, height: number, readback = false): Surface {
+  #newSurface(width: number, height: number): Surface {
     const canvas = this.#createCanvas(width, height);
     try {
       canvas.width = width;
@@ -504,7 +500,7 @@ export class Canvas2dRenderer {
       if (canvas.width !== width || canvas.height !== height) {
         throw new Error("Canvas2D scratch surface rejected its dimensions");
       }
-      const context = canvasContext(canvas, readback);
+      const context = canvasContext(canvas);
       if (context === null) throw new Error("Canvas2D scratch context is unavailable");
       assertContextAvailable(context);
       configureContext(context);
@@ -518,9 +514,9 @@ export class Canvas2dRenderer {
     }
   }
 
-  #reacquireSurface(surface: Surface | null, readback: boolean): void {
+  #reacquireSurface(surface: Surface | null): void {
     if (surface === null) throw new Error("Canvas2D scratch surface is unavailable");
-    const context = canvasContext(surface.canvas, readback);
+    const context = canvasContext(surface.canvas);
     if (context === null) throw new Error("Canvas2D scratch context is unavailable");
     assertContextAvailable(context);
     configureContext(context);
@@ -543,123 +539,36 @@ export class Canvas2dRenderer {
         reason
       );
     }
-    let copied = false;
-    let copyReason: unknown;
+    const materialization = this.#materializer.create(frame, rect);
     try {
-      await this.#copy(frame, rect);
-      copied = true;
-    } catch (reason) {
-      copyReason = reason;
-    }
-    if (!copied) {
+      const source = await materialization.rgba();
       if (this.#state !== "active") throw unavailable();
-      if (!isUnsupportedRgbaCopy(copyReason)) {
-        throw this.#failure(
-          "rgba-copy",
-          "runtime",
-          operationOrdinal,
-          copyReason,
-          "rgba-copy"
-        );
-      }
-      try {
-        this.#readback(frame);
-      } catch (reason) {
-        throw this.#failure(
-          "rgba-copy",
-          "runtime",
-          operationOrdinal,
-          reason,
-          "rgba-copy"
-        );
-      }
-    }
-    if (this.#state !== "active") throw unavailable();
-    this.#extract(target);
-  }
-
-  async #copy(frame: VideoFrame, rect: DOMRectReadOnly): Promise<void> {
-    const staging = this.#staging;
-    if (staging.byteLength !== this.#storageBytes) throw unavailable();
-    staging.fill(0);
-    const stride = this.#layout.storageWidth * 4;
-    let raw: Promise<readonly PlaneLayout[]>;
-    try {
-      raw = frame.copyTo(staging, {
-        format: "RGBA",
-        rect,
-        layout: [{ offset: 0, stride }]
-      });
+      this.#extract(target, source.pixels);
     } catch (reason) {
-      throw reason;
+      if (this.#state !== "active") throw unavailable();
+      if (!(reason instanceof MaterializerFailureError)) throw reason;
+      throw this.#failure(
+        "rgba-copy",
+        "runtime",
+        operationOrdinal,
+        reason.reason,
+        "rgba-copy"
+      );
+    } finally {
+      materialization.release();
     }
-    this.#sourceCopiesInFlight += 1;
-    void raw.then(
-      () => { this.#sourceCopiesInFlight -= 1; },
-      () => { this.#sourceCopiesInFlight -= 1; }
-    );
-    const planes = await timed(
-      raw,
-      this.#copyTimeoutMs,
-      this.#setTimeout,
-      this.#clearTimeout
-    );
-    const plane = Array.isArray(planes) ? planes[0] : undefined;
-    if (
-      !Array.isArray(planes) || planes.length !== 1 || plane === undefined ||
-      plane.offset !== 0 || plane.stride !== stride
-    ) throw new RgbaCopyContractError("decoded frame copy layout is invalid");
   }
 
-  #readback(frame: VideoFrame): void {
-    const surface = this.#readbackSurface;
-    if (surface === null || this.#staging.byteLength !== this.#storageBytes) {
-      throw unavailable();
-    }
-    const context = surface.context;
-    if (context === null) throw unavailable();
-    assertContextAvailable(context);
-    configureContext(context);
-    context.globalCompositeOperation = "copy";
-    context.clearRect(0, 0, this.#layout.storageWidth, this.#layout.storageHeight);
-    context.drawImage(
-      frame,
-      0,
-      0,
-      frame.displayWidth,
-      frame.displayHeight,
-      0,
-      0,
-      this.#layout.storageWidth,
-      this.#layout.storageHeight
-    );
-    const image = context.getImageData(
-      0,
-      0,
-      this.#layout.storageWidth,
-      this.#layout.storageHeight
-    );
-    const pixels = image.data;
-    if (
-      image.width !== this.#layout.storageWidth ||
-      image.height !== this.#layout.storageHeight ||
-      pixels.byteLength !== this.#storageBytes
-    ) {
-      throw new RgbaCopyContractError("Canvas2D readback storage is invalid");
-    }
-    this.#staging.set(pixels);
-  }
-
-  #extract(target: CpuFrame): void {
+  #extract(target: CpuFrame, pixels: Uint8Array): void {
     const [colorX, colorY, colorWidth, colorHeight] = this.#layout.colorRect;
     const storageStride = this.#layout.storageWidth * 4;
     for (let row = 0; row < colorHeight; row += 1) {
       for (let column = 0; column < colorWidth; column += 1) {
         const source = (colorY + row) * storageStride + (colorX + column) * 4;
         const destination = (row * colorWidth + column) * 4;
-        target.color[destination] = this.#staging[source] ?? 0;
-        target.color[destination + 1] = this.#staging[source + 1] ?? 0;
-        target.color[destination + 2] = this.#staging[source + 2] ?? 0;
+        target.color[destination] = pixels[source] ?? 0;
+        target.color[destination + 1] = pixels[source + 1] ?? 0;
+        target.color[destination + 2] = pixels[source + 2] ?? 0;
         target.color[destination + 3] = 255;
       }
     }
@@ -674,7 +583,7 @@ export class Canvas2dRenderer {
         alpha[destination] = 255;
         alpha[destination + 1] = 255;
         alpha[destination + 2] = 255;
-        alpha[destination + 3] = this.#staging[source] ?? 0;
+        alpha[destination + 3] = pixels[source] ?? 0;
       }
     }
   }
@@ -772,6 +681,7 @@ export class Canvas2dRenderer {
     this.#state = "lost";
     this.#losses += 1;
     this.#outputContext = null;
+    this.#materializer.reset();
     this.#notify(Object.freeze({ state: "lost", error: null }));
   }
 
@@ -902,12 +812,13 @@ export class Canvas2dRenderer {
         maxRuntimeBytes: this.#maxRuntimeBytes
       });
     } catch {
+      const materializer = this.#materializer.snapshot();
       return Object.freeze({
-        stagingBytes: diagnosticScalar(this.#staging.byteLength),
+        stagingBytes: diagnosticScalar(materializer.stagingBytes),
         residentBytes: 0,
         textureBytes: 0,
         backingBytes: 0,
-        runtimeBytes: diagnosticScalar(this.#staging.byteLength),
+        runtimeBytes: diagnosticScalar(materializer.stagingBytes),
         maxTextureBytes: this.#maxTextureBytes,
         maxBackingBytes: this.#maxBackingBytes,
         maxRuntimeBytes: this.#maxRuntimeBytes
@@ -921,17 +832,18 @@ export class Canvas2dRenderer {
       rgbaBytes(this.#layout.colorRect[2], this.#layout.colorRect[3]),
       this.#layout.alphaRect === undefined
         ? 0 : rgbaBytes(this.#layout.alphaRect[2], this.#layout.alphaRect[3]),
-      this.#storageBytes
+      this.#materializer.budget().maximumFallbackBackingBytes
     ]);
     return allocationBytes(raw);
   }
 
   #ownedBackingBytes(outputWidth: number, outputHeight: number): number {
+    const materializer = this.#materializer.snapshot();
     const raw = checkedSum([
       rgbaBytes(outputWidth, outputHeight),
       surfaceBytes(this.#colorSurface),
       surfaceBytes(this.#alphaSurface),
-      surfaceBytes(this.#readbackSurface)
+      materializer.readbackBackingBytes
     ]);
     return allocationBytes(raw);
   }
@@ -947,7 +859,7 @@ export class Canvas2dRenderer {
       this.#plannedStagingBytes,
       residentBytes,
       backingBytes,
-      this.#storageBytes
+      this.#materializer.budget().maximumTransientReadbackBytes
     ]);
     if (
       backingBytes > this.#maxBackingBytes ||
@@ -961,9 +873,10 @@ export class Canvas2dRenderer {
   }
 
   #stagingBytes(): number {
-    if (this.#staging.byteLength === 0 && this.#streams.length === 0) return 0;
+    const stagingBytes = this.#materializer.snapshot().stagingBytes;
+    if (stagingBytes === 0 && this.#streams.length === 0) return 0;
     return checkedSum([
-      this.#staging.byteLength,
+      stagingBytes,
       ...this.#streams.map((frame) => frameBytes(frame))
     ]);
   }
@@ -973,13 +886,13 @@ export class Canvas2dRenderer {
     return Number(this.#outputContext !== null) +
       Number(this.#colorSurface !== null && this.#colorSurface.context !== null) +
       Number(this.#alphaSurface !== null && this.#alphaSurface.context !== null) +
-      Number(this.#readbackSurface !== null && this.#readbackSurface.context !== null);
+      this.#materializer.snapshot().resourceCount;
   }
 
   #isDisposed(): boolean { return this.#state === "disposed"; }
 
   #releaseCpuStorage(): void {
-    this.#staging = new Uint8Array(0);
+    this.#materializer.dispose();
     this.#streams = [];
     this.#nextStream = 0;
   }
@@ -987,8 +900,7 @@ export class Canvas2dRenderer {
   #releaseSurfaces(): void {
     for (const surface of [
       this.#colorSurface,
-      this.#alphaSurface,
-      this.#readbackSurface
+      this.#alphaSurface
     ]) {
       if (surface === null) continue;
       surface.context = null;
@@ -999,7 +911,6 @@ export class Canvas2dRenderer {
     }
     this.#colorSurface = null;
     this.#alphaSurface = null;
-    this.#readbackSurface = null;
   }
 }
 
@@ -1032,30 +943,12 @@ function assertContextAvailable(context: CanvasRenderingContext2D): void {
   }
 }
 
-function canvasContext(
-  canvas: HTMLCanvasElement,
-  readback: boolean
-): CanvasRenderingContext2D | null {
+function canvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
   return canvas.getContext("2d", {
     alpha: true,
     desynchronized: true,
-    willReadFrequently: readback
+    willReadFrequently: false
   });
-}
-
-function defaultCanvasFactory(
-  output: HTMLCanvasElement
-): (width: number, height: number) => HTMLCanvasElement {
-  return (width, height) => {
-    const document = output.ownerDocument ?? globalThis.document;
-    if (document === undefined) {
-      throw new Error("Canvas2D scratch surface factory is unavailable");
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    return canvas;
-  };
 }
 
 function frameBytes(frame: CpuFrame): number {
@@ -1086,11 +979,6 @@ function cap(value: number | undefined, label: string): number {
   return Math.min(value, HARD_BYTES);
 }
 
-function isUnsupportedRgbaCopy(reason: unknown): boolean {
-  return reason instanceof TypeError ||
-    reason instanceof DOMException && reason.name === "NotSupportedError";
-}
-
 function diagnosticScalar(value: unknown): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value : 0;
@@ -1103,40 +991,6 @@ class RendererUnavailableError extends Error {
   }
 }
 
-class RgbaCopyContractError extends Error {}
-
 function unavailable(): RendererUnavailableError {
   return new RendererUnavailableError();
-}
-
-function timed<T>(
-  operation: Promise<T>,
-  timeoutMs: number,
-  setTimer: (callback: () => void, delay: number) => number,
-  clearTimer: (handle: number) => void
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    const timeout = setTimer(() => {
-      if (settled) return;
-      settled = true;
-      const error = new Error("decoded frame RGBA copy timed out");
-      error.name = "TimeoutError";
-      reject(error);
-    }, timeoutMs);
-    void operation.then(
-      (value) => {
-        if (settled) return;
-        settled = true;
-        clearTimer(timeout);
-        resolve(value);
-      },
-      (reason) => {
-        if (settled) return;
-        settled = true;
-        clearTimer(timeout);
-        reject(reason);
-      }
-    );
-  });
 }

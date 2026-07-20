@@ -130,7 +130,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       stagingBytes: 336,
       residentBytes: 0,
       textureBytes: 0,
-      runtimeBytes: 876
+      runtimeBytes: 636
     });
     expect(renderer.admit(0)).toEqual({ textureBytes: 0, runtimeBytes: 1_068 });
     expect(renderer.admit(1)).toEqual({ textureBytes: 0, runtimeBytes: 1_116 });
@@ -149,13 +149,11 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
       createCanvas: fixture.createCanvas
     });
-    const readback = fixture.surface(4, 12, 0).context;
-    readback.lastImageData = imageData(4, 12, packedPixels([0, 128, 255]));
-
     await renderer.draw(frameWithCopy(() => {
       throw new DOMException("RGBA is unsupported", "NotSupportedError");
     }));
 
+    const readback = fixture.surface(4, 12, 0).context;
     expect(readback.draws).toHaveLength(1);
     expect(renderer.snapshot().failure).toBeNull();
   });
@@ -165,8 +163,6 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
       createCanvas: fixture.createCanvas
     });
-    const readback = fixture.surface(4, 12, 0).context;
-    readback.lastImageData = imageData(4, 12, packedPixels([0, 128, 255]));
     const candidate = {
       ...frameWithCopy(() => {
         throw new TypeError("RGBA copy is unsupported");
@@ -180,6 +176,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
 
     await renderer.draw(candidate);
 
+    const readback = fixture.surface(4, 12, 0).context;
     expect(readback.draws[0]?.args.slice(1, 5)).toEqual([0, 0, 8, 24]);
   });
 
@@ -194,7 +191,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     const storing = renderer.store("idle", 0, frameWithCopy(() => copy));
     expect(renderer.snapshot()).toMatchObject({
       residentBytes: 48,
-      runtimeBytes: 924
+      runtimeBytes: 684
     });
     resolve([{ offset: 0, stride: 16 }]);
     await storing;
@@ -215,11 +212,11 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
       createCanvas: fixture.createCanvas
     });
-    const readback = fixture.surface(4, 12, 0).context;
-
     await expect(renderer.draw(frameWithCopy(copy))).rejects
       .toBeInstanceOf(RendererFailureError);
-    expect(readback.draws).toHaveLength(0);
+    expect(fixture.surfaces.filter((surface) =>
+      surface.initialWidth === 4 && surface.initialHeight === 12
+    )).toHaveLength(0);
     expect(renderer.snapshot().failure).toMatchObject({
       backend: "canvas2d",
       phase: "rgba-copy",
@@ -242,7 +239,9 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     fire?.();
 
     await expect(pending).rejects.toBeInstanceOf(RendererFailureError);
-    expect(fixture.surface(4, 12, 0).context.draws).toHaveLength(0);
+    expect(fixture.surfaces.filter((surface) =>
+      surface.initialWidth === 4 && surface.initialHeight === 12
+    )).toHaveLength(0);
     expect(renderer.snapshot().failure).toMatchObject({
       phase: "rgba-copy",
       exception: { name: "TimeoutError" }
@@ -479,10 +478,6 @@ function destinationBytes(destination: AllowSharedBufferSource): Uint8Array {
     );
   }
   return new Uint8Array(destination);
-}
-
-function imageData(width: number, height: number, pixels: Uint8Array): ImageData {
-  return { width, height, data: new Uint8ClampedArray(pixels) } as ImageData;
 }
 
 function canvasFixture(width = 4, height = 12): Readonly<{
