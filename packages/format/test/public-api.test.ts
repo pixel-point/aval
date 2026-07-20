@@ -17,6 +17,7 @@ const REQUIRED_RUNTIME_EXPORTS = Object.freeze([
   "FORMAT_VERSION_MAJOR",
   "FORMAT_VERSION_MINOR",
   "FormatError",
+  "classifyDecoderColor",
   "createCanonicalChunkPlan",
   "deriveVideoRenditionGeometry",
   "h264CodecForLevel",

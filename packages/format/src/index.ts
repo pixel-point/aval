@@ -80,10 +80,15 @@ export {
   VIDEO_CODECS
 } from "./video/codec-string.js";
 export { maximumDecodedRgbaBytes } from "./video/decoder-surface.js";
+export { classifyDecoderColor } from "./video/decoder-color.js";
 export { deriveVideoRenditionGeometry, PACKED_ALPHA_GUTTER } from "./video/geometry.js";
 export type {
   ParsedVideoCodecString
 } from "./video/codec-string.js";
+export type {
+  DecoderColorClassification,
+  DecoderColorTuple
+} from "./video/decoder-color.js";
 export {
   COMPILE_BUNDLE_H264_PRESETS,
   COMPILE_BUNDLE_H265_PRESETS,
