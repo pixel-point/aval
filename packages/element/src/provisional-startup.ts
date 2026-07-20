@@ -1,8 +1,67 @@
 import {
+  decodedOutputIncompatibleCandidateOutcome,
   retryableCandidateOutcome,
   type ProvisionalCandidateOutcome,
   type RetryableCandidateRejection
 } from "./provisional-candidate-outcome.js";
+import type {
+  Manifest,
+  PackedAlphaWitnessV1
+} from "./asset.js";
+import { qualifyDecodedPackedAlphaOutput } from
+  "./decoded-output-qualifier.js";
+import type { RgbaFrameReference } from "./rgba-materializer.js";
+import type { RenderLayout } from "./renderer-geometry.js";
+
+export interface ProvisionalDecodedFrame {
+  readonly frame: VideoFrame;
+  readonly unit: string;
+  readonly localFrame: number;
+}
+
+export interface ProvisionalOutputQualificationInput {
+  readonly manifest: Readonly<Manifest>;
+  readonly renditionId: string;
+  readonly layout: Readonly<RenderLayout>;
+  readonly withDecodedFrame: (
+    unit: string,
+    localFrame: number,
+    use: (decoded: Readonly<ProvisionalDecodedFrame>) => Promise<void>
+  ) => Promise<void>;
+  readonly inspectAndPrime: (
+    frame: VideoFrame,
+    inspect: (source: Readonly<RgbaFrameReference>) => Promise<void>
+  ) => Promise<void>;
+}
+
+export class UnsupportedPlaybackProfileError extends Error {
+  public constructor() {
+    super("legacy packed-alpha output is outside the qualified playback profile");
+    this.name = "NotSupportedError";
+  }
+}
+
+/** Qualifies one exact packed-alpha witness frame without owning publication. */
+export async function qualifyProvisionalOutput(
+  input: Readonly<ProvisionalOutputQualificationInput>
+): Promise<void> {
+  const witness = outputWitness(input.manifest, input.renditionId);
+  if (witness === null) return;
+  await input.withDecodedFrame(
+    witness.unit,
+    witness.frame,
+    async (decoded) => input.inspectAndPrime(
+      decoded.frame,
+      async (source) => qualifyDecodedPackedAlphaOutput({
+        unit: decoded.unit,
+        localFrame: decoded.localFrame,
+        layout: input.layout,
+        witness,
+        source
+      })
+    )
+  );
+}
 
 export interface ProvisionalCandidateRetirement {
   readonly retryAllowed: boolean;
@@ -49,10 +108,32 @@ async function qualifyCandidate<T>(
     const localFailure = input.localFailure(candidate) ?? error;
     const retirement = await input.retire(candidate);
     if (input.cancelled() || !retirement.retryAllowed) throw error;
-    const outcome = retryableCandidateOutcome(localFailure);
+    const outcome = decodedOutputIncompatibleCandidateOutcome(localFailure) ??
+      retryableCandidateOutcome(localFailure);
     if (outcome === null) throw error;
     return outcome;
   }
+}
+
+function outputWitness(
+  manifest: Readonly<Manifest>,
+  renditionId: string
+): Readonly<PackedAlphaWitnessV1> | null {
+  if (manifest.layout === "opaque") {
+    if (!manifest.renditions.some(({ id }) => id === renditionId)) invalidAsset();
+    return null;
+  }
+  if (manifest.formatVersion === "1.0") {
+    if (!manifest.renditions.some(({ id }) => id === renditionId)) invalidAsset();
+    throw new UnsupportedPlaybackProfileError();
+  }
+  const rendition = manifest.renditions.find(({ id }) => id === renditionId);
+  if (rendition === undefined) return invalidAsset();
+  return rendition.outputQualification;
+}
+
+function invalidAsset(): never {
+  throw new Error("Invalid AVAL asset");
 }
 
 function unreachableOutcome(outcome: never): never {

@@ -31,14 +31,22 @@ export function unsupportedConfigCandidateOutcome(): Readonly<
   return retryableOutcome("probe", "unsupported-config");
 }
 
+/** Maps only the qualifier's semantic witness mismatch into codec retry. */
+export function decodedOutputIncompatibleCandidateOutcome(
+  failure: unknown
+): Readonly<
+  Extract<ProvisionalCandidateOutcome<never>, { kind: "retryable-rejection" }>
+> | null {
+  return failure instanceof DecodedOutputIncompatibleError
+    ? retryableOutcome("output", "decoded-output-incompatible")
+    : null;
+}
+
 export function retryableCandidateOutcome(
   failure: unknown
 ): Readonly<
   Extract<ProvisionalCandidateOutcome<never>, { kind: "retryable-rejection" }>
 > | null {
-  if (failure instanceof DecodedOutputIncompatibleError) {
-    return retryableOutcome("output", "decoded-output-incompatible");
-  }
   if (!(failure instanceof DecoderLocalFailureError)) return null;
   const local = failure.failure;
   if (local.kind === "unsupported-config") {
