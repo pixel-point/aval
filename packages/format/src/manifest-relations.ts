@@ -80,6 +80,37 @@ export function validateManifestRelations(input: ManifestRelationInput): void {
     edgesById,
     unitsById
   );
+  validateOutputQualifications(
+    input.renditions,
+    unitsById,
+    new Set(input.readiness.bootstrapUnits)
+  );
+}
+
+function validateOutputQualifications(
+  renditions: readonly ProductionRendition[],
+  unitsById: ReadonlyMap<string, Unit>,
+  bootstrapUnits: ReadonlySet<string>
+): void {
+  for (let index = 0; index < renditions.length; index += 1) {
+    const rendition = renditions[index]!;
+    const witness = rendition.outputQualification;
+    if (witness === undefined) continue;
+    const path = `renditions[${String(index)}].outputQualification`;
+    const unit = unitsById.get(witness.unit);
+    if (unit === undefined) {
+      invalid(`${path}.unit`, "does not reference a unit");
+    }
+    if (!bootstrapUnits.has(unit.id)) {
+      invalid(`${path}.unit`, "must reference a bootstrap unit");
+    }
+    if (witness.frame >= unit.frameCount) {
+      invalid(`${path}.frame`, "must be a local presentation frame in the unit");
+    }
+    if (!unit.chunks.some((span) => span.rendition === rendition.id)) {
+      invalid(`${path}.unit`, "must contain a chunk span for the rendition");
+    }
+  }
 }
 
 export function validateBlobCount(

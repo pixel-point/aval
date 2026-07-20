@@ -3,7 +3,7 @@ import {
   type CanonicalAssetInput,
   type ChunkDigestInput,
   type EncodedChunkInput,
-  type ProductionRendition,
+  type ProductionRenditionV1_0,
   type UnitInput
 } from "@pixel-point/aval-format";
 
@@ -29,7 +29,7 @@ export function opaqueTestRendition(
   codedHeight = 64,
   peakBitrate = 2_000_000,
   averageBitrate = 1_000_000
-): ProductionRendition {
+): ProductionRenditionV1_0 {
   return Object.freeze({
     id,
     codec: "avc1.640020",
@@ -267,7 +267,7 @@ export function createIntegratedPathTestAsset(): Uint8Array {
 interface BaseManifestInput {
   readonly generator: string;
   readonly pixelAspect: readonly [number, number];
-  readonly renditions: readonly ProductionRendition[];
+  readonly renditions: readonly ProductionRenditionV1_0[];
   readonly units: readonly UnitInput[];
   readonly initialState: string;
   readonly states: CanonicalAssetInput["manifest"]["states"];
@@ -319,7 +319,7 @@ function baseManifest(
 }
 
 function chunkDescriptors(
-  renditions: readonly ProductionRendition[],
+  renditions: readonly ProductionRenditionV1_0[],
   sha256 = DIGEST
 ): readonly ChunkDigestInput[] {
   return Object.freeze(renditions.map(({ id }) => Object.freeze({

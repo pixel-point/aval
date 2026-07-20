@@ -11,11 +11,18 @@ export const CHUNK_INDEX_MAGIC = Object.freeze([
 ] as const);
 
 export const FORMAT_VERSION_MAJOR = 1;
-export const FORMAT_VERSION_MINOR = 0;
+export const FORMAT_VERSION_MINOR = 1;
+export const FORMAT_SUPPORTED_VERSIONS = Object.freeze([
+  "1.0",
+  "1.1"
+] as const);
 export const FORMAT_HEADER_LENGTH = 64;
 export const FORMAT_ALIGNMENT = 8;
 export const CHUNK_INDEX_HEADER_LENGTH = 16;
 export const CHUNK_INDEX_RECORD_LENGTH = 48;
+export const PACKED_ALPHA_WITNESS_MAX_SAMPLES = 8;
+export const PACKED_ALPHA_WITNESS_MAX_INTERVAL_WIDTH = 96;
+export const PACKED_ALPHA_WITNESS_MAX_REFERENCE_DELTA = 32;
 const UINT32_MAX = 0xffff_ffff;
 
 export const IDENTIFIER_PATTERN = Object.freeze(

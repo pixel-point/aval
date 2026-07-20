@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { PUBLIC_RELEASE_DEPENDENCIES, PUBLIC_RELEASE_PACKAGES, validateApiClassifications, validateSynchronizedReleaseSet } from "../src/compatibility.js";
-import { FORMAT_VERSION_MAJOR, FORMAT_VERSION_MINOR } from "../../format/src/index.js";
+import {
+  FORMAT_SUPPORTED_VERSIONS,
+  FORMAT_VERSION_MAJOR,
+  FORMAT_VERSION_MINOR
+} from "../../format/src/index.js";
 import { COMPILER_PROJECT_VERSION } from "../../compiler/src/index.js";
 
-describe("1.0 compatibility policy", () => {
+describe("compatibility policy", () => {
   it("keeps package, wire, and project version spaces independent", () => {
-    expect([FORMAT_VERSION_MAJOR, FORMAT_VERSION_MINOR]).toEqual([1, 0]);
+    expect([FORMAT_VERSION_MAJOR, FORMAT_VERSION_MINOR]).toEqual([1, 1]);
+    expect(FORMAT_SUPPORTED_VERSIONS).toEqual(["1.0", "1.1"]);
     expect(COMPILER_PROJECT_VERSION).toBe("1.0");
   });
   it("requires synchronized public ESM packages and exact internal dependencies", () => {

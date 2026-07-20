@@ -2,11 +2,26 @@ import type {
   CanonicalAssetInput,
   CompiledManifest,
   CompiledManifestInput,
+  CompiledManifestInputV1_0,
+  CompiledManifestV1_0,
   ParsedFrontIndex
 } from "../src/model.js";
 import { validManifest } from "./manifest-fixture.js";
 
-function manifestInputFromCompiled(manifest: CompiledManifest): CompiledManifestInput {
+type LegacyManifestInput = CompiledManifestInputV1_0;
+type LegacyCanonicalAssetInput = Omit<CanonicalAssetInput, "manifest"> & {
+  readonly manifest: LegacyManifestInput;
+};
+
+function manifestInputFromCompiled(
+  manifest: CompiledManifestV1_0
+): LegacyManifestInput;
+function manifestInputFromCompiled(
+  manifest: CompiledManifest
+): CompiledManifestInput;
+function manifestInputFromCompiled(
+  manifest: CompiledManifest
+): CompiledManifestInput {
   const { units, ...rest } = manifest;
   return {
     ...rest,
@@ -27,10 +42,10 @@ export interface WriterFixtureOptions {
 /** A fresh valid writer input with one encoded chunk per displayed frame. */
 export function validWriterInput(
   options: WriterFixtureOptions = {}
-): CanonicalAssetInput {
+): LegacyCanonicalAssetInput {
   const compiled = validManifest();
   const baseManifest = manifestInputFromCompiled(compiled);
-  const manifest: CompiledManifestInput = {
+  const manifest: LegacyManifestInput = {
     ...baseManifest,
     generator: baseManifest.generator + (options.generatorSuffix ?? "")
   };

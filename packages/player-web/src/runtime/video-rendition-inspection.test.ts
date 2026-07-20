@@ -1,7 +1,7 @@
 import type {
-  CompiledManifest,
+  CompiledManifestV1_0,
   EncodedChunkRecord,
-  ProductionRendition,
+  ProductionRenditionV1_0,
   Unit
 } from "@pixel-point/aval-format";
 import { describe, expect, it, vi } from "vitest";
@@ -56,7 +56,7 @@ describe("selected catalog video rendition inspection", () => {
         ...fixture.manifest.renditions[0]!,
         bitrate: { average: 90_000, peak: 140_000 }
       }]
-    } satisfies CompiledManifest;
+    } satisfies CompiledManifestV1_0;
     const foreign = certifyVideoRenditions(foreignManifest)[0]!;
 
     expect(() => inspectSelectedVideoRendition(fixture.catalog, foreign))
@@ -74,11 +74,11 @@ describe("selected catalog video rendition inspection", () => {
 });
 
 function createCatalogFixture(codec = "avc1.42E020"): Readonly<{
-  manifest: Readonly<CompiledManifest>;
+  manifest: Readonly<CompiledManifestV1_0>;
   catalog: RuntimeAssetCatalog;
   copyChunk: ReturnType<typeof vi.fn>;
 }> {
-  const rendition: ProductionRendition = Object.freeze({
+  const rendition: ProductionRenditionV1_0 = Object.freeze({
     id: "main",
     codec,
     bitDepth: 8,
@@ -104,7 +104,7 @@ function createCatalogFixture(codec = "avc1.42E020"): Readonly<{
       sha256: "0".repeat(64)
     })])
   });
-  const manifest: Readonly<CompiledManifest> = Object.freeze({
+  const manifest: Readonly<CompiledManifestV1_0> = Object.freeze({
     formatVersion: "1.0",
     generator: "inspection-test",
     codec: "h264",

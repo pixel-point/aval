@@ -4,8 +4,7 @@ import {
   FORMAT_DEFAULT_BUDGETS,
   FORMAT_HEADER_LENGTH,
   FORMAT_MAGIC,
-  FORMAT_VERSION_MAJOR,
-  FORMAT_VERSION_MINOR,
+  FORMAT_SUPPORTED_VERSIONS,
   resolveFormatBudgets
 } from "./constants.js";
 import {
@@ -43,7 +42,7 @@ function fail(message: string, offset: number): never {
 function assertMagic(bytes: Uint8Array): void {
   for (let index = 0; index < FORMAT_MAGIC.length; index += 1) {
     if (bytes[index] !== FORMAT_MAGIC[index]) {
-      fail("format magic does not match AVLF 1.0", index);
+      fail("format magic does not match AVLF", index);
     }
   }
 }
@@ -54,11 +53,12 @@ function validateHeaderShape(
 ): void {
   const budgets = resolveFormatBudgets(options);
 
-  if (header.major !== FORMAT_VERSION_MAJOR || header.minor !== FORMAT_VERSION_MINOR) {
+  const version = `${String(header.major)}.${String(header.minor)}`;
+  if (!FORMAT_SUPPORTED_VERSIONS.some((candidate) => candidate === version)) {
     throw new FormatError(
       "VERSION_UNSUPPORTED",
       `format version ${header.major}.${header.minor} is unsupported`,
-      { offset: header.major !== FORMAT_VERSION_MAJOR ? 8 : 10 }
+      { offset: header.major !== 1 ? 8 : 10 }
     );
   }
   if (header.headerLength !== FORMAT_HEADER_LENGTH) {
@@ -67,7 +67,7 @@ function validateHeaderShape(
   if (header.requiredFeatureFlags !== 0) {
     throw new FormatError(
       "FEATURE_UNSUPPORTED",
-      "required feature flags are unsupported in format 1.0",
+      "required feature flags are unsupported",
       { offset: 16 }
     );
   }
@@ -137,7 +137,7 @@ function validateHeaderShape(
   }
 }
 
-/** Decodes and validates the exact 64-byte version-1.0 header. */
+/** Decodes and validates an exact supported 64-byte header. */
 export function parseHeader(
   bytes: Uint8Array,
   options?: FormatOptions
@@ -220,9 +220,9 @@ export function parseHeader(
       indexLength
     };
     validateHeaderShape(fields, options);
-    const header: FormatHeader = {
-      major: FORMAT_VERSION_MAJOR,
-      minor: FORMAT_VERSION_MINOR,
+    const header = {
+      major,
+      minor,
       headerLength: FORMAT_HEADER_LENGTH,
       requiredFeatureFlags: 0,
       declaredFileLength,
@@ -230,7 +230,7 @@ export function parseHeader(
       manifestLength,
       indexOffset,
       indexLength
-    };
+    } as FormatHeader;
     return Object.freeze(header);
   } catch (error) {
     if (isFormatError(error)) {
@@ -240,7 +240,7 @@ export function parseHeader(
   }
 }
 
-/** Encodes one canonical version-1.0 header into a new 64-byte array. */
+/** Encodes one canonical supported header into a new 64-byte array. */
 export function encodeHeader(
   header: FormatHeader,
   options?: FormatOptions

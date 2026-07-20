@@ -5,9 +5,9 @@ import {
   writeCanonicalAsset,
   type Bitrate,
   type CanonicalAssetInput,
-  type CompiledManifestInput,
+  type CompiledManifestInputV1_0,
   type EncodedChunkInput,
-  type ProductionRendition,
+  type ProductionRenditionV1_0,
   type UnitInput,
   type VideoBitDepth,
   type VideoLayout,
@@ -58,7 +58,7 @@ export interface CompileProjectEncodingInput {
 /** A validated, byte-complete one-codec artifact before bundle publication. */
 export interface CompiledProjectEncoding {
   readonly codec: NormalizedVideoEncoding["codec"];
-  readonly manifest: CompiledManifestInput;
+  readonly manifest: CompiledManifestInputV1_0;
   readonly assetBytes: Uint8Array;
   readonly bytes: number;
   readonly sha256: string;
@@ -110,7 +110,7 @@ export function compileProjectEncoding(
   const renditions = input.renditions.map((rendition) =>
     lowerRendition(rendition, input.layout)
   );
-  const manifest: CompiledManifestInput = Object.freeze({
+  const manifest: CompiledManifestInputV1_0 = Object.freeze({
     formatVersion: "1.0",
     generator: ffmpegGenerator(),
     codec: input.encoding.codec,
@@ -251,7 +251,7 @@ function validatePreparedUnit(
 function lowerRendition(
   rendition: Readonly<PreparedEncodingRendition>,
   layout: VideoLayout
-): ProductionRendition {
+): ProductionRenditionV1_0 {
   const alphaLayout = layout === "opaque"
     ? Object.freeze({
         type: "opaque" as const,

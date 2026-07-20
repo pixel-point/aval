@@ -19,12 +19,29 @@ export interface AssetPlatform {
   readonly clearTimeout?: (handle: number) => void;
 }
 
-export interface Rendition {
+export interface PackedAlphaWitnessSampleV1 {
+  readonly x: number;
+  readonly y: number;
+  readonly expectedRange: readonly [minimum: number, maximum: number];
+}
+
+export interface PackedAlphaWitnessV1 {
+  readonly kind: "packed-alpha-v1";
+  readonly unit: string;
+  readonly frame: number;
+  readonly samples: readonly Readonly<PackedAlphaWitnessSampleV1>[];
+}
+
+interface RenditionBase {
   readonly id: string;
   readonly codec: string;
   readonly bitDepth: 8 | 10;
   readonly codedWidth: number;
   readonly codedHeight: number;
+  readonly bitrate: { readonly average: number; readonly peak: number };
+}
+
+export interface LegacyRendition extends RenditionBase {
   readonly alphaLayout:
     | { readonly type: "opaque"; readonly colorRect: Rect }
     | {
@@ -32,8 +49,27 @@ export interface Rendition {
         readonly colorRect: Rect;
         readonly alphaRect: Rect;
       };
-  readonly bitrate: { readonly average: number; readonly peak: number };
+  readonly outputQualification?: never;
 }
+
+export interface OpaqueQualifiedRendition extends RenditionBase {
+  readonly alphaLayout: { readonly type: "opaque"; readonly colorRect: Rect };
+  readonly outputQualification?: never;
+}
+
+export interface PackedAlphaQualifiedRendition extends RenditionBase {
+  readonly alphaLayout: {
+    readonly type: "stacked";
+    readonly colorRect: Rect;
+    readonly alphaRect: Rect;
+  };
+  readonly outputQualification: PackedAlphaWitnessV1;
+}
+
+export type Rendition =
+  | LegacyRendition
+  | OpaqueQualifiedRendition
+  | PackedAlphaQualifiedRendition;
 
 export interface UnitSpan {
   readonly rendition: string;
@@ -116,12 +152,10 @@ export type Edge = EdgeBase & (
     }
 );
 
-export interface Manifest {
-  readonly formatVersion: "1.0";
+interface ManifestBase {
   readonly generator: string;
   readonly codec: Codec;
   readonly bitstream: Bitstream;
-  readonly layout: "opaque" | "packed-alpha";
   readonly canvas: {
     readonly width: number;
     readonly height: number;
@@ -130,7 +164,6 @@ export interface Manifest {
     readonly colorSpace: "srgb";
   };
   readonly frameRate: { readonly numerator: number; readonly denominator: number };
-  readonly renditions: readonly Rendition[];
   readonly units: readonly Unit[];
   readonly initialState: string;
   readonly states: readonly {
@@ -153,6 +186,29 @@ export interface Manifest {
     readonly runtimeWorkingSetBytes: number;
   };
 }
+
+export interface LegacyManifest extends ManifestBase {
+  readonly formatVersion: "1.0";
+  readonly layout: "opaque" | "packed-alpha";
+  readonly renditions: readonly LegacyRendition[];
+}
+
+export interface OpaqueQualifiedManifest extends ManifestBase {
+  readonly formatVersion: "1.1";
+  readonly layout: "opaque";
+  readonly renditions: readonly OpaqueQualifiedRendition[];
+}
+
+export interface PackedAlphaQualifiedManifest extends ManifestBase {
+  readonly formatVersion: "1.1";
+  readonly layout: "packed-alpha";
+  readonly renditions: readonly PackedAlphaQualifiedRendition[];
+}
+
+export type Manifest =
+  | LegacyManifest
+  | OpaqueQualifiedManifest
+  | PackedAlphaQualifiedManifest;
 
 export interface AssetRecord {
   readonly offset: number;
@@ -198,6 +254,8 @@ export interface AssetSnapshot {
 
 type Obj = Record<string, unknown>;
 type Header = {
+  major: 1;
+  minor: 0 | 1;
   declared: number;
   manifestLength: number;
   indexOffset: number;
@@ -433,7 +491,7 @@ function stringBytes(value: string): Uint8Array {
 function validateManifest(value: unknown): Manifest {
   const m = object(value);
   shape(m, TOP);
-  if (m.formatVersion !== "1.0") bad();
+  const formatVersion = choice(m.formatVersion, ["1.0", "1.1"] as const);
   if (typeof m.generator !== "string") bad();
   const generatorBytes = UTF8.encode(m.generator).byteLength;
   if (generatorBytes < 1 || generatorBytes > 128 || /[\u0000-\u001f]/.test(m.generator)) bad();
@@ -460,7 +518,14 @@ function validateManifest(value: unknown): Manifest {
   const renditionIds = new Set<string>();
   for (const value of renditionValues) {
     const rendition = object(value);
-    shape(rendition, ["id", "codec", "bitDepth", "codedWidth", "codedHeight", "alphaLayout", "bitrate"]);
+    const renditionKeys = [
+      "id", "codec", "bitDepth", "codedWidth", "codedHeight", "alphaLayout", "bitrate"
+    ];
+    if (formatVersion === "1.1" && layout === "packed-alpha") {
+      shape(rendition, [...renditionKeys, "outputQualification"]);
+    } else {
+      shape(rendition, renditionKeys);
+    }
     const rid = identifier(rendition.id);
     if (renditionIds.has(rid)) bad();
     renditionIds.add(rid);
@@ -471,7 +536,18 @@ function validateManifest(value: unknown): Manifest {
     const codedWidth = integer(rendition.codedWidth, 1, U32);
     const codedHeight = integer(rendition.codedHeight, 1, U32);
     if (codedWidth % 2 !== 0 || codedHeight % 2 !== 0) bad();
-    validateAlpha(rendition.alphaLayout, layout, width, height, codedWidth, codedHeight);
+    const alphaRect = validateAlpha(
+      rendition.alphaLayout,
+      layout,
+      width,
+      height,
+      codedWidth,
+      codedHeight
+    );
+    if (formatVersion === "1.1" && layout === "packed-alpha") {
+      if (alphaRect === null) bad();
+      validatePackedAlphaWitness(rendition.outputQualification, alphaRect);
+    }
     const bitrate = object(rendition.bitrate);
     shape(bitrate, ["average", "peak"]);
     if (integer(bitrate.average, 1) > integer(bitrate.peak, 1)) bad();
@@ -590,7 +666,7 @@ function validateManifest(value: unknown): Manifest {
 }
 
 function validateAlpha(value: unknown, layout: string, canvasWidth: number, canvasHeight: number,
-  codedWidth: number, codedHeight: number): void {
+  codedWidth: number, codedHeight: number): Rect | null {
   const alpha = object(value);
   if (layout === "opaque") {
     shape(alpha, ["type", "colorRect"]);
@@ -606,6 +682,31 @@ function validateAlpha(value: unknown, layout: string, canvasWidth: number, canv
     const a = rect(alpha.alphaRect, codedWidth, codedHeight);
     const expectedY = color[3]! + color[3]! % 2 + 8;
     if (a[0] !== 0 || a[1] !== expectedY || a[2] !== color[2] || a[3] !== color[3]) bad();
+    return a;
+  }
+  return null;
+}
+
+function validatePackedAlphaWitness(value: unknown, alphaRect: Rect): void {
+  const witness = object(value);
+  shape(witness, ["kind", "unit", "frame", "samples"]);
+  if (witness.kind !== "packed-alpha-v1") bad();
+  identifier(witness.unit);
+  integer(witness.frame);
+  const samples = array(witness.samples, 1, 8);
+  const coordinates = new Set<string>();
+  for (const value of samples) {
+    const sample = object(value);
+    shape(sample, ["x", "y", "expectedRange"]);
+    const x = integer(sample.x, 0, alphaRect[2] - 1);
+    const y = integer(sample.y, 0, alphaRect[3] - 1);
+    const coordinate = `${String(x)}\0${String(y)}`;
+    if (coordinates.has(coordinate)) bad();
+    coordinates.add(coordinate);
+    const expectedRange = array(sample.expectedRange, 2, 2);
+    const minimum = integer(expectedRange[0], 0, 255);
+    const maximum = integer(expectedRange[1], 0, 255);
+    if (minimum > maximum || maximum - minimum > 96) bad();
   }
 }
 
@@ -772,6 +873,13 @@ function validateRelations(manifest: Manifest): void {
     if (edge.transition !== undefined) required.add(edge.transition.unit);
   }
   for (const id of required) if (!bootstrap.has(id)) bad();
+  for (const rendition of manifest.renditions) {
+    const witness = rendition.outputQualification;
+    if (witness === undefined) continue;
+    const unit = units.get(witness.unit);
+    if (unit === undefined || !bootstrap.has(unit.id) || witness.frame >= unit.frameCount ||
+      !unit.chunks.some((span) => span.rendition === rendition.id)) bad();
+  }
 }
 
 function greatestPortalWait(unit: Extract<Unit, { kind: "body" }>, portals: readonly number[]): number {
@@ -799,7 +907,9 @@ function parseHeader(bytes: Uint8Array): Header {
   if (bytes.byteLength < 64) bad();
   for (let i = 0; i < MAGIC.length; i += 1) if (bytes[i] !== MAGIC[i]) bad();
   const view = new DataView(bytes.buffer, bytes.byteOffset, 64);
-  if (view.getUint16(8, true) !== 1 || view.getUint16(10, true) !== 0 ||
+  const major = view.getUint16(8, true);
+  const minor = view.getUint16(10, true);
+  if (major !== 1 || (minor !== 0 && minor !== 1) ||
     view.getUint32(12, true) !== 64 || view.getUint32(16, true) !== 0 || view.getUint32(20, true) !== 0) bad();
   const declared = read64(view, 24);
   if (read64(view, 32) !== 64) bad();
@@ -811,7 +921,15 @@ function parseHeader(bytes: Uint8Array): Header {
   if (indexLength < 16 || (indexLength - 16) % 48 !== 0 || (indexLength - 16) / 48 > U32) bad();
   const frontEnd = add(indexOffset, indexLength);
   if (frontEnd > declared) bad();
-  return { declared, manifestLength, indexOffset, indexLength, frontEnd };
+  return {
+    major: 1,
+    minor: minor as 0 | 1,
+    declared,
+    manifestLength,
+    indexOffset,
+    indexLength,
+    frontEnd
+  };
 }
 
 function parseManifest(
@@ -822,6 +940,7 @@ function parseManifest(
   if (bytes.byteLength < header.indexOffset) bad();
   const manifestEnd = add(64, header.manifestLength);
   const manifest = validateManifest(canonicalJson(bytes.subarray(64, manifestEnd)));
+  if (manifest.formatVersion !== `${String(header.major)}.${String(header.minor)}`) bad();
   if (manifest.codec !== expectedFamily) bad();
   zero(bytes, manifestEnd, header.indexOffset - manifestEnd);
   return manifest;
@@ -835,6 +954,7 @@ function parseFront(
   const header = admission?.header ?? parseHeader(bytes);
   if (bytes.byteLength < header.frontEnd) bad();
   const manifest = admission?.manifest ?? parseManifest(bytes, header, expectedFamily);
+  if (manifest.formatVersion !== `${String(header.major)}.${String(header.minor)}`) bad();
   const manifestEnd = add(64, header.manifestLength);
   const index = bytes.subarray(header.indexOffset, header.frontEnd);
   if (index[0] !== 0x41 || index[1] !== 0x56 || index[2] !== 0x4c || index[3] !== 0x49) bad();

@@ -1,9 +1,7 @@
 import { encodeEncodedChunkIndex } from "./access-unit-index.js";
 import { serializeCanonicalJson } from "./canonical-json.js";
 import {
-  FORMAT_HEADER_LENGTH,
-  FORMAT_VERSION_MAJOR,
-  FORMAT_VERSION_MINOR
+  FORMAT_HEADER_LENGTH
 } from "./constants.js";
 import { FormatError, isFormatError } from "./errors.js";
 import { encodeHeader } from "./header.js";
@@ -28,7 +26,7 @@ interface WriterLayout {
   readonly fileLength: number;
 }
 
-/** Write one byte-canonical version-1.0 aval asset. */
+/** Write one byte-canonical supported aval asset. */
 export function writeCanonicalAsset(
   input: CanonicalAssetInput,
   options?: FormatOptions
@@ -44,9 +42,9 @@ export function writeCanonicalAsset(
       options
     );
 
-    const header: FormatHeader = Object.freeze({
-      major: FORMAT_VERSION_MAJOR,
-      minor: FORMAT_VERSION_MINOR,
+    const header = Object.freeze({
+      major: 1,
+      minor: manifest.formatVersion === "1.0" ? 0 : 1,
       headerLength: FORMAT_HEADER_LENGTH,
       requiredFeatureFlags: 0,
       declaredFileLength: finalLayout.fileLength,
@@ -54,7 +52,7 @@ export function writeCanonicalAsset(
       manifestLength: manifestBytes.byteLength,
       indexOffset: finalLayout.indexOffset,
       indexLength: finalLayout.indexLength
-    });
+    }) as FormatHeader;
     const headerBytes = encodeHeader(header, options);
     const indexBytes = encodeEncodedChunkIndex(finalLayout.records, manifest, options);
     if (indexBytes.byteLength !== finalLayout.indexLength) {

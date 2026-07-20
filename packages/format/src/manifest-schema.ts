@@ -1,4 +1,7 @@
-import { resolveFormatBudgets } from "./constants.js";
+import {
+  FORMAT_SUPPORTED_VERSIONS,
+  resolveFormatBudgets
+} from "./constants.js";
 import { FormatError } from "./errors.js";
 import {
   cloneBindings,
@@ -21,7 +24,6 @@ import {
   exactKeys,
   generatorString,
   identifier,
-  literal,
   oneOf,
   record,
   invalid
@@ -54,7 +56,7 @@ const TOP_LEVEL_KEYS = [
   "limits"
 ] as const;
 
-/** Validate, detach, and recursively freeze the sole production manifest. */
+/** Validate, detach, and recursively freeze one supported manifest version. */
 export function validateCompiledManifest(
   value: unknown,
   options?: FormatOptions
@@ -63,7 +65,11 @@ export function validateCompiledManifest(
     const budgets = resolveFormatBudgets(options);
     const input = record(value, "manifest");
     exactKeys(input, TOP_LEVEL_KEYS, "manifest");
-    literal(input.formatVersion, "1.0", "formatVersion");
+    const formatVersion = oneOf(
+      input.formatVersion,
+      FORMAT_SUPPORTED_VERSIONS,
+      "formatVersion"
+    );
     const generator = generatorString(input.generator, "generator");
     const codec = oneOf(input.codec, VIDEO_CODECS, "codec");
     const bitstream = oneOf(
@@ -85,6 +91,7 @@ export function validateCompiledManifest(
       canvas,
       codec,
       layout,
+      formatVersion,
       budgets,
       "renditions"
     );
@@ -114,7 +121,7 @@ export function validateCompiledManifest(
     });
 
     return Object.freeze({
-      formatVersion: "1.0",
+      formatVersion,
       generator,
       codec,
       bitstream,
@@ -129,7 +136,7 @@ export function validateCompiledManifest(
       bindings,
       readiness,
       limits
-    });
+    }) as CompiledManifest;
   } catch (error) {
     if (error instanceof FormatError) throw error;
     throw new FormatError("MANIFEST_INVALID", "manifest validation failed");

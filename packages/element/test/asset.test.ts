@@ -3,6 +3,7 @@ import { runInNewContext } from "node:vm";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { serializeCanonicalJson } from "../../format/src/canonical-json.js";
 import { writeCanonicalAsset } from "../../format/src/writer.js";
 import type { CanonicalAssetInput } from "../../format/src/model.js";
 import { Asset } from "../src/asset.js";
@@ -47,6 +48,143 @@ describe("Asset manifest parity", () => {
     const asset = await open(`sha256-${"A".repeat(43)}=`);
     expect(asset.manifest.edges.map((edge) => edge.transition?.kind)).toEqual(["locked", "locked"]);
     await asset.dispose();
+  });
+
+  it("admits and freezes a qualified 1.1 packed-alpha witness in full and range modes", async () => {
+    const body = qualifiedPackedAssetBytes();
+    vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(body)));
+
+    const full = await open(`sha256-${"A".repeat(43)}=`);
+    expect(full.mode).toBe("full");
+    expect(full.manifest.formatVersion).toBe("1.1");
+    expect(full.manifest.renditions[0]?.outputQualification).toMatchObject({
+      kind: "packed-alpha-v1",
+      unit: "body-00",
+      frame: 0,
+      samples: [{ x: 0, y: 0, expectedRange: [0, 32] }]
+    });
+    expect(Object.isFrozen(full.manifest.renditions[0]?.outputQualification)).toBe(true);
+    expect(Object.isFrozen(
+      full.manifest.renditions[0]?.outputQualification?.samples[0]?.expectedRange
+    )).toBe(true);
+    await full.dispose();
+
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      rangeResponse(body, requestedRange(init))
+    ));
+    const range = await open();
+    expect(range.mode).toBe("range");
+    expect(range.manifest.formatVersion).toBe("1.1");
+    expect(range.manifest.renditions[0]?.outputQualification?.unit).toBe("body-00");
+    await range.dispose();
+  });
+
+  it("retains strict legacy 1.0 inspection without inventing a witness", async () => {
+    const body = assetBytes(1, new Uint8Array([1, 2, 3, 4]));
+    vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(body)));
+
+    const asset = await open(`sha256-${"A".repeat(43)}=`);
+    expect(asset.manifest.formatVersion).toBe("1.0");
+    expect(asset.manifest.renditions[0]?.outputQualification).toBeUndefined();
+    await asset.dispose();
+
+    const legacyPacked = rewriteManifest(qualifiedPackedAssetBytes(), (manifest) => {
+      manifest.formatVersion = "1.0";
+      delete manifest.renditions[0].outputQualification;
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(legacyPacked)));
+    const packed = await open(`sha256-${"A".repeat(43)}=`);
+    expect(packed.manifest).toMatchObject({
+      formatVersion: "1.0",
+      layout: "packed-alpha"
+    });
+    expect(packed.manifest.renditions[0]?.outputQualification).toBeUndefined();
+    await packed.dispose();
+
+    const qualifiedOpaque = rewriteManifest(body, (manifest) => {
+      manifest.formatVersion = "1.1";
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(qualifiedOpaque)));
+    const opaque = await open(`sha256-${"A".repeat(43)}=`);
+    expect(opaque.manifest).toMatchObject({
+      formatVersion: "1.1",
+      layout: "opaque"
+    });
+    await opaque.dispose();
+  });
+
+  it("rejects both header and manifest version mismatches", async () => {
+    const cases = [
+      mutateHeaderMinor(qualifiedPackedAssetBytes(), 0),
+      mutateHeaderMinor(assetBytes(1, new Uint8Array([1, 2, 3, 4])), 1)
+    ];
+    for (const body of cases) {
+      vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(body)));
+      await expect(open(`sha256-${"A".repeat(43)}=`)).rejects.toThrow(
+        "Invalid AVAL asset"
+      );
+    }
+  });
+
+  it("rejects versioned witness exact-key, bound, and relation failures", async () => {
+    const qualified = qualifiedPackedAssetBytes();
+    const legacy = assetBytes(1, new Uint8Array([1, 2, 3, 4]));
+    const cases = [
+      rewriteManifest(qualified, (manifest) => {
+        delete manifest.renditions[0].outputQualification;
+      }),
+      rewriteManifest(legacy, (manifest) => {
+        manifest.renditions[0].outputQualification = witness();
+      }),
+      rewriteManifest(legacy, (manifest) => {
+        manifest.formatVersion = "1.1";
+        manifest.renditions[0].outputQualification = witness();
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.renditions[0].outputQualification.extra = true;
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.renditions[0].outputQualification.kind = "packed-alpha-v2";
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.renditions[0].outputQualification.samples = [];
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.renditions[0].outputQualification.samples = Array.from(
+          { length: 9 },
+          () => ({ x: 0, y: 0, expectedRange: [0, 32] })
+        );
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.renditions[0].outputQualification.samples[0].x = 2;
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.renditions[0].outputQualification.samples[0].expectedRange = [0, 97];
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.renditions[0].outputQualification.samples.push({
+          x: 0,
+          y: 0,
+          expectedRange: [0, 32]
+        });
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.renditions[0].outputQualification.unit = "unknown";
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.renditions[0].outputQualification.frame = 6;
+      }),
+      rewriteManifest(qualified, (manifest) => {
+        manifest.readiness.bootstrapUnits = [];
+      })
+    ];
+
+    for (const body of cases) {
+      vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(body)));
+      await expect(open(`sha256-${"A".repeat(43)}=`)).rejects.toThrow(
+        "Invalid AVAL asset"
+      );
+    }
   });
 });
 
@@ -435,6 +573,132 @@ function assetBytes(
     }))
   } as unknown as CanonicalAssetInput;
   return writeCanonicalAsset(input);
+}
+
+function witness(): Record<string, any> {
+  return {
+    kind: "packed-alpha-v1",
+    unit: "body-00",
+    frame: 0,
+    samples: [{ x: 0, y: 0, expectedRange: [0, 32] }]
+  };
+}
+
+function qualifiedPackedAssetBytes(): Uint8Array {
+  const payload = new Uint8Array([31, 32, 33, 34]);
+  const digest = createHash("sha256").update(payload).digest("hex");
+  const input = {
+    manifest: {
+      formatVersion: "1.1",
+      generator: "qualified-asset-tests",
+      codec: "h264",
+      bitstream: "annex-b",
+      layout: "packed-alpha",
+      canvas: {
+        width: 2,
+        height: 2,
+        fit: "contain",
+        pixelAspect: [1, 1],
+        colorSpace: "srgb"
+      },
+      frameRate: { numerator: 30, denominator: 1 },
+      renditions: [{
+        id: "video",
+        codec: CODEC,
+        bitDepth: 8,
+        codedWidth: 16,
+        codedHeight: 32,
+        alphaLayout: {
+          type: "stacked",
+          colorRect: [0, 0, 2, 2],
+          alphaRect: [0, 10, 2, 2]
+        },
+        bitrate: { average: 1_000, peak: 2_000 },
+        outputQualification: witness()
+      }],
+      units: [{
+        id: "body-00",
+        kind: "body",
+        playback: "finite",
+        frameCount: 6,
+        ports: [{ id: "default", entryFrame: 0, portalFrames: [5] }],
+        chunks: [{ rendition: "video", sha256: digest }]
+      }],
+      initialState: "state-00",
+      states: [{ id: "state-00", bodyUnit: "body-00" }],
+      edges: [],
+      bindings: [],
+      readiness: {
+        policy: "all-routes",
+        bootstrapUnits: ["body-00"],
+        immediateEdges: []
+      },
+      limits: {
+        maxCompiledBytes: 1024 * 1024,
+        maxRuntimeBytes: 1024 * 1024,
+        decodedPixelBytes: 16 * 32 * 4,
+        persistentCacheBytes: payload.byteLength,
+        runtimeWorkingSetBytes: 16 * 32 * 4
+      }
+    },
+    chunks: [{
+      rendition: "video",
+      unit: "body-00",
+      decodeIndex: 0,
+      presentationTimestamp: 0,
+      duration: 1,
+      randomAccess: true,
+      displayedFrameCount: 6,
+      bytes: payload
+    }]
+  } as unknown as CanonicalAssetInput;
+  return writeCanonicalAsset(input);
+}
+
+function mutateHeaderMinor(bytes: Uint8Array, minor: 0 | 1): Uint8Array {
+  const output = bytes.slice();
+  new DataView(output.buffer, output.byteOffset, 64).setUint16(10, minor, true);
+  return output;
+}
+
+function rewriteManifest(
+  bytes: Uint8Array,
+  mutate: (manifest: Record<string, any>) => void
+): Uint8Array {
+  const oldHeader = new DataView(bytes.buffer, bytes.byteOffset, 64);
+  const oldManifestLength = Number(oldHeader.getBigUint64(40, true));
+  const oldIndexOffset = Number(oldHeader.getBigUint64(48, true));
+  const indexLength = Number(oldHeader.getBigUint64(56, true));
+  const oldIndex = bytes.slice(oldIndexOffset, oldIndexOffset + indexLength);
+  const oldIndexView = new DataView(oldIndex.buffer, oldIndex.byteOffset, oldIndex.byteLength);
+  const oldPayloadOffset = Number(oldIndexView.getBigUint64(16, true));
+  const payload = bytes.slice(oldPayloadOffset);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(bytes.subarray(64, 64 + oldManifestLength))
+  ) as Record<string, any>;
+  mutate(manifest);
+  const manifestBytes = serializeCanonicalJson(manifest);
+  const indexOffset = align8ForTest(64 + manifestBytes.byteLength);
+  const payloadOffset = align8ForTest(indexOffset + indexLength);
+  oldIndexView.setBigUint64(16, BigInt(payloadOffset), true);
+  const declared = payloadOffset + payload.byteLength;
+  const header = bytes.slice(0, 64);
+  const headerView = new DataView(header.buffer, header.byteOffset, header.byteLength);
+  headerView.setUint16(10, manifest.formatVersion === "1.1" ? 1 : 0, true);
+  headerView.setBigUint64(24, BigInt(declared), true);
+  headerView.setBigUint64(40, BigInt(manifestBytes.byteLength), true);
+  headerView.setBigUint64(48, BigInt(indexOffset), true);
+
+  const output = new Uint8Array(declared);
+  output.set(header);
+  output.set(manifestBytes, 64);
+  output.set(oldIndex, indexOffset);
+  output.set(payload, payloadOffset);
+  return output;
+}
+
+function align8ForTest(value: number): number {
+  return Math.ceil(value / 8) * 8;
 }
 
 function transitionedCompletionCycleBytes(): Uint8Array {

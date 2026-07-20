@@ -1,6 +1,7 @@
 import type {
   CompiledManifest,
-  ProductionRendition,
+  CompiledManifestV1_0,
+  ProductionRenditionV1_0,
   VideoCodec
 } from "@pixel-point/aval-format";
 import { describe, expect, it } from "vitest";
@@ -224,7 +225,7 @@ function codecFamily(codec: string): VideoCodec {
   return match[0] as VideoCodec;
 }
 
-function rendition(id: string, family: VideoCodec): ProductionRendition {
+function rendition(id: string, family: VideoCodec): ProductionRenditionV1_0 {
   return {
     id,
     codec: SPECS[family].codec,
@@ -238,8 +239,8 @@ function rendition(id: string, family: VideoCodec): ProductionRendition {
 
 function manifest(
   family: VideoCodec,
-  renditions: readonly ProductionRendition[] = [rendition("main", family)]
-): CompiledManifest {
+  renditions: readonly ProductionRenditionV1_0[] = [rendition("main", family)]
+): CompiledManifestV1_0 {
   return {
     formatVersion: "1.0",
     generator: "test",

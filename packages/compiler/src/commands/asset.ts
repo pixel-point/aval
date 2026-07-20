@@ -1,5 +1,6 @@
 import type {
   AlphaLayout,
+  FormatVersion,
   ValidatedAssetLayout,
   VideoBitstream,
   VideoCodec,
@@ -19,7 +20,7 @@ export interface AssetInspection {
   readonly file: string;
   readonly bytes: number;
   readonly sha256: string;
-  readonly formatVersion: "1.0";
+  readonly formatVersion: FormatVersion;
   readonly generator: string;
   readonly codec: VideoCodec;
   readonly bitstream: VideoBitstream;
