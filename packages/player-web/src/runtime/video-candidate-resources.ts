@@ -11,9 +11,7 @@ import type {
   VideoCandidatePreparedMedia,
   VideoCandidateReadinessSession,
   VideoCandidateResourceAuthority,
-  VideoCandidateResourcePlanLease,
-  VideoCandidateRendererReservation,
-  VideoCandidateWorker
+  VideoCandidateResourcePlanLease
 } from "./video-candidate-model.js";
 import {
   VideoCandidateOperationControl,
@@ -57,15 +55,10 @@ export class VideoCandidateResources {
   readonly #invokeOwnerDisposer: (operation: () => unknown) => unknown;
 
   #workerLease = false;
-  #worker: VideoCandidateWorker | null = null;
   #workerDispose: (() => unknown) | null = null;
-  #reservation: VideoCandidateRendererReservation | null = null;
   #reservationDispose: (() => unknown) | null = null;
-  #renderer: FrameRenderer | null = null;
   #rendererDispose: (() => unknown) | null = null;
   #rendererSettled: (() => unknown) | null = null;
-  #timeline: DecodeTimeline | null = null;
-  #samples: WorkerSampleFactory | null = null;
   #readiness: VideoCandidateReadinessSession | null = null;
   #readinessDispose: (() => unknown) | null = null;
   #scheduler: PathScheduler | null = null;
@@ -108,7 +101,6 @@ export class VideoCandidateResources {
     control.throwIfStopped();
 
     const reservation = this.#options.rendererFactory.create(this.#context);
-    this.#reservation = reservation;
     this.#reservationDispose = captureVideoOwnerMethod(
       reservation,
       "dispose",
@@ -183,7 +175,6 @@ export class VideoCandidateResources {
     this.#acquireWorker();
     this.#workerLease = true;
     const worker = this.#options.workerFactory.create(this.#context);
-    this.#worker = worker;
     this.#workerDispose = captureVideoOwnerMethod(
       worker,
       "dispose",
@@ -206,7 +197,6 @@ export class VideoCandidateResources {
     } catch (error) {
       throw videoPhaseFailure("renderer-failure", error, this.#context);
     }
-    this.#renderer = renderer;
     this.#rendererDispose = captureVideoOwnerMethod(
       renderer,
       "dispose",
@@ -230,8 +220,6 @@ export class VideoCandidateResources {
         ? {}
         : { resourceHost: this.#workerSampleResourceHost })
     });
-    this.#timeline = timeline;
-    this.#samples = samples;
     const generation = timeline.activateNextGeneration();
     await this.#runWorkerOperation(
       () => worker.activateGeneration(generation),
@@ -490,7 +478,6 @@ export class VideoCandidateResources {
     this.#scheduler = null;
     if (scheduler !== null) await clean(() => scheduler.dispose());
 
-    this.#renderer = null;
     const rendererDispose = this.#rendererDispose;
     this.#rendererDispose = null;
     if (rendererDispose !== null) await clean(rendererDispose);
@@ -498,12 +485,10 @@ export class VideoCandidateResources {
     this.#rendererSettled = null;
     if (rendererSettled !== null) await clean(rendererSettled);
 
-    this.#reservation = null;
     const reservationDispose = this.#reservationDispose;
     this.#reservationDispose = null;
     if (reservationDispose !== null) await clean(reservationDispose);
 
-    this.#worker = null;
     const workerDispose = this.#workerDispose;
     this.#workerDispose = null;
     if (workerDispose !== null) await clean(workerDispose);
@@ -525,8 +510,6 @@ export class VideoCandidateResources {
     this.#resourcePlanAssert = null;
     this.#workerSampleResourceHost = null;
     if (resourcePlanRelease !== null) await clean(resourcePlanRelease);
-    this.#timeline = null;
-    this.#samples = null;
     this.#finalResourcePlan = null;
 
     if (firstError !== null) throw firstError;

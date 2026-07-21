@@ -189,16 +189,6 @@ function checkedUnsigned(
   return value;
 }
 
-export function readUint8(
-  bytes: Uint8Array,
-  offset: number,
-  code: FormatErrorCode = "INPUT_INVALID",
-  label = "uint8"
-): number {
-  requireByteRange(bytes, offset, 1, code, label);
-  return bytes[offset] as number;
-}
-
 export function readUint16LE(
   bytes: Uint8Array,
   offset: number,
@@ -254,17 +244,6 @@ export function readUint64LE(
     }
     throw new FormatError(code, `${label} could not be converted`, { offset });
   }
-}
-
-export function writeUint8(
-  bytes: Uint8Array,
-  offset: number,
-  value: number,
-  code: FormatErrorCode = "INPUT_INVALID",
-  label = "uint8"
-): void {
-  requireByteRange(bytes, offset, 1, code, label);
-  bytes[offset] = checkedUnsigned(value, UINT8_MAX, code, label, offset);
 }
 
 export function writeUint16LE(

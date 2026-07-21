@@ -4,6 +4,8 @@ import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parseFrontIndex } from "@pixel-point/aval-format";
+
 import { mediaType, readVerifiedRegularFile } from "../release/candidate-artifacts.mjs";
 import { verifyCandidateRoot } from "../release/candidate-root.mjs";
 import { FATAL_BOUNDARY_FIXTURE_PATH } from "./certification-fixture-authority.mjs";
@@ -131,7 +133,8 @@ function exactManifestArtifact(artifacts, reference, path) {
 
 function serveFatalBoundaryRequest(request, response, manifestDigest, source) {
   const range = parseRangeHeader(request.headers.range, source.bytes.byteLength);
-  if (range !== null && (range.start === 0 || range.start === 64)) {
+  const metadataBytes = parseFrontIndex(source.bytes).frontIndexRange.length;
+  if (range !== null && range.end < metadataBytes) {
     const body = source.bytes.subarray(range.start, range.end + 1);
     response.statusCode = 206;
     response.setHeader("Content-Type", source.mediaType);

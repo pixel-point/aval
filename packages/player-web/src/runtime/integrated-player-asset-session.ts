@@ -24,7 +24,7 @@ interface CapturedRuntimeAssetSession {
   readonly identity: object;
   readonly generation: number;
   readonly catalog: RuntimeAssetCatalog;
-  readonly ensureAllUnits: RuntimeAssetSession["ensureAllUnits"];
+  readonly ensureRenditionUnits: RuntimeAssetSession["ensureRenditionUnits"];
   readonly evictRenditionUnits: RuntimeAssetSession["evictRenditionUnits"];
   readonly dispose: RuntimeAssetSession["dispose"];
 }
@@ -159,7 +159,7 @@ export class IntegratedPlayerAssetBinding {
   ): Promise<void> {
     if (this.#source.kind === "bytes") return;
     throwIfAborted(signal);
-    await this.#source.session.ensureAllUnits(rendition, { signal });
+    await this.#source.session.ensureRenditionUnits(rendition, { signal });
     throwIfAborted(signal);
   }
 
@@ -193,13 +193,13 @@ function captureRuntimeAssetSession(value: unknown): CapturedRuntimeAssetSession
   }
   let catalog: unknown;
   let disposed: unknown;
-  let ensureAllUnits: unknown;
+  let ensureRenditionUnits: unknown;
   let evictRenditionUnits: unknown;
   let dispose: unknown;
   try {
     catalog = Reflect.get(value, "catalog");
     disposed = Reflect.get(value, "disposed");
-    ensureAllUnits = Reflect.get(value, "ensureAllUnits");
+    ensureRenditionUnits = Reflect.get(value, "ensureRenditionUnits");
     evictRenditionUnits = Reflect.get(value, "evictRenditionUnits");
     dispose = Reflect.get(value, "dispose");
   } catch {
@@ -209,7 +209,7 @@ function captureRuntimeAssetSession(value: unknown): CapturedRuntimeAssetSession
     throw new TypeError("integrated player assetSession is disposed");
   }
   if (
-    typeof ensureAllUnits !== "function" ||
+    typeof ensureRenditionUnits !== "function" ||
     typeof evictRenditionUnits !== "function" ||
     typeof dispose !== "function"
   ) {
@@ -220,14 +220,14 @@ function captureRuntimeAssetSession(value: unknown): CapturedRuntimeAssetSession
     identity: value,
     generation,
     catalog,
-    ensureAllUnits: (
+    ensureRenditionUnits: (
       rendition: string,
-      options?: Parameters<RuntimeAssetSession["ensureAllUnits"]>[1]
+      options?: Parameters<RuntimeAssetSession["ensureRenditionUnits"]>[1]
     ) => Reflect.apply(
-      ensureAllUnits,
+      ensureRenditionUnits,
       value,
       [rendition, options]
-    ) as ReturnType<RuntimeAssetSession["ensureAllUnits"]>,
+    ) as ReturnType<RuntimeAssetSession["ensureRenditionUnits"]>,
     evictRenditionUnits: (rendition: string) => Reflect.apply(
       evictRenditionUnits,
       value,

@@ -27,6 +27,7 @@ import type { MotionGraphSnapshot } from '@pixel-point/aval-graph';
 import type { MotionGraphStaticReason } from '@pixel-point/aval-graph';
 import type { MotionGraphTickOptions } from '@pixel-point/aval-graph';
 import { ParsedFrontIndex } from '@pixel-point/aval-format';
+import { ParsedManifestPrefix } from '@pixel-point/aval-format';
 import { parseVideoCodecString } from '@pixel-point/aval-format';
 import type { Port } from '@pixel-point/aval-format';
 import { ProductionRendition } from '@pixel-point/aval-format';
@@ -302,8 +303,6 @@ export interface BrowserPresentationPlanesOptions {
     readonly maxBackingHeight?: number;
     // (undocumented)
     readonly maxBackingWidth?: number;
-    // (undocumented)
-    readonly onClamp?: (geometry: Readonly<PresentationGeometry>) => void;
 }
 
 // @public (undocumented)
@@ -585,9 +584,6 @@ export interface CreateDecoderWorkerClientOptions extends DecoderWorkerClientOpt
 // @public
 export function createInteractionCachePlan(input: InteractionCachePlanInput): Readonly<InteractionCachePlan>;
 
-// @public
-export function createInteractionCachePlanFromSemanticSequences(input: InteractionCacheSemanticInput): Readonly<InteractionCachePlan>;
-
 // Warning: (ae-forgotten-export) The symbol "PlayerResourceAdmission" needs to be exported by the entry point index.d.ts
 //
 // @public
@@ -668,7 +664,6 @@ export type CutFrameMedia = Extract<RuntimeMediaPresentation, {
 // @public
 export class CutPresentationCoordinator implements IntegratedPlaybackSession {
     constructor(options: CutPresentationCoordinatorOptions);
-    activateCut(input: Readonly<CutActivationInput>): Promise<Readonly<CutActivationReport>>;
     dispose(): void;
     // (undocumented)
     drawContentTick(prepared: Readonly<IntegratedPreparedContentTick>, presentation: Readonly<GraphPresentation>): string | null;
@@ -695,7 +690,7 @@ export class CutPresentationCoordinator implements IntegratedPlaybackSession {
 
 // @public (undocumented)
 export interface CutPresentationCoordinatorOptions {
-    readonly enqueueMediaOperation?: <T>(operation: (signal?: AbortSignal) => Promise<T>) => Promise<T>;
+    readonly enqueueMediaOperation: <T>(operation: (signal?: AbortSignal) => Promise<T>) => Promise<T>;
     readonly firstStreamingSlot?: number;
     readonly handoffAfterFirstStreaming?: boolean;
     // (undocumented)
@@ -737,7 +732,7 @@ export interface CutPresentationScheduler {
     // Warning: (ae-forgotten-export) The symbol "PathSchedulerWorkerActivation" needs to be exported by the entry point index.d.ts
     //
     // (undocumented)
-    commitResidentRunway(transaction: Readonly<PathSchedulerResidentRunwayTransaction>, options?: Readonly<CommitResidentRunwayOptions>): PathSchedulerWorkerActivation;
+    commitResidentRunway(transaction: Readonly<PathSchedulerResidentRunwayTransaction>, options: Readonly<CommitResidentRunwayOptions>): PathSchedulerWorkerActivation;
     // (undocumented)
     discardPreparedPresentation(): void;
     // (undocumented)
@@ -781,7 +776,7 @@ export interface CutPresentationSnapshot {
 }
 
 // @public (undocumented)
-export type CutPresentationStatus = "idle" | "activating" | "ready" | "error" | "disposed";
+export type CutPresentationStatus = "idle" | "ready" | "error" | "disposed";
 
 // @public
 export class CutPresentationSupersededError extends Error {
@@ -922,13 +917,13 @@ export interface DecoderWorkerClientPort {
 // @public (undocumented)
 export interface DecoderWorkerColorSpaceExpectation {
     // (undocumented)
-    readonly fullRange: boolean | null;
+    readonly fullRange: false;
     // (undocumented)
-    readonly matrix: VideoMatrixCoefficients | null;
+    readonly matrix: "bt709";
     // (undocumented)
-    readonly primaries: VideoColorPrimaries | null;
+    readonly primaries: "bt709";
     // (undocumented)
-    readonly transfer: VideoTransferCharacteristics | null;
+    readonly transfer: "bt709";
 }
 
 // @public (undocumented)
@@ -1162,7 +1157,8 @@ export interface DecoderWorkerOutputExpectation {
     readonly codedHeight: number;
     // (undocumented)
     readonly codedWidth: number;
-    readonly colorSpace: DecoderWorkerColorSpaceExpectation | null;
+    // (undocumented)
+    readonly colorSpace: DecoderWorkerColorSpaceExpectation;
     // (undocumented)
     readonly displayHeight: number;
     // (undocumented)
@@ -1661,14 +1657,12 @@ export class FrameRenderer {
     draw(handle: RenderFrameHandle): void;
     // (undocumented)
     get limits(): Readonly<FrameRendererBackendLimits>;
-    markContextLost(): void;
     // (undocumented)
     readPixels(): Uint8Array;
     // (undocumented)
     residentHandle(layer: number): ResidentFrameHandle;
     // (undocumented)
     get resourceGeneration(): number;
-    restore(backend: FrameRendererBackend): void;
     // (undocumented)
     settled(): Promise<void>;
     // (undocumented)
@@ -1704,7 +1698,6 @@ export interface FrameRendererBackendLimits {
 
 // @public (undocumented)
 export interface FrameRendererOptions {
-    readonly contextLossPolicy?: "terminal" | "restorable";
     readonly copyTimeoutMs?: number;
     // (undocumented)
     readonly streamingSlots?: number;
@@ -1749,7 +1742,7 @@ export interface FrameRendererSnapshot {
 }
 
 // @public (undocumented)
-export type FrameRendererState = "active" | "lost" | "error" | "disposed";
+export type FrameRendererState = "active" | "error" | "disposed";
 
 // @public (undocumented)
 export interface FrameRendererTimerHost {
@@ -2287,23 +2280,6 @@ export interface InteractionCacheReversibleClip {
 }
 
 // @public (undocumented)
-export interface InteractionCacheSemanticInput {
-    readonly allowMixedRenditions?: boolean;
-    // (undocumented)
-    readonly cutRunways: readonly SemanticCutRunwayInput[];
-    // (undocumented)
-    readonly deviceLimits: Readonly<InteractionCacheDeviceLimits>;
-    // (undocumented)
-    readonly height: number;
-    // (undocumented)
-    readonly rendition: string;
-    // (undocumented)
-    readonly reversibleClips: readonly SemanticReversibleClipInput[];
-    // (undocumented)
-    readonly width: number;
-}
-
-// @public (undocumented)
 export interface InteractionCacheSequence {
     // (undocumented)
     readonly frames: readonly Readonly<RuntimeFrameKey>[];
@@ -2402,13 +2378,7 @@ export interface ManagedDecoderWorkerFrame {
 }
 
 // @public
-export const MAX_INTERACTION_CACHE_LAYERS: number;
-
-// @public
 export const MAX_PLAYER_RUNTIME_BYTES: number;
-
-// @public
-export const MAX_PRESENTATION_BACKING_DIMENSION: number;
 
 // @public (undocumented)
 export const MAX_PRESENTATION_RING_CAPACITY: 12;
@@ -2418,9 +2388,6 @@ export const MAX_READINESS_RING_CAPACITY: 12;
 
 // @public (undocumented)
 export const MAX_RESOURCE_RING_CAPACITY = 12;
-
-// @public (undocumented)
-export const MAX_REVERSIBLE_ENDPOINT_PAIR_BYTES: number;
 
 // @public
 export const MAX_RUNTIME_DIAGNOSTIC_TEXT_LENGTH: 128;
@@ -2686,7 +2653,7 @@ export class PathScheduler {
     commitResidentPresentation(media: Readonly<Extract<RuntimeMediaPresentation, {
         readonly kind: "frame";
     }>>): void;
-    commitResidentRunway(transaction: Readonly<PathSchedulerResidentRunwayTransaction>, options?: Readonly<CommitResidentRunwayOptions>): PathSchedulerWorkerActivation;
+    commitResidentRunway(transaction: Readonly<PathSchedulerResidentRunwayTransaction>, options: Readonly<CommitResidentRunwayOptions>): PathSchedulerWorkerActivation;
     // (undocumented)
     discardPreparedPresentation(): void;
     // (undocumented)
@@ -2709,8 +2676,6 @@ export class PathScheduler {
     stageResidentRunway(input: Readonly<StartResidentRunwayInput>): Readonly<PathSchedulerResidentRunwayTransaction>;
     // (undocumented)
     startBody(input: StartScheduledBodyInput): Promise<void>;
-    // (undocumented)
-    startResidentRunway(input: StartResidentRunwayInput): Promise<void>;
     // (undocumented)
     takeNext(): Readonly<PathSchedulerTakeResult>;
     takeStreamingContinuation(): Readonly<PathSchedulerTakeResult>;
@@ -3097,9 +3062,6 @@ export interface PresentableFrameBackend extends FrameRendererBackend {
 export const PRESENTATION_FIT_MODES: readonly ["contain", "cover", "fill", "none"];
 
 // @public (undocumented)
-export type PresentationClampReason = "format-dimension" | "device-dimension" | "byte-budget";
-
-// @public (undocumented)
 export type PresentationFit = (typeof PRESENTATION_FIT_MODES)[number];
 
 // @public (undocumented)
@@ -3111,10 +3073,6 @@ export interface PresentationGeometry {
         readonly bytesPerPlane: number;
         readonly totalBackingBytes: number;
     };
-    // (undocumented)
-    readonly clampReasons: readonly PresentationClampReason[];
-    // (undocumented)
-    readonly desiredBacking: Readonly<PresentationSize>;
     // (undocumented)
     readonly destinationBackingRect: Readonly<PresentationRect>;
     // (undocumented)
@@ -3132,8 +3090,6 @@ export interface PresentationGeometry {
     readonly planes: {
         readonly animated: Readonly<PresentationPlaneMapping>;
     };
-    // (undocumented)
-    readonly resolutionScale: number;
     // (undocumented)
     readonly sourceRect: Readonly<PresentationRect>;
 }
@@ -3942,7 +3898,6 @@ export interface RuntimeAssetSession {
     dispose(): Promise<void>;
     // (undocumented)
     readonly disposed: boolean;
-    ensureAllUnits(rendition: string, options?: Readonly<RuntimeAssetEnsureOptions>): Promise<readonly Readonly<VerifiedBlobHandle>[]>;
     // (undocumented)
     ensureRenditionUnits(rendition: string, options?: Readonly<RuntimeAssetEnsureOptions>): Promise<readonly Readonly<VerifiedBlobHandle>[]>;
     // Warning: (ae-forgotten-export) The symbol "VerifiedBlobHandle" needs to be exported by the entry point index.d.ts
@@ -4842,8 +4797,6 @@ export type RuntimeSuspensionState = "active" | "suspending" | "suspended";
 // @public (undocumented)
 export interface RuntimeTraceCounters {
     // (undocumented)
-    readonly cleanedFrames: number;
-    // (undocumented)
     readonly settledRequests: number;
     // (undocumented)
     readonly staticTransitions: number;
@@ -4910,40 +4863,6 @@ export type RuntimeVisibilityState = "visible" | "hidden";
 
 // @public
 export function selectVideoSource<TCandidate extends VideoSourceDescriptor, TSession extends VideoSourceSession>(input: Readonly<VideoSourceSelectionInput<TCandidate, TSession>>): Promise<Readonly<AcceptedVideoSource<TCandidate, TSession>>>;
-
-// @public (undocumented)
-export interface SemanticCutRunwayInput {
-    // (undocumented)
-    readonly edge: string;
-    // (undocumented)
-    readonly frames: readonly RuntimeFrameKey[];
-    // (undocumented)
-    readonly port: string;
-    // (undocumented)
-    readonly state: string;
-}
-
-// @public (undocumented)
-export interface SemanticEndpointRunwayInput {
-    // (undocumented)
-    readonly frames: readonly RuntimeFrameKey[];
-    // (undocumented)
-    readonly port: string;
-    // (undocumented)
-    readonly state: string;
-}
-
-// @public (undocumented)
-export interface SemanticReversibleClipInput {
-    // (undocumented)
-    readonly clip: readonly RuntimeFrameKey[];
-    // (undocumented)
-    readonly sourceEndpoint: Readonly<SemanticEndpointRunwayInput>;
-    // (undocumented)
-    readonly targetEndpoint: Readonly<SemanticEndpointRunwayInput>;
-    // (undocumented)
-    readonly unit: string;
-}
 
 // @public (undocumented)
 export interface SourceBodyCursor {

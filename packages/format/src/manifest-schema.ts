@@ -1,7 +1,4 @@
-import {
-  FORMAT_SUPPORTED_VERSIONS,
-  resolveFormatBudgets
-} from "./constants.js";
+import { resolveFormatBudgets } from "./constants.js";
 import { FormatError } from "./errors.js";
 import {
   cloneBindings,
@@ -24,6 +21,7 @@ import {
   exactKeys,
   generatorString,
   identifier,
+  literal,
   oneOf,
   record,
   invalid
@@ -65,11 +63,8 @@ export function validateCompiledManifest(
     const budgets = resolveFormatBudgets(options);
     const input = record(value, "manifest");
     exactKeys(input, TOP_LEVEL_KEYS, "manifest");
-    const formatVersion = oneOf(
-      input.formatVersion,
-      FORMAT_SUPPORTED_VERSIONS,
-      "formatVersion"
-    );
+    literal(input.formatVersion, "1.1", "formatVersion");
+    const formatVersion = "1.1" as const;
     const generator = generatorString(input.generator, "generator");
     const codec = oneOf(input.codec, VIDEO_CODECS, "codec");
     const bitstream = oneOf(
@@ -91,7 +86,6 @@ export function validateCompiledManifest(
       canvas,
       codec,
       layout,
-      formatVersion,
       budgets,
       "renditions"
     );

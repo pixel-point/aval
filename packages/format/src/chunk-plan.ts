@@ -1,6 +1,6 @@
 import { checkedAdd } from "./checked-integer.js";
 import { FormatError, type FormatErrorCode } from "./errors.js";
-import type { ProductionRendition, Unit, UnitChunkSpan } from "./model.js";
+import type { ProductionRendition, Unit } from "./model.js";
 
 const UINT32_MAX = 0xffff_ffff;
 
@@ -198,19 +198,6 @@ export function validateCanonicalChunkSpans(
       });
     }
   }
-}
-
-export function chunkSpanDescriptor(
-  span: CanonicalChunkSpan,
-  sha256: string
-): Readonly<UnitChunkSpan> {
-  return Object.freeze({
-    rendition: span.renditionId,
-    chunkStart: span.chunkStart,
-    chunkCount: span.chunkCount,
-    frameCount: span.frameCount,
-    sha256
-  });
 }
 
 function positiveSafe(value: unknown): value is number {

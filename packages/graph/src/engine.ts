@@ -2,7 +2,6 @@ import { MotionGraphError } from "./errors.js";
 import { MOTION_GRAPH_STATIC_REASONS } from "./model.js";
 import type {
   GraphEdgeDefinition,
-  GraphPresentation,
   GraphStateId,
   MotionGraphDefinition,
   MotionGraphDisposeOptions,

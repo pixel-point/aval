@@ -2,11 +2,6 @@ import type { AvalPlaybackLifecycleCounters } from "./public-types.js";
 
 const MAXIMUM = Number.MAX_SAFE_INTEGER;
 
-export type PlaybackLifecycleScalarKey = Exclude<
-  keyof AvalPlaybackLifecycleCounters,
-  "nativeDecoderCreatesByLane" | "nativeDecoderClosesByLane"
->;
-
 export function saturatingIncrement(value: number): number {
   return value >= MAXIMUM ? MAXIMUM : value + 1;
 }

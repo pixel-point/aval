@@ -217,7 +217,7 @@ describe("renderer failure diagnostics", () => {
     fixture.gl.rgbaUploadError = 0x0505;
 
     let rejected!: RendererFailureError;
-    try { await renderer.store("group", 0, frame()); }
+    try { await renderer.store("group", 0, frame(), false); }
     catch (error) { rejected = error as RendererFailureError; }
 
     expect(rejected).toBeInstanceOf(RendererFailureError);
@@ -241,7 +241,7 @@ describe("renderer failure diagnostics", () => {
 
     let rejected!: RendererFailureError;
     try {
-      await renderer.draw(frame(async () => Promise.reject(reason)));
+      await renderer.draw(frame(async () => Promise.reject(reason)), false);
     } catch (error) {
       expect(error).toBeInstanceOf(RendererFailureError);
       rejected = error as RendererFailureError;
@@ -305,7 +305,7 @@ describe("renderer runtime ownership", () => {
       createCanvas: readback.createCanvas
     });
 
-    await renderer.draw(candidate);
+    await renderer.draw(candidate, false);
 
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
@@ -321,7 +321,7 @@ describe("renderer runtime ownership", () => {
     expect(readback.state.creations).toBe(1);
     expect(readback.state.drawCalls).toHaveLength(1);
 
-    await renderer.draw(candidate);
+    await renderer.draw(candidate, false);
     expect(readback.state.drawCalls).toHaveLength(1);
     expect(fixture.gl.nativeUploadCount).toBe(2);
   });
@@ -338,8 +338,8 @@ describe("renderer runtime ownership", () => {
       new TypeError("layout size is invalid")
     ));
 
-    await renderer.draw(candidate);
-    await renderer.draw(candidate);
+    await renderer.draw(candidate, false);
+    await renderer.draw(candidate, false);
 
     expect(webGlDetails(renderer).uploadMode).toBe("rgba-copy");
     expect(fixture.gl.nativeUploadCount).toBe(1);
@@ -366,7 +366,7 @@ describe("renderer runtime ownership", () => {
       createCanvas: readback.createCanvas
     });
 
-    await expect(renderer.draw(frame(() => Promise.reject(copyReason))))
+    await expect(renderer.draw(frame(() => Promise.reject(copyReason)), false))
       .rejects.toMatchObject({
         diagnostic: {
           phase: "rgba-copy",
@@ -390,7 +390,7 @@ describe("renderer runtime ownership", () => {
 
     await expect(renderer.draw(frame(() => {
       throw new TypeError("layout size is invalid");
-    }))).rejects.toMatchObject({
+    }), false)).rejects.toMatchObject({
       diagnostic: {
         phase: "rgba-upload",
         uploadPath: "rgba-copy",
@@ -412,7 +412,7 @@ describe("renderer runtime ownership", () => {
       clearTimeout: () => undefined,
       copyTimeoutMs: 1
     });
-    const drawing = renderer.draw(frame(() => pending.promise));
+    const drawing = renderer.draw(frame(() => pending.promise), false);
     await eventually(() => renderer.snapshot().sourceCopiesInFlight === 1);
 
     expire();
@@ -433,7 +433,7 @@ describe("renderer runtime ownership", () => {
     fixture.gl.rgbaReadback = informativeProbePixels();
     const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await expect(renderer.draw(compactOpaqueFrame())).resolves.toBeUndefined();
+    await expect(renderer.draw(compactOpaqueFrame(), false)).resolves.toBeUndefined();
 
     expect(fixture.gl.nativeUploadCount).toBe(1);
     expect(fixture.gl.rgbaUploadCount).toBe(1);
@@ -449,7 +449,7 @@ describe("renderer runtime ownership", () => {
       }
     });
 
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
     expect(fixture.gl.nativeUploadCount).toBe(1);
     expect(fixture.gl.rgbaUploadCount).toBe(2);
     expect(fixture.gl.presentationUploadKinds).toEqual([
@@ -464,7 +464,7 @@ describe("renderer runtime ownership", () => {
     fixture.gl.rgbaReadback = blackProbePixels();
     const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
 
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
@@ -476,7 +476,7 @@ describe("renderer runtime ownership", () => {
     });
     expect(fixture.gl.presentationUploadKinds).toEqual(["rgba-copy"]);
 
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
     expect(fixture.gl.nativeUploadCount).toBe(1);
     expect(fixture.gl.rgbaUploadCount).toBe(2);
   });
@@ -486,7 +486,7 @@ describe("renderer runtime ownership", () => {
     fixture.gl.nextProbeReadError = 0x0502;
     const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
 
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
@@ -498,7 +498,7 @@ describe("renderer runtime ownership", () => {
     });
     expect(fixture.gl.presentationUploadKinds).toEqual(["rgba-copy"]);
 
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
     expect(fixture.gl.nativeUploadCount).toBe(1);
     expect(fixture.gl.rgbaUploadCount).toBe(2);
     expect(fixture.gl.readPixelsCount).toBe(1);
@@ -511,7 +511,7 @@ describe("renderer runtime ownership", () => {
     fixture.gl.rgbaReadback = pixels;
     const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
         kind: "webgl2",
@@ -522,8 +522,8 @@ describe("renderer runtime ownership", () => {
     expect(fixture.gl.presentationUploadKinds).toEqual(["rgba-copy"]);
 
     fixture.gl.nextNativeUploadError = 0x0502;
-    await renderer.draw(compactOpaqueFrame());
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
+    await renderer.draw(compactOpaqueFrame(), false);
 
     expect(webGlDetails(renderer).uploadMode).toBe("rgba-copy");
     expect(fixture.gl.nativeUploadCount).toBe(2);
@@ -550,7 +550,7 @@ describe("renderer runtime ownership", () => {
     within.gl.rgbaReadback = reference;
     const accepted = new Renderer(within.canvas, compactOpaqueLayout());
 
-    await accepted.draw(compactOpaqueFrame());
+    await accepted.draw(compactOpaqueFrame(), false);
     expect(webGlDetails(accepted).uploadMode).toBe("native");
 
     const outside = webglCanvas(48, 48);
@@ -560,7 +560,7 @@ describe("renderer runtime ownership", () => {
     outside.gl.rgbaReadback = reference;
     const rejected = new Renderer(outside.canvas, compactOpaqueLayout());
 
-    await rejected.draw(compactOpaqueFrame());
+    await rejected.draw(compactOpaqueFrame(), false);
     expect(webGlDetails(rejected).uploadMode).toBe("rgba-copy");
   });
 
@@ -570,8 +570,8 @@ describe("renderer runtime ownership", () => {
     fixture.gl.rgbaReadback = blackProbePixels();
     const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
 
-    await renderer.draw(compactOpaqueFrame());
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
+    await renderer.draw(compactOpaqueFrame(), false);
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
         kind: "webgl2",
@@ -579,7 +579,7 @@ describe("renderer runtime ownership", () => {
         nativeProbeAttempts: 2
       }
     });
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
     expect(renderer.snapshot()).toMatchObject({
       backendDetails: {
         kind: "webgl2",
@@ -587,7 +587,7 @@ describe("renderer runtime ownership", () => {
         nativeProbeAttempts: 3
       }
     });
-    await renderer.draw(compactOpaqueFrame());
+    await renderer.draw(compactOpaqueFrame(), false);
     expect(fixture.gl.nativeUploadCount).toBe(3);
     expect(fixture.gl.readPixelsCount).toBe(6);
 
@@ -618,7 +618,7 @@ describe("renderer runtime ownership", () => {
     const fixture = webglCanvas(48, 48);
     const copy = deferred<readonly PlaneLayout[]>();
     const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
-    const drawing = renderer.draw(compactOpaqueFrame(() => copy.promise));
+    const drawing = renderer.draw(compactOpaqueFrame(() => copy.promise), false);
     await eventually(() => webGlDetails(renderer).nativeProbeInFlight);
 
     fixture.dispatch("webglcontextlost");
@@ -663,7 +663,7 @@ describe("renderer runtime ownership", () => {
         renderLayout,
         displayWidth,
         displayHeight
-      ))).resolves.toBeUndefined();
+      ), false)).resolves.toBeUndefined();
       renderer.dispose();
     }
   );
@@ -677,7 +677,7 @@ describe("renderer runtime ownership", () => {
       renderLayout,
       1_279,
       720
-    ))).rejects.toThrow("decoded frame geometry is invalid");
+    ), false)).rejects.toThrow("decoded frame geometry is invalid");
   });
 
   it("applies exact initial presentation backing before resource admission", () => {
@@ -700,7 +700,7 @@ describe("renderer runtime ownership", () => {
   it("rotates three streaming textures and accounts for every allocation", async () => {
     const fixture = webglCanvas();
     const renderer = new Renderer(fixture.canvas, layout());
-    for (let index = 0; index < 4; index += 1) await renderer.draw(frame());
+    for (let index = 0; index < 4; index += 1) await renderer.draw(frame(), false);
 
     expect(fixture.gl.drawnTextures).toEqual([
       fixture.gl.createdTextures[0],
@@ -795,7 +795,7 @@ describe("renderer runtime ownership", () => {
     fixture.gl.loseOnDraw = true;
 
     let rejected!: RendererFailureError;
-    try { await renderer.draw(frame()); }
+    try { await renderer.draw(frame(), false); }
     catch (error) { rejected = error as RendererFailureError; }
     await Promise.resolve();
 
@@ -820,7 +820,7 @@ describe("renderer runtime ownership", () => {
     });
     fixture.canvas.width = 9_000;
 
-    await expect(renderer.draw(frame())).rejects.toBeInstanceOf(RangeError);
+    await expect(renderer.draw(frame(), false)).rejects.toBeInstanceOf(RangeError);
     expect(renderer.snapshot().failure).toBeNull();
     renderer.dispose();
   });
@@ -829,7 +829,7 @@ describe("renderer runtime ownership", () => {
     const fixture = webglCanvas(48, 48);
     const copy = deferred<readonly PlaneLayout[]>();
     const renderer = new Renderer(fixture.canvas, compactOpaqueLayout());
-    const drawing = renderer.draw(compactOpaqueFrame(() => copy.promise));
+    const drawing = renderer.draw(compactOpaqueFrame(() => copy.promise), false);
     await eventually(() =>
       renderer.snapshot().sourceCopiesInFlight === 1 &&
       webGlDetails(renderer).nativeProbeInFlight);

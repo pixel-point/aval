@@ -547,10 +547,6 @@ export function throwIfIntegratedAborted(signal: AbortSignal): void {
   if (signal.aborted) throw integratedAbortReason(signal);
 }
 
-export function neverAbortedIntegratedSignal(): AbortSignal {
-  return new AbortController().signal;
-}
-
 export async function raceIntegratedAbort<T>(
   operation: Promise<T>,
   signal: AbortSignal

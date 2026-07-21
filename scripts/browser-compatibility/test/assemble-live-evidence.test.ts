@@ -29,11 +29,11 @@ import {
 
 const SOURCE_POLICY = resolve(
   process.cwd(),
-  "scripts/browser-compatibility/certification-policy.json"
+  "config/release/browser-certification-policy.json"
 );
 const SOURCE_POLICY_SCHEMA = resolve(
   process.cwd(),
-  "scripts/browser-compatibility/certification-policy.schema.json"
+  "config/release/browser-certification-policy.schema.json"
 );
 const HEAD = "a".repeat(40);
 const SESSION_ID = "20260719T220000Z-live";
@@ -51,8 +51,8 @@ const IDENTITY = Object.freeze({
   sourceAttestation: ATTESTATION
 });
 const CODEC_STRINGS = Object.freeze({
-  av1: "av01.0.08M.08",
-  vp9: "vp09.00.10.08",
+  av1: "av01.0.08M.08.0.110.01.01.01.0",
+  vp9: "vp09.00.10.08.01.01.01.01.00",
   h265: "hvc1.1.6.L93.B0",
   h264: "avc1.42E020"
 });
@@ -74,7 +74,7 @@ describe("BrowserStack Live evidence assembler", () => {
     const assemble = (overrides: Record<string, unknown> = {}) =>
       assembleLiveEvidenceManifest({
         createAttestation: async () => ATTESTATION,
-        policyPath: "scripts/browser-compatibility/certification-policy.json",
+        policyPath: "config/release/browser-certification-policy.json",
         repoRoot: fixture.repoRoot,
         runRoot: fixture.runRoot,
         ...overrides
@@ -263,11 +263,11 @@ async function createFixture() {
   const repoRoot = resolve(tempRoot, "repo");
   const policyPath = resolve(
     repoRoot,
-    "scripts/browser-compatibility/certification-policy.json"
+    "config/release/browser-certification-policy.json"
   );
   const policySchemaPath = resolve(
     repoRoot,
-    "scripts/browser-compatibility/certification-policy.schema.json"
+    "config/release/browser-certification-policy.schema.json"
   );
   const runRoot = resolve(
     repoRoot,
@@ -313,8 +313,7 @@ async function createFixture() {
           };
         }
         if (iosFullLadderCase === null && slot.platform === "ios" &&
-            slot.expectation === "playback" && mode === "full-ladder" &&
-            demo.sourceContract === "multi-source") {
+            slot.expectation === "playback" && mode === "full-ladder") {
           iosFullLadderCase = {
             caseId: `${demoId}-${mode}`,
             reportPaths: captured.reportPaths
@@ -359,9 +358,7 @@ async function writeCaseArtifacts({
   const playback = slot.expectation === "playback";
   const states = playback ? demo.states : [null, null];
   const ids = playback ? demo.states : ["unsupported", "unsupported-soaked"];
-  const codecs = demo.sourceContract === "h264-only"
-    ? ["h264"]
-    : policy.requirements.authoredCodecsByMode[mode];
+  const codecs = policy.requirements.authoredCodecsByMode[mode];
   const selectedCodec = playback ? codecs[0] : null;
   const visualCheckpoints = [];
   const reportPaths = [];

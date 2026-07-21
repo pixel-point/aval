@@ -1,6 +1,5 @@
 import type {
   H264Codec,
-  H264CodecProfile,
   H264LevelIdc
 } from "./codec.js";
 
@@ -21,7 +20,7 @@ export interface H264FrameRate {
   readonly denominator: number;
 }
 
-/** Non-bitstream facts required to match either canonical H264 profile. */
+/** Non-bitstream facts required to match the canonical H264 profile. */
 export interface H264Profile {
   readonly codedWidth: number;
   readonly codedHeight: number;
@@ -57,8 +56,8 @@ export interface H264ColorSummary {
 }
 
 export interface H264ParameterSetSummary {
-  readonly profile: H264CodecProfile;
-  readonly profileIdc: 66 | 100;
+  readonly profile: "constrained-baseline";
+  readonly profileIdc: 66;
   readonly codec: H264Codec;
   readonly levelIdc: H264LevelIdc;
   readonly codedWidth: number;
@@ -81,7 +80,7 @@ export interface H264AccessUnitSummary {
   readonly pictureOrderCount: number;
   readonly key: boolean;
   readonly idr: boolean;
-  readonly sliceType: "I" | "P" | "B";
+  readonly sliceType: "I" | "P";
   readonly sliceCount: number;
   readonly nalUnitTypes: readonly number[];
 }

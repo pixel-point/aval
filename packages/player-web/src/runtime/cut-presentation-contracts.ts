@@ -34,7 +34,7 @@ export interface CutPresentationScheduler {
   ): Readonly<PathSchedulerResidentRunwayTransaction>;
   commitResidentRunway(
     transaction: Readonly<PathSchedulerResidentRunwayTransaction>,
-    options?: Readonly<CommitResidentRunwayOptions>
+    options: Readonly<CommitResidentRunwayOptions>
   ): PathSchedulerWorkerActivation;
   rollbackResidentRunway(
     transaction: Readonly<PathSchedulerResidentRunwayTransaction>
@@ -99,11 +99,8 @@ export interface CutPresentationCoordinatorOptions {
   readonly firstStreamingSlot?: number;
   /** Browser session adopts the aligned scheduler after its first stream draw. */
   readonly handoffAfterFirstStreaming?: boolean;
-  /**
-   * Optional owner-supplied serialization lane. The resident runway is bound
-   * synchronously; only decoder and upload work is enqueued here.
-   */
-  readonly enqueueMediaOperation?: <T>(
+  /** Decoder and upload work share the browser owner's serialization lane. */
+  readonly enqueueMediaOperation: <T>(
     operation: (signal?: AbortSignal) => Promise<T>
   ) => Promise<T>;
   readonly onStaticRecovery?: (failure: Readonly<RuntimeFailure>) => void;
@@ -115,7 +112,6 @@ export interface CutPresentationCoordinatorOptions {
 
 export type CutPresentationStatus =
   | "idle"
-  | "activating"
   | "ready"
   | "error"
   | "disposed";

@@ -2,20 +2,24 @@ import type {
   CanonicalAssetInput,
   CompiledManifest,
   CompiledManifestInput,
-  CompiledManifestInputV1_0,
-  CompiledManifestV1_0,
+  OpaqueCompiledManifestInputV1_1,
+  OpaqueCompiledManifestV1_1,
+  PackedAlphaCompiledManifestInputV1_1,
+  PackedAlphaCompiledManifestV1_1,
   ParsedFrontIndex
 } from "../src/model.js";
 import { validManifest } from "./manifest-fixture.js";
 
-type LegacyManifestInput = CompiledManifestInputV1_0;
-type LegacyCanonicalAssetInput = Omit<CanonicalAssetInput, "manifest"> & {
-  readonly manifest: LegacyManifestInput;
+type OpaqueCanonicalAssetInput = Omit<CanonicalAssetInput, "manifest"> & {
+  readonly manifest: OpaqueCompiledManifestInputV1_1;
 };
 
 function manifestInputFromCompiled(
-  manifest: CompiledManifestV1_0
-): LegacyManifestInput;
+  manifest: OpaqueCompiledManifestV1_1
+): OpaqueCompiledManifestInputV1_1;
+function manifestInputFromCompiled(
+  manifest: PackedAlphaCompiledManifestV1_1
+): PackedAlphaCompiledManifestInputV1_1;
 function manifestInputFromCompiled(
   manifest: CompiledManifest
 ): CompiledManifestInput;
@@ -42,10 +46,10 @@ export interface WriterFixtureOptions {
 /** A fresh valid writer input with one encoded chunk per displayed frame. */
 export function validWriterInput(
   options: WriterFixtureOptions = {}
-): LegacyCanonicalAssetInput {
+): OpaqueCanonicalAssetInput {
   const compiled = validManifest();
   const baseManifest = manifestInputFromCompiled(compiled);
-  const manifest: LegacyManifestInput = {
+  const manifest: OpaqueCompiledManifestInputV1_1 = {
     ...baseManifest,
     generator: baseManifest.generator + (options.generatorSuffix ?? "")
   };

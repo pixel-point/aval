@@ -7,8 +7,7 @@ import { BrowserVideoCandidateHub } from "./browser-video-candidate-hub.js";
 import { BrowserVideoCandidateReadinessFactory } from "./browser-video-candidate-readiness.js";
 import type {
   BrowserVideoCandidateComposition,
-  BrowserVideoCandidateCompositionOptions,
-  BrowserVideoCandidateControls
+  BrowserVideoCandidateCompositionOptions
 } from "./browser-video-candidate-contracts.js";
 
 export type {

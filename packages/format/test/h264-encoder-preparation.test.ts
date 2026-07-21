@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { FormatError } from "../src/errors.js";
 import { splitAnnexBAccessUnit } from "../src/h264/annex-b.js";
 import {
-  inspectH264AnnexBRendition,
   prepareH264EncoderRendition
 } from "../src/h264/index.js";
 import {
@@ -81,38 +80,6 @@ describe("H264 encoder preparation", () => {
         expectedAccessUnitCount: 8
       }]
     }));
-  });
-
-  it("keeps the real legacy High rendition readable through strict inspection", () => {
-    const bytes = new Uint8Array(Buffer.from(REAL_X264_HIGH_B_FRAMES, "base64"));
-    const accessUnitOffsets = splitAnnexBAccessUnit(bytes, "legacy-high")
-      .filter(({ type }) => type === 9)
-      .map(({ offset, prefixLength }) => offset - prefixLength);
-    const inspection = inspectH264AnnexBRendition({
-      profile: {
-        codedWidth: 48,
-        codedHeight: 96,
-        expectedVisibleRect: [0, 0, 48, 96],
-        frameRate: { numerator: 30, denominator: 1 },
-        requireBt709LimitedRange: true
-      },
-      units: [{
-        id: "unit",
-        accessUnits: accessUnitOffsets.map((offset, index) => ({
-          key: index === 0,
-          bytes: canonicalizeStartCodes(bytes.slice(
-            offset,
-            accessUnitOffsets[index + 1] ?? bytes.length
-          ))
-        }))
-      }]
-    });
-
-    expect(inspection.parameterSet.codec).toBe("avc1.64000A");
-    expect(inspection.units[0]?.accessUnits.map(({ sliceType }) => sliceType))
-      .toEqual(["I", "P", "B", "B", "B", "P", "B", "B"]);
-    expect(inspection.units[0]?.decodeToPresentation)
-      .toEqual([0, 4, 2, 1, 3, 7, 5, 6]);
   });
 
   it("strips bounded encoder SEI and emits canonical four-byte start codes", () => {
@@ -212,10 +179,4 @@ function baselineStream(): Uint8Array {
 
 function expectProfileError(operation: () => unknown): void {
   expect(operation).toThrow(FormatError);
-}
-
-function canonicalizeStartCodes(accessUnit: Uint8Array): Uint8Array {
-  const startCode = Uint8Array.of(0, 0, 0, 1);
-  const nals = splitAnnexBAccessUnit(accessUnit, "legacy-high.access-unit");
-  return concat(...nals.flatMap(({ payload }) => [startCode, payload]));
 }

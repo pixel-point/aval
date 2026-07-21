@@ -12,10 +12,6 @@ export const CHUNK_INDEX_MAGIC = Object.freeze([
 
 export const FORMAT_VERSION_MAJOR = 1;
 export const FORMAT_VERSION_MINOR = 1;
-export const FORMAT_SUPPORTED_VERSIONS = Object.freeze([
-  "1.0",
-  "1.1"
-] as const);
 export const FORMAT_HEADER_LENGTH = 64;
 export const FORMAT_ALIGNMENT = 8;
 export const CHUNK_INDEX_HEADER_LENGTH = 16;

@@ -1,5 +1,4 @@
 import type { IntegratedPlaybackTickContext } from "./integrated-player-contracts.js";
-import type { RuntimeFrameKey } from "./model.js";
 import type { RuntimeFailureCode } from "./errors.js";
 import { graphBodyFrameAt } from "./body-frame-semantics.js";
 import {
@@ -63,10 +62,7 @@ export function validateCutPresentationOptions(
   ) {
     throw new TypeError("cut streaming handoff flag must be boolean");
   }
-  if (
-    options.enqueueMediaOperation !== undefined &&
-    typeof options.enqueueMediaOperation !== "function"
-  ) {
+  if (typeof options.enqueueMediaOperation !== "function") {
     throw new TypeError("cut media-operation scheduler must be a function");
   }
   if (
@@ -234,15 +230,6 @@ export function rebindCutOrdinal(
   return media.intendedPresentationOrdinal === intendedPresentationOrdinal
     ? media
     : Object.freeze({ ...media, intendedPresentationOrdinal });
-}
-
-export function sameRuntimeFrame(
-  left: Readonly<RuntimeFrameKey>,
-  right: Readonly<RuntimeFrameKey>
-): boolean {
-  return left.rendition === right.rendition &&
-    left.unit === right.unit &&
-    left.localFrame === right.localFrame;
 }
 
 export function cutWorkerFailureCode(error: unknown): RuntimeFailureCode {

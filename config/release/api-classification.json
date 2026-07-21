@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "defaultClassification": "stable",
+  "defaultClassification": "experimental",
   "allowed": ["stable", "experimental", "deprecated", "internal"],
   "packages": {
     "@pixel-point/aval-graph": { "experimental": [], "deprecated": [] },

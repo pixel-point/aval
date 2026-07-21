@@ -24,7 +24,7 @@ import {
 } from "./protocol.js";
 
 const CODECS = Object.freeze({
-  h264: "avc1.640020",
+  h264: "avc1.42E020",
   h265: "hvc1.1.6.L93.B0",
   vp9: "vp09.00.10.08.01.01.01.01.00",
   av1: "av01.0.04M.10.0.110.01.01.01.0"
@@ -108,10 +108,10 @@ describe("codec-neutral decoder worker", () => {
         displayHeight: 104,
         visibleRect: { x: visibleX, y: visibleY, width: 48, height: 104 },
         colorSpace: {
-          fullRange: null,
-          matrix: null,
-          primaries: null,
-          transfer: null
+          fullRange: false,
+          matrix: "bt709",
+          primaries: "bt709",
+          transfer: "bt709"
         }
       } as unknown as VideoFrame;
 
@@ -121,7 +121,12 @@ describe("codec-neutral decoder worker", () => {
         displayWidth: 48,
         displayHeight: 104,
         visibleRect: { x: 0, y: 0, width: 48, height: 104 },
-        colorSpace: null
+        colorSpace: {
+          fullRange: false,
+          matrix: "bt709",
+          primaries: "bt709",
+          transfer: "bt709"
+        }
       }, 0, 1_000)).toBe(renditionWidth * renditionHeight * 4);
     }
   );
@@ -598,7 +603,12 @@ function expectedOutput() {
     displayWidth: 2,
     displayHeight: 2,
     visibleRect: { x: 0, y: 0, width: 2, height: 2 },
-    colorSpace: null
+    colorSpace: {
+      fullRange: false,
+      matrix: "bt709",
+      primaries: "bt709",
+      transfer: "bt709"
+    }
   } as const;
 }
 
@@ -711,10 +721,10 @@ class FakeVideoFrame {
   public readonly displayHeight = 2;
   public readonly visibleRect = { x: 0, y: 0, width: 2, height: 2 };
   public readonly colorSpace = {
-    fullRange: null,
-    matrix: null,
-    primaries: null,
-    transfer: null
+    fullRange: false,
+    matrix: "bt709",
+    primaries: "bt709",
+    transfer: "bt709"
   };
   public closeCalls = 0;
 

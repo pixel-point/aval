@@ -162,8 +162,7 @@ export class CutPresentationCoordinator implements IntegratedPlaybackSession {
     this.#nextStreamingSlot = options.firstStreamingSlot ?? 0;
     this.#handoffAfterFirstStreaming =
       options.handoffAfterFirstStreaming ?? false;
-    this.#enqueueMediaOperation = options.enqueueMediaOperation ??
-      createStandaloneCutMediaOperationQueue();
+    this.#enqueueMediaOperation = options.enqueueMediaOperation;
     this.#onStaticRecovery = options.onStaticRecovery ?? null;
     this.#readbackTag = options.readbackTag;
   }
@@ -377,19 +376,6 @@ export class CutPresentationCoordinator implements IntegratedPlaybackSession {
     return tracked;
   }
 
-  /** Compatibility path for callers that do not own a synchronous draw gate. */
-  public activateCut(
-    input: Readonly<CutActivationInput>
-  ): Promise<Readonly<CutActivationReport>> {
-    try {
-      this.stageCut(input);
-      this.#commitStagedActivation(0);
-      return this.startStagedContinuation();
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-
   /** Adds decoded continuation credit outside the realtime callback. */
   public pumpContinuation(
     options: PathSchedulerPumpOptions = {}
@@ -588,7 +574,7 @@ export class CutPresentationCoordinator implements IntegratedPlaybackSession {
     this.#drawn = null;
     if (drawn.handle.kind === "resident") {
       if (this.#residentPresented === 0 && this.#stagedActivation !== null) {
-        this.#commitStagedActivation(1);
+        this.#commitStagedActivation();
       } else {
         this.#scheduler.commitResidentPresentation(media);
       }
@@ -679,7 +665,7 @@ export class CutPresentationCoordinator implements IntegratedPlaybackSession {
     this.#discardStreamingReservation();
   }
 
-  #commitStagedActivation(alreadyPresented: 0 | 1): void {
+  #commitStagedActivation(): void {
     const staged = this.#stagedActivation;
     const active = this.#active;
     if (
@@ -696,7 +682,7 @@ export class CutPresentationCoordinator implements IntegratedPlaybackSession {
     try {
       activateWorker = this.#scheduler.commitResidentRunway(
         staged.transaction,
-        { alreadyPresented }
+        { alreadyPresented: 1 }
       );
     } catch (error) {
       this.#scheduler.rollbackResidentRunway(staged.transaction);
@@ -931,16 +917,4 @@ function forwardAbort(
   const abort = () => target.abort(source.reason);
   source.addEventListener("abort", abort, { once: true });
   return () => source.removeEventListener("abort", abort);
-}
-
-/** Unit/standalone compatibility only; browser composition supplies its lane. */
-function createStandaloneCutMediaOperationQueue(): <T>(
-  operation: (signal?: AbortSignal) => Promise<T>
-) => Promise<T> {
-  let tail: Promise<unknown> = Promise.resolve();
-  return <T>(operation: (signal?: AbortSignal) => Promise<T>): Promise<T> => {
-    const next = tail.catch(() => undefined).then(() => operation(undefined));
-    tail = next;
-    return next;
-  };
 }

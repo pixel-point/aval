@@ -1,6 +1,7 @@
 import {
   FORMAT_DEFAULT_BUDGETS,
   parseVideoCodecString,
+  SHA256_HEX_PATTERN,
   VIDEO_CODECS
 } from "@pixel-point/aval-format";
 
@@ -35,7 +36,6 @@ export interface DevServerBuild {
 export const MAX_ASSET_BYTES = FORMAT_DEFAULT_BUDGETS.maxFileBytes;
 export const MAX_BUILD_REPORT_BYTES = 64 * 1024 * 1024;
 const MAX_WARNINGS = 64;
-const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const SOURCE_TYPE = /^application\/vnd\.aval; codecs="([^"]+)"$/u;
 
 /** Convert one unpublished compiler bundle into exact dev-server metadata. */
@@ -163,7 +163,7 @@ function validBytes(value: number, maximum: number): boolean {
 }
 
 function validSha256(value: string): boolean {
-  return typeof value === "string" && SHA256_HEX.test(value);
+  return typeof value === "string" && SHA256_HEX_PATTERN.test(value);
 }
 
 function integrityForHexDigest(value: string): `sha256-${string}` {

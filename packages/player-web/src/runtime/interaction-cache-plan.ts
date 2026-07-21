@@ -15,14 +15,9 @@ import {
 } from "./checked-runtime-bytes.js";
 
 export const MIN_REVERSIBLE_CLIP_FRAMES = 1;
-/** Compatibility export; reversible clips are bounded only by representation. */
-export const MAX_REVERSIBLE_CLIP_FRAMES = 0xffff_ffff;
+const MAX_REVERSIBLE_CLIP_FRAMES = 0xffff_ffff;
 export const MIN_ENDPOINT_RUNWAY_FRAMES = 6;
 export const MAX_ENDPOINT_RUNWAY_FRAMES = 12;
-/** Compatibility exports; the active layer boundary is the queried device. */
-export const MAX_INTERACTION_CACHE_LAYERS = Number.MAX_SAFE_INTEGER;
-export const MAX_REVERSIBLE_CLIP_BYTES = Number.MAX_SAFE_INTEGER;
-export const MAX_REVERSIBLE_ENDPOINT_PAIR_BYTES = Number.MAX_SAFE_INTEGER;
 
 export interface InteractionCacheDeviceLimits {
   readonly maxArrayTextureLayers: number;
@@ -35,35 +30,33 @@ export interface InteractionCachePlanInput {
   readonly deviceLimits: Readonly<InteractionCacheDeviceLimits>;
 }
 
-export interface SemanticEndpointRunwayInput {
+interface SemanticEndpointRunwayInput {
   readonly state: string;
   readonly port: string;
   readonly frames: readonly RuntimeFrameKey[];
 }
 
-export interface SemanticReversibleClipInput {
+interface SemanticReversibleClipInput {
   readonly unit: string;
   readonly sourceEndpoint: Readonly<SemanticEndpointRunwayInput>;
   readonly clip: readonly RuntimeFrameKey[];
   readonly targetEndpoint: Readonly<SemanticEndpointRunwayInput>;
 }
 
-export interface SemanticCutRunwayInput {
+interface SemanticCutRunwayInput {
   readonly edge: string;
   readonly state: string;
   readonly port: string;
   readonly frames: readonly RuntimeFrameKey[];
 }
 
-export interface InteractionCacheSemanticInput {
+interface InteractionCacheSemanticInput {
   readonly rendition: string;
   readonly width: number;
   readonly height: number;
   readonly reversibleClips: readonly SemanticReversibleClipInput[];
   readonly cutRunways: readonly SemanticCutRunwayInput[];
   readonly deviceLimits: Readonly<InteractionCacheDeviceLimits>;
-  /** Compatibility-only: a selected production candidate always leaves this false. */
-  readonly allowMixedRenditions?: boolean;
 }
 
 export interface InteractionCacheLayer {
@@ -180,7 +173,7 @@ export function createInteractionCachePlan(
       };
     });
 
-  return createInteractionCachePlanFromSemanticSequences({
+  return assembleInteractionCachePlan({
     rendition: rendition.id,
     width: rendition.codedWidth,
     height: rendition.codedHeight,
@@ -201,8 +194,7 @@ function requireProductionVideoRendition(
   return selected;
 }
 
-/** Shared sequence/layer owner used by the manifest planner and M2 adapter. */
-export function createInteractionCachePlanFromSemanticSequences(
+function assembleInteractionCachePlan(
   input: InteractionCacheSemanticInput
 ): Readonly<InteractionCachePlan> {
   validateObject(input, "interaction cache semantic input");
@@ -242,7 +234,7 @@ export function createInteractionCachePlanFromSemanticSequences(
     const layers: number[] = [];
     for (let index = 0; index < sequence.length; index += 1) {
       const key = cloneFrameKey(sequence[index], `${label} frame ${String(index)}`);
-      if (input.allowMixedRenditions !== true && key.rendition !== input.rendition) {
+      if (key.rendition !== input.rendition) {
         throw new RangeError(`${label} frame rendition does not match the plan`);
       }
       const identity = identityFor(key);

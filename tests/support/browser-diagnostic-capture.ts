@@ -17,6 +17,7 @@ import {
 } from "node:path";
 import { performance as monotonicPerformance } from "node:perf_hooks";
 
+import { H264_CONSTRAINED_BASELINE_CODECS } from "@pixel-point/aval-format";
 import {
   expect,
   type Locator,
@@ -200,11 +201,6 @@ export interface BrowserDiagnosticEvidenceFinalization {
 
 export interface BrowserDiagnosticArtifactOptions {
   readonly evidence?: Readonly<BrowserDiagnosticEvidenceTarget> | undefined;
-  /**
-   * Legacy caller hint retained for source compatibility. Evidence capture
-   * never trusts this value; expected outcome selects temporal measurement.
-   */
-  readonly advancingFrame?: boolean | undefined;
   readonly onEvidenceWritten?: (
     artifacts: Readonly<BrowserDiagnosticEvidenceCheckpointArtifacts>
   ) => void;
@@ -960,7 +956,6 @@ export async function captureDeterministicUnsupportedBrowserEvidence(
         demoId: input.demoId,
         checkpoint: "unsupported"
       }),
-      advancingFrame: false,
       onEvidenceWritten: (artifacts) => evidenceCheckpoints.push(artifacts)
     }
   );
@@ -974,7 +969,6 @@ export async function captureDeterministicUnsupportedBrowserEvidence(
         demoId: input.demoId,
         checkpoint: "unsupported-soaked"
       }),
-      advancingFrame: false,
       onEvidenceWritten: (artifacts) => evidenceCheckpoints.push(artifacts)
     }
   );
@@ -1031,19 +1025,25 @@ export async function openWithDiagnostics(
 }
 
 async function installForcedH264SourcePolicy(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const h264 = /(?:avc1|avc3|h264)/iu;
+  await page.addInitScript((canonicalH264Codecs) => {
+    const h264 = new Set<string>(canonicalH264Codecs);
+    const prefix = 'application/vnd.aval; codecs="';
+    const isH264 = (source: HTMLSourceElement): boolean => {
+      const type = source.getAttribute("type");
+      return typeof type === "string" && type.startsWith(prefix) &&
+        type.endsWith('"') && h264.has(type.slice(prefix.length, -1));
+    };
     const prune = (root: Node) => {
       if (!(root instanceof Element || root instanceof Document)) return;
       if (
         root instanceof HTMLSourceElement &&
         root.parentElement?.localName === "aval-player" &&
-        !h264.test(root.getAttribute("type") ?? "")
+        !isH264(root)
       ) {
         root.remove();
       }
       for (const source of root.querySelectorAll("aval-player > source")) {
-        if (!h264.test(source.getAttribute("type") ?? "")) source.remove();
+        if (!isH264(source as HTMLSourceElement)) source.remove();
       }
     };
     new MutationObserver((records) => {
@@ -1052,7 +1052,7 @@ async function installForcedH264SourcePolicy(page: Page): Promise<void> {
       }
       prune(document);
     }).observe(document, { childList: true, subtree: true });
-  });
+  }, H264_CONSTRAINED_BASELINE_CODECS);
 }
 
 export async function checkpoint(
@@ -1842,10 +1842,10 @@ function validateEvidenceCheckpointArtifacts(
       }
       paths.add(path);
     }
-    if (!/^[a-f0-9]{64}$/u.test(checkpoint.pngSha256)) {
+    if (!EVIDENCE_SHA256_PATTERN.test(checkpoint.pngSha256)) {
       throw new Error(`Browser evidence PNG digest is invalid: ${checkpoint.id}`);
     }
-    if (!/^[a-f0-9]{64}$/u.test(checkpoint.contextPngSha256)) {
+    if (!EVIDENCE_SHA256_PATTERN.test(checkpoint.contextPngSha256)) {
       throw new Error(`Browser evidence context PNG digest is invalid: ${checkpoint.id}`);
     }
     const proof = checkpoint.frameProof;
@@ -1857,8 +1857,8 @@ function validateEvidenceCheckpointArtifacts(
     }
     if (checkpoint.beforePngPath === null ||
         proof.afterCanvasSha256 !== checkpoint.pngSha256 ||
-        !/^[a-f0-9]{64}$/u.test(proof.beforeCanvasSha256) ||
-        !/^[a-f0-9]{64}$/u.test(proof.afterCanvasSha256) ||
+        !EVIDENCE_SHA256_PATTERN.test(proof.beforeCanvasSha256) ||
+        !EVIDENCE_SHA256_PATTERN.test(proof.afterCanvasSha256) ||
         proof.sampleIntervalMilliseconds < 1 ||
         proof.sampleIntervalMilliseconds > 5_000 ||
         proof.beforeDrawsCompleted === null ||

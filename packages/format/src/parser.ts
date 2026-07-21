@@ -1,6 +1,12 @@
 import { parseEncodedChunkIndex } from "./access-unit-index.js";
 import { parseCanonicalJson, serializeCanonicalJson } from "./canonical-json.js";
-import { checkedAdd, requireByteRange } from "./checked-integer.js";
+import { checkedAdd, checkedMultiply, requireByteRange } from "./checked-integer.js";
+import { createCanonicalChunkPlan } from "./chunk-plan.js";
+import {
+  CHUNK_INDEX_HEADER_LENGTH,
+  CHUNK_INDEX_RECORD_LENGTH,
+  resolveFormatBudgets
+} from "./constants.js";
 import { adaptManifestToMotionGraph } from "./graph-adapter.js";
 import { parseHeader } from "./header.js";
 import {
@@ -15,6 +21,7 @@ import type {
   FormatHeader,
   FormatOptions,
   ParsedFrontIndex,
+  ParsedManifestPrefix,
   ValidatedAssetLayout
 } from "./model.js";
 
@@ -169,29 +176,23 @@ function parseManifest(
 }
 
 /**
- * Parse exactly the bounded metadata prefix needed to route and range-load an
- * asset. Payload bytes, when present in the input view, are ignored.
+ * Parse the bounded manifest stage needed to calculate the exact front-index
+ * range without accepting or allocating from unverified index metadata.
  */
-export function parseFrontIndex(
+export function parseManifestPrefix(
   bytesFromFileStart: Uint8Array,
   options?: FormatOptions
-): ParsedFrontIndex {
+): Readonly<ParsedManifestPrefix> {
   try {
     if (!(bytesFromFileStart instanceof Uint8Array)) {
       throw new FormatError(
         "INPUT_INVALID",
-        "front-index input must be a Uint8Array"
+        "manifest-prefix input must be a Uint8Array"
       );
     }
-    const header = parseHeader(bytesFromFileStart, options) as FormatHeader;
-    const frontIndexEnd = checkedAdd(
-      header.indexOffset,
-      header.indexLength,
-      header.declaredFileLength,
-      "front index end"
-    );
-    if (bytesFromFileStart.byteLength < frontIndexEnd) {
-      throw new FormatError("INDEX_INVALID", "front index is truncated", {
+    const header = parseHeader(bytesFromFileStart, options);
+    if (bytesFromFileStart.byteLength < header.indexOffset) {
+      throw new FormatError("JSON_INVALID", "manifest prefix is truncated", {
         offset: bytesFromFileStart.byteLength
       });
     }
@@ -209,6 +210,76 @@ export function parseFrontIndex(
         length: header.indexOffset - manifestEnd
       })
     ]);
+
+    if (header.declaredFileLength > manifest.limits.maxCompiledBytes) {
+      throw new FormatError(
+        "BUDGET_EXCEEDED",
+        "declared file length exceeds manifest limits.maxCompiledBytes",
+        { path: "limits.maxCompiledBytes" }
+      );
+    }
+
+    const budgets = resolveFormatBudgets(options);
+    const chunkPlan = createCanonicalChunkPlan(
+      manifest.renditions,
+      manifest.units,
+      budgets.maxChunkRecords,
+      budgets.maxTotalUnitFrames
+    );
+    const expectedIndexLength = checkedAdd(
+      CHUNK_INDEX_HEADER_LENGTH,
+      checkedMultiply(
+        chunkPlan.recordCount,
+        CHUNK_INDEX_RECORD_LENGTH,
+        budgets.maxIndexBytes,
+        "encoded-chunk records length"
+      ),
+      budgets.maxIndexBytes,
+      "encoded-chunk index length"
+    );
+    if (header.indexLength !== expectedIndexLength) {
+      throw new FormatError(
+        "INDEX_INVALID",
+        `encoded-chunk index length must be ${String(expectedIndexLength)} bytes`,
+        { offset: 56 }
+      );
+    }
+    const frontIndexLength = checkedAdd(
+      header.indexOffset,
+      header.indexLength,
+      header.declaredFileLength,
+      "front index end"
+    );
+    return Object.freeze({
+      header,
+      manifest,
+      frontIndexRange: Object.freeze({ offset: 0, length: frontIndexLength })
+    });
+  } catch (error) {
+    if (isFormatError(error)) {
+      throw error;
+    }
+    throw new FormatError("INPUT_INVALID", "manifest prefix could not be parsed");
+  }
+}
+
+/**
+ * Parse exactly the bounded metadata prefix needed to route and range-load an
+ * asset. Payload bytes, when present in the input view, are ignored.
+ */
+export function parseFrontIndex(
+  bytesFromFileStart: Uint8Array,
+  options?: FormatOptions
+): ParsedFrontIndex {
+  try {
+    const prefix = parseManifestPrefix(bytesFromFileStart, options);
+    const { header, manifest } = prefix;
+    const frontIndexEnd = prefix.frontIndexRange.length;
+    if (bytesFromFileStart.byteLength < frontIndexEnd) {
+      throw new FormatError("INDEX_INVALID", "front index is truncated", {
+        offset: bytesFromFileStart.byteLength
+      });
+    }
 
     let records: readonly EncodedChunkRecord[];
     try {
@@ -228,7 +299,7 @@ export function parseFrontIndex(
       manifest,
       graph,
       records,
-      frontIndexRange: layout.frontIndexRange,
+      frontIndexRange: prefix.frontIndexRange,
       unitBlobs: layout.unitBlobs
     });
   } catch (error) {

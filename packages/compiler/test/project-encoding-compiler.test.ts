@@ -26,7 +26,7 @@ describe("one-codec project encoding assembly", () => {
       layout: "packed-alpha",
       renditions: [{
         id: "video.main",
-        codec: "av01.0.08M.10",
+        codec: "av01.0.08M.10.0.110.01.01.01.0",
         bitDepth: 10,
         geometry,
         bitrate: { average: 800, peak: 1_200 },
@@ -52,7 +52,7 @@ describe("one-codec project encoding assembly", () => {
       layout: "packed-alpha",
       renditions: [{
         id: "video.main",
-        codec: "av01.0.08M.10",
+        codec: "av01.0.08M.10.0.110.01.01.01.0",
         bitDepth: 10,
         codedWidth: 16,
         codedHeight: 24,
@@ -122,7 +122,7 @@ describe("one-codec project encoding assembly", () => {
       layout: "packed-alpha",
       renditions: [{
         id: "video.main",
-        codec: "av01.0.08M.10",
+        codec: "av01.0.08M.10.0.110.01.01.01.0",
         bitDepth: 10,
         geometry,
         bitrate: { average: 1, peak: 1 },

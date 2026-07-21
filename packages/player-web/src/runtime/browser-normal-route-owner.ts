@@ -59,10 +59,6 @@ export class BrowserNormalRouteOwner {
     return this.#scheduler.snapshot().generation ?? 1;
   }
 
-  public get hasInitialPrefix(): boolean {
-    return this.#prefix !== null;
-  }
-
   public get retainedStreamingSlot(): number | null {
     const handle = this.#lastPresented?.handle;
     return handle?.kind === "stream" ? handle.slot : null;

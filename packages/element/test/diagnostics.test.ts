@@ -4,7 +4,6 @@ import { ELEMENT_DECODER_CAPACITY } from "../src/decoder-capacity.js";
 import {
   contextRecoveryCount,
   outstandingDecoder,
-  resolutionScale,
   runtimeSuspension,
   runtimeVisibility,
   resumeCurrent,
@@ -244,8 +243,6 @@ describe("diagnostics", () => {
       "granted"
     )).toBe(ELEMENT_DECODER_CAPACITY.workerCount);
     expect(outstandingDecoder(0, null)).toBe(0);
-    expect(resolutionScale(0, 0)).toBe(0);
-    expect(resolutionScale(100, 50)).toBe(1);
     expect(runtimeVisibility(false, false)).toBeNull();
     expect(runtimeSuspension(false, false, false)).toBeNull();
     expect(runtimeVisibility(true, false)).toBe("hidden");

@@ -77,7 +77,6 @@ export function unfilterPngRgba(input: PngUnfilterInput): Uint8Array {
       fail("PNG RGBA layout must be an object");
     }
     const {
-      width,
       height,
       rowBytes,
       filteredRowBytes,

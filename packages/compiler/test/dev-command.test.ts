@@ -266,7 +266,7 @@ async function createProject(): Promise<string> {
 function artifact(marker = 4): Readonly<CompileBundleArtifact> {
   const assetBytes = new Uint8Array(10).fill(marker);
   const sha256 = "b".repeat(64);
-  const type = 'application/vnd.aval; codecs="avc1.64001E"';
+  const type = 'application/vnd.aval; codecs="avc1.42E01E"';
   const integrity = `sha256-${Buffer.from(sha256, "hex").toString("base64")}`;
   const reportedAsset = Object.freeze({
     codec: "h264" as const,

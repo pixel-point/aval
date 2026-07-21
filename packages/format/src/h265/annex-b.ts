@@ -1,7 +1,5 @@
 import { requireH265 } from "./failure.js";
 
-export const H265_NAL_TRAIL_N = 0;
-export const H265_NAL_TRAIL_R = 1;
 export const H265_NAL_BLA_W_LP = 16;
 export const H265_NAL_BLA_W_RADL = 17;
 export const H265_NAL_BLA_N_LP = 18;

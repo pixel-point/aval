@@ -1,4 +1,5 @@
 import { defineAvalElement } from "@pixel-point/aval-element";
+import { parseVideoCodecString } from "@pixel-point/aval-format";
 
 import { avalBrowserDiagnostics } from "../support/aval-browser-diagnostics.js";
 
@@ -52,11 +53,14 @@ function reflectRenderedMotion() {
 function selectedCodecLabel() {
   if (!motion || typeof motion.getDiagnostics !== "function") return null;
   const selectedCodec = motion.getDiagnostics().runtime.selectedCodec;
-  if (selectedCodec?.startsWith("av01.")) return "AV1";
-  if (selectedCodec?.startsWith("vp09.")) return "VP9";
-  if (selectedCodec?.startsWith("hvc1.")) return "HEVC";
-  if (selectedCodec?.startsWith("avc1.")) return "H.264 fallback";
-  return null;
+  if (typeof selectedCodec !== "string") return null;
+  switch (parseVideoCodecString(selectedCodec)?.family) {
+    case "av1": return "AV1";
+    case "vp9": return "VP9";
+    case "h265": return "HEVC";
+    case "h264": return "H.264 fallback";
+    default: return null;
+  }
 }
 
 function reflectSelectedCodec() {

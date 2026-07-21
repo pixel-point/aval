@@ -16,7 +16,7 @@ import {
 
 const HEADER: FormatHeader = {
   major: 1,
-  minor: 0,
+  minor: 1,
   headerLength: FORMAT_HEADER_LENGTH,
   requiredFeatureFlags: 0,
   declaredFileLength: 136,
@@ -28,7 +28,7 @@ const HEADER: FormatHeader = {
 
 const GOLDEN_HEX =
   "41564c460d0a1a0a" +
-  "01000000" +
+  "01000100" +
   "40000000" +
   "00000000" +
   "00000000" +
@@ -56,7 +56,7 @@ function expectFormatError(
   throw new Error("expected operation to throw");
 }
 
-describe("version-1.0 header codec", () => {
+describe("version-1.1 header codec", () => {
   it("emits the exact canonical 64-byte little-endian header", () => {
     const bytes = encodeHeader(HEADER);
     expect(bytes).toHaveLength(64);
@@ -70,9 +70,10 @@ describe("version-1.0 header codec", () => {
     expect(Object.isFrozen(parsed)).toBe(true);
   });
 
-  it("round-trips the qualified 1.1 header without rewriting its version", () => {
-    const qualified: FormatHeader = { ...HEADER, major: 1, minor: 1 };
-    expect(parseHeader(encodeHeader(qualified))).toEqual(qualified);
+  it("rejects the retired wire-1.0 minor version", () => {
+    const legacy = encodeHeader(HEADER);
+    legacy[10] = 0;
+    expectFormatError(() => parseHeader(legacy), "VERSION_UNSUPPORTED");
   });
 
   it("supports an unaligned Uint8Array view without reading adjacent bytes", () => {

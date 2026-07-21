@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import {
   FRAME_STREAMING_SLOT_COUNT,
   FrameRenderer,
-  RendererFrameUnavailableError,
   RendererUploadTimeoutError,
   type BorrowedVideoFrame,
   type CopyableVideoFrame,
@@ -383,136 +382,6 @@ describe("profile-neutral frame renderer", () => {
     );
   });
 
-  it("restores one geometry-backed implementation and invalidates old handles", async () => {
-    const initial = new FakeBackend();
-    const renderer = new FrameRenderer(initial, LAYOUT, {
-      contextLossPolicy: "restorable"
-    });
-    const oldSource = borrowedFrame(1);
-    const old = await renderer.uploadResident(0, oldSource.source);
-    if (old === null) throw new Error("old resident handle is missing");
-
-    renderer.markContextLost();
-    const replacement = new FakeBackend();
-    renderer.restore(replacement);
-
-    expect(() => renderer.draw(old)).toThrow(RendererFrameUnavailableError);
-    expect(replacement.allocations[0]?.layout.geometry).toEqual(GEOMETRY);
-    const freshSource = borrowedFrame(2);
-    const fresh = await renderer.uploadResident(
-      0,
-      freshSource.source,
-      renderer.resourceGeneration
-    );
-    if (fresh === null) throw new Error("fresh resident handle is missing");
-    renderer.draw(fresh);
-    expect(oldSource.closeCalls()).toBe(1);
-    expect(freshSource.closeCalls()).toBe(1);
-    expect(replacement.draws).toEqual([["resident", 0]]);
-  });
-
-  it("refuses restoration while an uncancellable old frame copy owns staging", async () => {
-    const callbacks: Array<() => void> = [];
-    const gate = deferred<void>();
-    const initial = new FakeBackend();
-    const renderer = new FrameRenderer(initial, LAYOUT, {
-      contextLossPolicy: "restorable",
-      copyTimeoutMs: 10,
-      timers: {
-        setTimeout(callback) {
-          callbacks.push(callback);
-          return callbacks.length;
-        },
-        clearTimeout() {}
-      }
-    });
-    const oldSource = borrowedFrame(9, { copyGate: gate.promise });
-    const oldUpload = renderer.uploadResident(0, oldSource.source);
-    await Promise.resolve();
-    callbacks[0]!();
-    await expect(oldUpload).rejects.toBeInstanceOf(RendererUploadTimeoutError);
-
-    const premature = new FakeBackend();
-    expect(() => renderer.restore(premature)).toThrow(
-      "decoded frame copy is still settling"
-    );
-    expect(premature.disposeCalls).toBe(1);
-
-    gate.resolve(undefined);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    const replacement = new FakeBackend();
-    renderer.restore(replacement);
-    await renderer.uploadResident(0, borrowedFrame(4).source);
-    expect(replacement.uploads[0]?.pixels[0]).toBe(4);
-    expect(oldSource.closeCalls()).toBe(1);
-  });
-
-  it("does not resurrect when replacement allocation disposes the renderer", () => {
-    const renderer = new FrameRenderer(new FakeBackend(), LAYOUT, {
-      contextLossPolicy: "restorable"
-    });
-    renderer.markContextLost();
-    const replacement = new FakeBackend();
-    replacement.allocateAction = () => renderer.dispose();
-
-    expect(() => renderer.restore(replacement)).toThrowError(
-      expect.objectContaining({ name: "RendererDisposedError" })
-    );
-    expect(replacement.disposeCalls).toBe(1);
-    expect(renderer.snapshot()).toMatchObject({
-      state: "disposed",
-      stagingBytes: 0,
-      allocatedTextureBytes: 0
-    });
-  });
-
-  it("does not resurrect when replacement limit inspection disposes the renderer", () => {
-    const renderer = new FrameRenderer(new FakeBackend(), LAYOUT, {
-      contextLossPolicy: "restorable"
-    });
-    renderer.markContextLost();
-    let disposals = 0;
-    const replacement = {
-      get limits() {
-        renderer.dispose();
-        return { maxTextureSize: 8_192, maxArrayTextureLayers: 2_048 };
-      },
-      allocate() {},
-      upload() {},
-      draw() {},
-      dispose() {
-        disposals += 1;
-      }
-    } satisfies FrameRendererBackend;
-
-    expect(() => renderer.restore(replacement)).toThrowError(
-      expect.objectContaining({ name: "RendererDisposedError" })
-    );
-    expect(disposals).toBe(1);
-    expect(renderer.snapshot()).toMatchObject({
-      state: "disposed",
-      stagingBytes: 0
-    });
-  });
-
-  it("releases an invalid replacement backend during restore validation", () => {
-    const renderer = new FrameRenderer(new FakeBackend(), LAYOUT, {
-      contextLossPolicy: "restorable"
-    });
-    renderer.markContextLost();
-    const replacement = new FakeBackend();
-    Object.defineProperty(replacement, "limits", {
-      value: { maxTextureSize: 8_192, maxArrayTextureLayers: 1 }
-    });
-
-    expect(() => renderer.restore(replacement)).toThrow();
-    expect(replacement.disposeCalls).toBe(1);
-    expect(renderer.snapshot().state).toBe("error");
-  });
-
   it("releases renderer staging while an aborted native copy settles late", async () => {
     const renderer = new FrameRenderer(new FakeBackend(), LAYOUT);
     const source = borrowedFrame(8, {
@@ -587,13 +456,11 @@ class FakeBackend implements FrameRendererBackend {
   public uploadFailure: Error | null = null;
   public drawFailure: Error | null = null;
   public readFailure: Error | null = null;
-  public allocateAction: (() => void) | null = null;
   public uploadAction: (() => void) | null = null;
   public drawAction: (() => void) | null = null;
   public readAction: (() => void) | null = null;
 
   public allocate(layout: FrameTextureLayout, streamingSlots: number): void {
-    this.allocateAction?.();
     this.allocations.push({ layout, streamingSlots });
   }
 
@@ -727,20 +594,5 @@ function normalizeCopyOptions(options: VideoFrameCopyToOptions | undefined): unk
       : { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     format: options.format,
     layout: options.layout?.map(({ offset, stride }) => ({ offset, stride }))
-  };
-}
-
-function deferred<T>(): {
-  readonly promise: Promise<T>;
-  resolve(value: T): void;
-} {
-  let resolve!: (value: T) => void;
-  return {
-    promise: new Promise<T>((done) => {
-      resolve = done;
-    }),
-    resolve(value) {
-      resolve(value);
-    }
   };
 }

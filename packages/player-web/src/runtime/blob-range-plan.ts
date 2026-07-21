@@ -1,7 +1,8 @@
-import type {
-  ByteRange,
-  ParsedFrontIndex,
-  UnitBlobRange
+import {
+  SHA256_HEX_PATTERN,
+  type ByteRange,
+  type ParsedFrontIndex,
+  type UnitBlobRange
 } from "@pixel-point/aval-format";
 
 export const DEFAULT_BLOB_RANGE_TARGET_BYTES = 4 * 1024 * 1024;
@@ -295,7 +296,7 @@ function requireRange(range: ByteRange, limit: number, label: string): void {
 }
 
 function requireDigest(value: string): void {
-  if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)) {
+  if (typeof value !== "string" || !SHA256_HEX_PATTERN.test(value)) {
     throw new TypeError("blob digest must be lowercase SHA-256 hexadecimal");
   }
 }

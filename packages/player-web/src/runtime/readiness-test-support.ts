@@ -176,7 +176,7 @@ function endpoint(
 function manifestFixture(): Readonly<CompiledManifest> {
   const rendition = "opaque";
   return Object.freeze({
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "readiness-evaluator-tests",
     codec: "h264",
     bitstream: "annex-b",
@@ -191,7 +191,7 @@ function manifestFixture(): Readonly<CompiledManifest> {
     frameRate: Object.freeze({ numerator: 30, denominator: 1 }),
     renditions: Object.freeze([Object.freeze({
       id: rendition,
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       bitDepth: 8,
       codedWidth: 64,
       codedHeight: 64,

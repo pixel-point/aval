@@ -30,13 +30,21 @@ defineAvalElement();
 
 ```html
 <aval-player id="orbit" width="96" height="96">
-  <source
-    src="/assets/orbit.h264.avl"
-    type='application/vnd.aval; codecs="avc1.42E01E"'
-  >
+  <source src="/assets/orbit/av1.avl"
+    type='application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"'>
+  <source src="/assets/orbit/vp9.avl"
+    type='application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"'>
+  <source src="/assets/orbit/h265.avl"
+    type='application/vnd.aval; codecs="hvc1.1.6.L30.90"'>
+  <source src="/assets/orbit/h264.avl"
+    type='application/vnd.aval; codecs="avc1.42E00B"'>
 </aval-player>
 <img id="orbit-unavailable" src="/assets/orbit.png" alt="" width="96" height="96" hidden>
 ```
+
+Copy the exact ordered `sourceMarkup` from the compiler's `build.json`; the
+codec level terms above are one concrete generated bundle. The element attempts
+AV1, VP9, HEVC, and finally H.264 in markup order.
 
 Connection automatically prepares metadata. When animation is supported and
 visible, the first revealed internal pixels are a decoded frame and a direct

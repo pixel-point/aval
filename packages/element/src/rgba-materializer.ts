@@ -4,6 +4,11 @@ import {
   canvas2dContext,
   configureCanvas2dContext
 } from "./canvas2d-context.js";
+import {
+  equivalentRgbaPixels,
+  informativeRgbaPixels,
+  resemblesZeroChromaGreen
+} from "./rgba-qualification.js";
 
 export interface RgbaMaterializerOptions {
   readonly copyTimeoutMs?: number;
@@ -20,6 +25,7 @@ export interface MaterializedRgbaFrame {
 }
 export interface RgbaFrameReference {
   readonly frame: VideoFrame;
+  readonly newDecoderRun: boolean;
   readonly rgba: () => Promise<Readonly<MaterializedRgbaFrame>>;
 }
 export interface MaterializedRgbaFrameReference {
@@ -62,6 +68,9 @@ interface ActiveLease {
 }
 
 const COPY_TIMEOUT = 5_000;
+const GREEN_RECHECK_INTERVAL = 8;
+
+type CopyMode = "copy" | "readback";
 
 /** One bounded, lazy CPU frame copy shared by all consumers of an operation. */
 export class RgbaMaterializer {
@@ -78,6 +87,8 @@ export class RgbaMaterializer {
   #sourceCopiesInFlight = 0;
   #epoch: object = Object.freeze({});
   #activeLease: ActiveLease | null = null;
+  #copyMode: CopyMode = "copy";
+  #consecutiveGreenCopies = 0;
   #disposed = false;
 
   public constructor(
@@ -102,7 +113,11 @@ export class RgbaMaterializer {
     this.#staging = new Uint8Array(this.#storageBytes);
   }
 
-  public create(frame: VideoFrame, rect: DOMRectReadOnly): Readonly<RgbaMaterialization> {
+  public create(
+    frame: VideoFrame,
+    rect: DOMRectReadOnly,
+    newDecoderRun: boolean
+  ): Readonly<RgbaMaterialization> {
     let result: Promise<Readonly<MaterializedRgbaFrame>> | null = null;
     let released = false;
     const epoch = this.#epoch;
@@ -112,13 +127,20 @@ export class RgbaMaterializer {
     const unavailable = (): boolean => this.#disposed || released || this.#epoch !== epoch;
     return Object.freeze({
       frame,
+      newDecoderRun,
       rgba: () => {
         if (unavailable()) return Promise.reject(aborted());
         if (result === null) {
           if (this.#activeLease !== null) result = Promise.reject(overlap());
           else {
             this.#activeLease = lease;
-            result = this.#materialize(frame, rect, unavailable, lease)
+            result = this.#materialize(
+              frame,
+              rect,
+              newDecoderRun,
+              unavailable,
+              lease
+            )
               .finally(() => this.#settleLeaseWork(lease));
           }
         }
@@ -156,6 +178,7 @@ export class RgbaMaterializer {
     if (lease !== null) { lease.releaseRequested = true; this.#retireLease(lease); }
     const surface = this.#readback;
     this.#readback = null;
+    this.#consecutiveGreenCopies = 0;
     if (surface === null) return;
     try { surface.canvas.width = 0; surface.canvas.height = 0; }
     catch { /* Bounded scratch cleanup is best-effort. */ }
@@ -169,23 +192,74 @@ export class RgbaMaterializer {
   }
 
   async #materialize(
-    frame: VideoFrame, rect: DOMRectReadOnly, released: () => boolean,
+    frame: VideoFrame, rect: DOMRectReadOnly, newDecoderRun: boolean,
+    released: () => boolean,
     lease: ActiveLease
   ): Promise<Readonly<MaterializedRgbaFrame>> {
+    if (this.#copyMode === "readback") {
+      try {
+        return this.#readPixels(frame, released);
+      } catch (reason) {
+        if (this.#disposed || released()) throw aborted();
+        throw new MaterializerFailureError("readback", reason);
+      }
+    }
+    if (newDecoderRun && this.#copyMode === "copy") {
+      this.#consecutiveGreenCopies = 0;
+    }
+    let copied: Readonly<MaterializedRgbaFrame>;
     try {
-      return await this.#copy(frame, rect, released, lease);
+      copied = await this.#copy(frame, rect, released, lease);
     } catch (reason) {
       if (this.#disposed || released()) throw aborted();
       if (!isUnsupportedRgbaCopy(reason)) {
         throw new MaterializerFailureError("copy", reason);
       }
+      try {
+        const readback = this.#readPixels(frame, released);
+        this.#copyMode = "readback";
+        return readback;
+      } catch (readbackReason) {
+        if (this.#disposed || released()) throw aborted();
+        throw new MaterializerFailureError("readback", readbackReason);
+      }
     }
+    const suspicious = resemblesZeroChromaGreen(copied.pixels);
+    if (!suspicious) {
+      this.#consecutiveGreenCopies = 0;
+      return copied;
+    }
+    this.#consecutiveGreenCopies += 1;
+    if (
+      this.#consecutiveGreenCopies !== 1 &&
+      this.#consecutiveGreenCopies % GREEN_RECHECK_INTERVAL !== 0
+    ) return copied;
+    return this.#qualifyCopy(frame, copied, released);
+  }
+
+  #qualifyCopy(
+    frame: VideoFrame,
+    copied: Readonly<MaterializedRgbaFrame>,
+    released: () => boolean
+  ): Readonly<MaterializedRgbaFrame> {
+    let reference: Uint8ClampedArray;
     try {
-      return this.#readPixels(frame, released);
+      reference = this.#readbackPixels(frame, released);
     } catch (reason) {
       if (this.#disposed || released()) throw aborted();
       throw new MaterializerFailureError("readback", reason);
     }
+    const referenceInformative = informativeRgbaPixels(reference);
+    const equivalent = equivalentRgbaPixels(copied.pixels, reference);
+    if (
+      referenceInformative &&
+      !resemblesZeroChromaGreen(reference) && !equivalent
+    ) {
+      this.#staging.set(reference);
+      this.#copyMode = "readback";
+      return this.#result(this.#staging);
+    }
+    return copied;
   }
 
   async #copy(
@@ -232,6 +306,14 @@ export class RgbaMaterializer {
   #readPixels(
     frame: VideoFrame, released: () => boolean
   ): Readonly<MaterializedRgbaFrame> {
+    this.#staging.set(this.#readbackPixels(frame, released));
+    return this.#result(this.#staging);
+  }
+
+  #readbackPixels(
+    frame: VideoFrame,
+    released: () => boolean
+  ): Uint8ClampedArray {
     if (this.#disposed || released() ||
       this.#staging.byteLength !== this.#storageBytes) {
       throw aborted();
@@ -250,8 +332,7 @@ export class RgbaMaterializer {
       image.width !== this.#width || image.height !== this.#height ||
       image.data.byteLength !== this.#storageBytes
     ) throw new Error("Canvas2D readback storage is invalid");
-    this.#staging.set(image.data);
-    return this.#result(this.#staging);
+    return image.data;
   }
 
   #readbackSurface(): ReadbackSurface {
@@ -301,7 +382,7 @@ export class RgbaMaterializer {
 
 export function defaultCanvasFactory(output: HTMLCanvasElement):
   (width: number, height: number) => HTMLCanvasElement {
-  return (width, height) => {
+  return () => {
     const document = output.ownerDocument ?? globalThis.document;
     if (document === undefined)
       throw new Error("Canvas2D scratch surface factory is unavailable");

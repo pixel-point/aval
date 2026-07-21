@@ -34,8 +34,8 @@ describe("compile bundle report", () => {
           path: "h264.avl",
           bytes: 222,
           sha256: "11".repeat(32),
-          codecString: "avc1.640028",
-          type: 'application/vnd.aval; codecs="avc1.640028"',
+          codecString: "avc1.42E028",
+          type: 'application/vnd.aval; codecs="avc1.42E028"',
           integrity: oneIntegrity
         }
       ],
@@ -63,7 +63,7 @@ describe("compile bundle report", () => {
       warnings: ["AV1 uses the requested ten-bit pixel pipeline."],
       sourceMarkup: [
         `<source src="av1.avl" type='application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"' integrity="${zeroIntegrity}">`,
-        `<source src="h264.avl" type='application/vnd.aval; codecs="avc1.640028"' integrity="${oneIntegrity}">`
+        `<source src="h264.avl" type='application/vnd.aval; codecs="avc1.42E028"' integrity="${oneIntegrity}">`
       ].join("\n")
     });
     expect(built.bytes).toEqual(serializeCanonicalJson(built.report));
@@ -267,7 +267,7 @@ function reportInput(): {
         codec: "h264",
         bytes: 222,
         sha256: "11".repeat(32),
-        codecString: "avc1.640028"
+        codecString: "avc1.42E028"
       }
     ],
     encodings: [

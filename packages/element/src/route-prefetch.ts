@@ -1,4 +1,7 @@
-import type { Manifest, Unit } from "./asset.js";
+import type {
+  CompiledManifest as Manifest,
+  Unit
+} from "@pixel-point/aval-format";
 import type { MotionGraphSnapshot } from "@pixel-point/aval-graph";
 import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 

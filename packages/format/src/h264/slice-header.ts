@@ -8,16 +8,14 @@ import type { ParsedPps, ParsedSps } from "./parameter-sets.js";
 
 export interface ParsedSliceHeader {
   readonly firstMacroblock: number;
-  readonly sliceType: "I" | "P" | "B";
+  readonly sliceType: "I" | "P";
   readonly ppsId: number;
   readonly frameNum: number;
   readonly referenceIdc: number;
   readonly idr: boolean;
   readonly idrPicId: number | undefined;
   readonly picOrderCntLsb: number | undefined;
-  readonly deltaPicOrderCntBottom: number;
   readonly deltaPicOrderCnt0: number;
-  readonly deltaPicOrderCnt1: number;
   readonly sliceQpDelta: number;
 }
 export function parseSliceHeader(
@@ -35,18 +33,12 @@ export function parseSliceHeader(
   const rawSliceType = reader.readUnsignedExpGolomb("slice_type", 9);
   const normalizedSliceType = rawSliceType % 5;
   requireH264(
-    normalizedSliceType === 0 ||
-      normalizedSliceType === 1 ||
-      normalizedSliceType === 2,
+    normalizedSliceType === 0 || normalizedSliceType === 2,
     path,
-    "only I, P, and B slices are permitted (SP/SI are forbidden)",
+    "Constrained Baseline permits only I and P slices",
     nal.offset + 1 + Math.floor(reader.bitOffset / 8)
   );
-  const sliceType = normalizedSliceType === 2
-    ? "I"
-    : normalizedSliceType === 1
-      ? "B"
-      : "P";
+  const sliceType = normalizedSliceType === 2 ? "I" : "P";
   const idr = nal.type === H264_NAL_TYPE_IDR;
   requireH264(
     !idr || sliceType === "I",
@@ -68,59 +60,33 @@ export function parseSliceHeader(
     : undefined;
 
   let picOrderCntLsb: number | undefined;
-  let deltaPicOrderCntBottom = 0;
   let deltaPicOrderCnt0 = 0;
-  let deltaPicOrderCnt1 = 0;
   if (sps.picOrderCount.type === 0) {
     picOrderCntLsb = reader.readBits(
       sps.picOrderCount.lsbBits,
       "pic_order_cnt_lsb"
     );
-    if (pps.bottomFieldPicOrderInFramePresent) {
-      deltaPicOrderCntBottom = reader.readSignedExpGolomb(
-        "delta_pic_order_cnt_bottom"
-      );
-    }
   } else if (
     sps.picOrderCount.type === 1 &&
     !sps.picOrderCount.deltaPicOrderAlwaysZero
   ) {
     deltaPicOrderCnt0 = reader.readSignedExpGolomb("delta_pic_order_cnt[0]");
-    if (pps.bottomFieldPicOrderInFramePresent) {
-      deltaPicOrderCnt1 = reader.readSignedExpGolomb("delta_pic_order_cnt[1]");
-    }
   }
 
-  let numRefIdxL0ActiveMinus1 = pps.numRefIdxL0DefaultActiveMinus1;
-  let numRefIdxL1ActiveMinus1 = pps.numRefIdxL1DefaultActiveMinus1;
-  if (sliceType === "B") {
-    reader.readBit("direct_spatial_mv_pred_flag");
-  }
-  if (sliceType === "P" || sliceType === "B") {
+  if (sliceType === "P") {
     if (reader.readBit("num_ref_idx_active_override_flag")) {
-      numRefIdxL0ActiveMinus1 = reader.readUnsignedExpGolomb(
+      const numRefIdxL0ActiveMinus1 = reader.readUnsignedExpGolomb(
         "num_ref_idx_l0_active_minus1",
         31
       );
-      if (sliceType === "B") {
-        numRefIdxL1ActiveMinus1 = reader.readUnsignedExpGolomb(
-          "num_ref_idx_l1_active_minus1",
-          31
-        );
-      }
+      requireH264(
+        numRefIdxL0ActiveMinus1 === 0,
+        path,
+        "Constrained Baseline slice reference count must equal one",
+        nal.offset + 1 + Math.floor(reader.bitOffset / 8)
+      );
     }
-    parseReferenceListModifications(reader, sliceType);
-  }
-
-  if (
-    (pps.weightedPrediction && sliceType === "P") ||
-    (pps.weightedBipredIdc === 1 && sliceType === "B")
-  ) {
-    parsePredictionWeights(
-      reader,
-      numRefIdxL0ActiveMinus1,
-      sliceType === "B" ? numRefIdxL1ActiveMinus1 : undefined
-    );
+    parseReferenceListModifications(reader, path, nal.offset + 1);
   }
 
   if (idr) {
@@ -135,10 +101,6 @@ export function parseSliceHeader(
     parseReferencePictureMarking(reader, path, nal.offset + 1);
   }
 
-  if (pps.entropyCoding && sliceType !== "I") {
-    reader.readUnsignedExpGolomb("cabac_init_idc", 2);
-  }
-
   const sliceQpDelta = reader.readSignedExpGolomb("slice_qp_delta", -87, 77);
   const finalQp = 26 + pps.picInitQpMinus26 + sliceQpDelta;
   requireH264(
@@ -147,15 +109,13 @@ export function parseSliceHeader(
     "final slice QP is outside the 8-bit H264 range",
     nal.offset + 1 + Math.floor(reader.bitOffset / 8)
   );
-  if (pps.deblockingFilterControlPresent) {
-    const disableDeblockingFilterIdc = reader.readUnsignedExpGolomb(
-      "disable_deblocking_filter_idc",
-      2
-    );
-    if (disableDeblockingFilterIdc !== 1) {
-      reader.readSignedExpGolomb("slice_alpha_c0_offset_div2", -6, 6);
-      reader.readSignedExpGolomb("slice_beta_offset_div2", -6, 6);
-    }
+  const disableDeblockingFilterIdc = reader.readUnsignedExpGolomb(
+    "disable_deblocking_filter_idc",
+    2
+  );
+  if (disableDeblockingFilterIdc !== 1) {
+    reader.readSignedExpGolomb("slice_alpha_c0_offset_div2", -6, 6);
+    reader.readSignedExpGolomb("slice_beta_offset_div2", -6, 6);
   }
   requireH264(
     reader.bitsRemaining > 0,
@@ -173,9 +133,7 @@ export function parseSliceHeader(
     idr,
     idrPicId,
     picOrderCntLsb,
-    deltaPicOrderCntBottom,
     deltaPicOrderCnt0,
-    deltaPicOrderCnt1,
     sliceQpDelta
   });
 }
@@ -213,79 +171,36 @@ function parseReferencePictureMarking(
 
 function parseReferenceListModifications(
   reader: RbspBitReader,
-  sliceType: "P" | "B"
+  path: string,
+  absoluteOffset: number
 ): void {
-  parseReferenceList(reader, "l0");
-  if (sliceType === "B") {
-    parseReferenceList(reader, "l1");
-  }
-}
-
-function parseReferenceList(
-  reader: RbspBitReader,
-  list: "l0" | "l1"
-): void {
-  if (!reader.readBit(`ref_pic_list_modification_flag_${list}`)) return;
+  if (!reader.readBit("ref_pic_list_modification_flag_l0")) return;
   for (let index = 0; index < 64; index += 1) {
     const operation = reader.readUnsignedExpGolomb(
-      `modification_of_pic_nums_idc_${list}[${String(index)}]`,
+      `modification_of_pic_nums_idc_l0[${String(index)}]`,
       3
     );
     if (operation === 3) return;
     if (operation === 0 || operation === 1) {
       reader.readUnsignedExpGolomb(
-        `abs_diff_pic_num_minus1_${list}[${String(index)}]`,
+        `abs_diff_pic_num_minus1_l0[${String(index)}]`,
         65_535
       );
     } else {
       requireH264(
         false,
-        "slice",
-        "long-term reference-list entries are forbidden in independent units"
+        path,
+        "long-term reference-list entries are forbidden in independent units",
+        absoluteOffset + Math.floor(reader.bitOffset / 8)
       );
     }
   }
-  requireH264(false, "slice", "reference-list modification exceeds the syntax budget");
-}
-
-function parsePredictionWeights(
-  reader: RbspBitReader,
-  list0Minus1: number,
-  list1Minus1: number | undefined
-): void {
-  reader.readUnsignedExpGolomb("luma_log2_weight_denom", 7);
-  reader.readUnsignedExpGolomb("chroma_log2_weight_denom", 7);
-  parsePredictionWeightList(reader, "l0", list0Minus1 + 1);
-  if (list1Minus1 !== undefined) {
-    parsePredictionWeightList(reader, "l1", list1Minus1 + 1);
-  }
-}
-
-function parsePredictionWeightList(
-  reader: RbspBitReader,
-  list: "l0" | "l1",
-  count: number
-): void {
-  for (let index = 0; index < count; index += 1) {
-    if (reader.readBit(`luma_weight_${list}_flag[${String(index)}]`)) {
-      reader.readSignedExpGolomb(`luma_weight_${list}[${String(index)}]`, -128, 127);
-      reader.readSignedExpGolomb(`luma_offset_${list}[${String(index)}]`, -128, 127);
-    }
-    if (reader.readBit(`chroma_weight_${list}_flag[${String(index)}]`)) {
-      for (let component = 0; component < 2; component += 1) {
-        reader.readSignedExpGolomb(
-          `chroma_weight_${list}[${String(index)}][${String(component)}]`,
-          -128,
-          127
-        );
-        reader.readSignedExpGolomb(
-          `chroma_offset_${list}[${String(index)}][${String(component)}]`,
-          -128,
-          127
-        );
-      }
-    }
-  }
+  requireH264(
+    false,
+    path,
+    "reference-list modification exceeds the syntax budget",
+    absoluteOffset + Math.floor(reader.bitOffset / 8)
+  );
 }
 
 export function samePrimaryPicture(
@@ -300,8 +215,6 @@ export function samePrimaryPicture(
     left.idr === right.idr &&
     left.idrPicId === right.idrPicId &&
     left.picOrderCntLsb === right.picOrderCntLsb &&
-    left.deltaPicOrderCntBottom === right.deltaPicOrderCntBottom &&
-    left.deltaPicOrderCnt0 === right.deltaPicOrderCnt0 &&
-    left.deltaPicOrderCnt1 === right.deltaPicOrderCnt1
+    left.deltaPicOrderCnt0 === right.deltaPicOrderCnt0
   );
 }

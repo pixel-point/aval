@@ -164,10 +164,7 @@ export {
   validatePositiveSafeInteger
 } from "./runtime/checked-runtime-bytes.js";
 export {
-  MAX_INTERACTION_CACHE_LAYERS,
-  MAX_REVERSIBLE_ENDPOINT_PAIR_BYTES,
   createInteractionCachePlan,
-  createInteractionCachePlanFromSemanticSequences,
   type InteractionCacheCutRunway,
   type InteractionCacheDeviceLimits,
   type InteractionCacheEndpointRunway,
@@ -175,11 +172,7 @@ export {
   type InteractionCachePlan,
   type InteractionCachePlanInput,
   type InteractionCacheReversibleClip,
-  type InteractionCacheSemanticInput,
   type InteractionCacheSequence,
-  type SemanticCutRunwayInput,
-  type SemanticEndpointRunwayInput,
-  type SemanticReversibleClipInput
 } from "./runtime/interaction-cache-plan.js";
 export {
   MAX_RESOURCE_RING_CAPACITY,
@@ -519,10 +512,8 @@ export {
   type RuntimeSessionPendingWait
 } from "./runtime/runtime-session-lifecycle.js";
 export {
-  MAX_PRESENTATION_BACKING_DIMENSION,
   PRESENTATION_FIT_MODES,
   computePresentationGeometry,
-  type PresentationClampReason,
   type PresentationFit,
   type PresentationGeometry,
   type PresentationGeometryInput,

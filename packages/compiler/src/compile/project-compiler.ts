@@ -181,7 +181,6 @@ export async function buildNormalizedProjectBundleArtifact(
     const continuity = await validateProjectMedia({
       project,
       sources,
-      ffmpeg: provenance.executable,
       ...(options.signal === undefined ? {} : { signal: options.signal })
     });
     const assets: CompileBundleAssetArtifact[] = [];

@@ -30,6 +30,8 @@ const LEVELS: readonly Vp9LevelLimit[] = Object.freeze([
   { level: "61", maximumLumaSampleRate: 2_353_004_544, maximumLumaPictureSize: 35_651_584, maximumBitrate: 240_000_000, maximumDimension: 16_832 },
   { level: "62", maximumLumaSampleRate: 4_706_009_088, maximumLumaPictureSize: 35_651_584, maximumBitrate: 480_000_000, maximumDimension: 16_832 }
 ]);
+const VP9_CODEC_PATTERN =
+  /^vp09\.00\.(10|11|20|21|30|31|40|41|50|51|52|60|61|62)\.08\.01\.01\.01\.01\.00$/u;
 
 export interface DeriveVp9CodecInput {
   readonly width: number;
@@ -60,6 +62,11 @@ export function deriveVp9Codec(input: Readonly<DeriveVp9CodecInput>): Vp9Codec {
 }
 
 export function isVp9Codec(value: unknown): value is Vp9Codec {
-  return typeof value === "string" &&
-    /^vp09\.00\.(?:10|11|20|21|30|31|40|41|50|51|52|60|61|62)\.08\.01\.01\.01\.01\.00$/u.test(value);
+  return parseVp9Level(value) !== undefined;
+}
+
+/** Read the level through the canonical VP9 codec grammar. */
+export function parseVp9Level(value: unknown): Vp9Level | undefined {
+  if (typeof value !== "string") return undefined;
+  return VP9_CODEC_PATTERN.exec(value)?.[1] as Vp9Level | undefined;
 }

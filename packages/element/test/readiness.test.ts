@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type {
-  Blob,
-  Manifest
-} from "../src/asset.js";
+  CompiledManifest as Manifest,
+  UnitBlobRange as Blob
+} from "@pixel-point/aval-format";
 import { ELEMENT_DECODER_CAPACITY } from "../src/decoder-capacity.js";
 import { createReadinessPlan } from "../src/readiness.js";
 
@@ -70,7 +70,7 @@ function fixture(): Manifest {
   const frameBytes = 8 * 8 * 4;
   const persistent = 21 * frameBytes;
   return {
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "test",
     codec: "h264",
     bitstream: "annex-b",
@@ -80,7 +80,7 @@ function fixture(): Manifest {
     },
     frameRate: { numerator: 30, denominator: 1 },
     renditions: [{
-      id: "r", codec: "avc1.64000A", bitDepth: 8,
+      id: "r", codec: "avc1.42E00A", bitDepth: 8,
       codedWidth: 8, codedHeight: 8,
       alphaLayout: { type: "opaque", colorRect: [0, 0, 8, 8] },
       bitrate: { average: 1_000, peak: 2_000 }

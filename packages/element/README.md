@@ -9,6 +9,17 @@ cannot run. Applications own any alternate content.
 npm install @pixel-point/aval-element@1.0.0
 ```
 
+## Required consumer error boundary
+
+Every production integration must handle unsupported browsers and terminal
+playback failure. `prepare()` rejects with `AvalPlaybackError`, and the element
+raises one fatal `error` event whose `failure.code` may be
+`unsupported-profile`, `unsupported-browser`, or another bounded failure code.
+AVAL never creates or activates fallback DOM; the application decides whether
+to reveal an ordinary video, image, text, another renderer, or nothing. Attach
+the direct listener before explicit registration and branch on `failure.code`,
+not the message.
+
 Register explicitly or use the opt-in automatic entry:
 
 ```js

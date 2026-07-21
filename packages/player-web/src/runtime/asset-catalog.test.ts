@@ -34,17 +34,17 @@ describe("runtime asset catalog", () => {
     expect(catalog.ownedByteLength).toBe(0);
   });
 
-  it("retains the exact wire-1.0 video rendition contract", () => {
+  it("retains the exact wire-1.1 video rendition contract", () => {
     const catalog = new RuntimeAssetCatalog(createRuntimeTestAsset());
 
     expect(catalog.manifest).toMatchObject({
-      formatVersion: "1.0",
+      formatVersion: "1.1",
       codec: "h264",
       bitstream: "annex-b",
       layout: "opaque"
     });
     expect(catalog.renditions.require("opaque")).toMatchObject({
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       bitDepth: 8,
       codedWidth: 64,
       codedHeight: 64

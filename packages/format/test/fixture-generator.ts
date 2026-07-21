@@ -81,8 +81,8 @@ function writerInputFromManifest(source: CompiledManifest): CanonicalAssetInput 
 
 function videoLoopInput(): CanonicalAssetInput {
   const manifest: CompiledManifestInput = {
-    formatVersion: "1.0",
-    generator: "aval-v1-video-loop",
+    formatVersion: "1.1",
+    generator: "aval-v1.1-video-loop",
     codec: "h264",
     bitstream: "annex-b",
     layout: "opaque",
@@ -96,7 +96,7 @@ function videoLoopInput(): CanonicalAssetInput {
     frameRate: { numerator: 30, denominator: 1 },
     renditions: [{
       id: "video",
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       bitDepth: 8,
       codedWidth: 16,
       codedHeight: 16,

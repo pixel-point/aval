@@ -18,8 +18,8 @@ export const FAMILIES = Object.freeze([
 ] as const);
 
 export const CODECS = Object.freeze({
-  av1: "av01.0.05M.08",
-  vp9: "vp09.00.10.08",
+  av1: "av01.0.05M.08.0.110.01.01.01.0",
+  vp9: "vp09.00.10.08.01.01.01.01.00",
   h265: "hvc1.1.6.L93.B0",
   h264: "avc1.42E020"
 } satisfies Readonly<Record<CodecFamily, string>>);
@@ -134,11 +134,13 @@ export class SyntheticAsset {
       offset: 1_000,
       length: frameCount,
       chunkStart: 0,
-      chunkCount: frameCount
+      chunkCount: frameCount,
+      frameCount,
+      sha256: "0".repeat(64)
     }];
     this.records = Array.from({ length: frameCount }, (_, index) => ({
-      offset: 1_000 + index,
-      length: 1,
+      byteOffset: 1_000 + index,
+      byteLength: 1,
       presentationTimestamp: index,
       duration: 1,
       randomAccess: index === 0,

@@ -217,7 +217,6 @@ export class IntegratedAnimatedPreparation {
         this.#releaseFailedResidency(candidate.rendition.id);
         return await this.#finishRejected(
           purpose,
-          reports,
           failures,
           control.controller.signal
         );
@@ -238,7 +237,6 @@ export class IntegratedAnimatedPreparation {
         this.#releaseFailedResidency(candidate.rendition.id);
         return await this.#finishRejected(
           purpose,
-          reports,
           failures,
           control.controller.signal
         );
@@ -403,7 +401,6 @@ export class IntegratedAnimatedPreparation {
         }
         return await this.#finishRejected(
           purpose,
-          reports,
           failures,
           control.controller.signal
         );
@@ -440,7 +437,6 @@ export class IntegratedAnimatedPreparation {
 
   async #finishRejected(
     purpose: "initial" | "reentry",
-    reports: readonly Readonly<RuntimeCandidateReport>[],
     failures: readonly Readonly<RuntimeFailure>[],
     signal: AbortSignal
   ): Promise<Readonly<RuntimeReadinessResult>> {

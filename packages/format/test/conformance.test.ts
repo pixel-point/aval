@@ -19,7 +19,7 @@ function expectFormatError(action: () => unknown): FormatError {
   throw new Error("expected a FormatError");
 }
 
-describe("wire 1.0 conformance", () => {
+describe("wire 1.1 conformance", () => {
   it("generates deterministic, complete single-codec assets", () => {
     const first = generateConformanceFixtures();
     const second = generateConformanceFixtures();
@@ -29,7 +29,7 @@ describe("wire 1.0 conformance", () => {
       expect(first[index]!.sha256).toBe(second[index]!.sha256);
       const layout = validateCompleteAsset({ bytes: first[index]!.bytes });
       expect(layout.fileRange.length).toBe(first[index]!.bytes.length);
-      expect(layout.frontIndex.manifest.formatVersion).toBe("1.0");
+      expect(layout.frontIndex.manifest.formatVersion).toBe("1.1");
       expect(new Set(layout.frontIndex.manifest.renditions.map(({ codec }) => codec.slice(0, 4))).size)
         .toBe(1);
     }

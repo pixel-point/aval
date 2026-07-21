@@ -74,7 +74,7 @@ function validLedger(
 describe("decoder throughput raw ledger", () => {
   it.each([
     ["h264", "avc1.42E00B", 8],
-    ["h264", "avc1.64000A", 8],
+    ["h264", "avc1.42E00A", 8],
     ["h265", "hvc1.1.6.L30.90", 8],
     ["vp9", "vp09.00.10.08.01.01.01.01.00", 8],
     ["av1", "av01.0.00M.10.0.110.01.01.01.0", 10]

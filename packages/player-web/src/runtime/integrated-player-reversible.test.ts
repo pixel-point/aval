@@ -2,9 +2,10 @@ import {
   MotionGraphEngine,
   type GraphPresentation
 } from "@pixel-point/aval-graph";
+import type { CompiledManifest, Unit } from "@pixel-point/aval-format";
 import { describe, expect, it } from "vitest";
 
-import { createInteractionCachePlanFromSemanticSequences } from "./interaction-cache-plan.js";
+import { createInteractionCachePlan } from "./interaction-cache-plan.js";
 import {
   ReversiblePresentationCoordinator,
   ReversiblePresentationInvariantError,
@@ -272,25 +273,9 @@ function createFixture(
 ) {
   const renderer = new FakeRenderer();
   let decoderCalls = 0;
-  const plan = createInteractionCachePlanFromSemanticSequences({
+  const plan = createInteractionCachePlan({
+    manifest: reversibleManifest(endpoints),
     rendition: "opaque",
-    width: 4,
-    height: 4,
-    reversibleClips: [{
-      unit: "rev",
-      sourceEndpoint: {
-        state: endpoints.source,
-        port: "default",
-        frames: frames("source-body", 6)
-      },
-      clip: frames("rev", 6),
-      targetEndpoint: {
-        state: endpoints.target,
-        port: "default",
-        frames: frames("target-body", 6)
-      }
-    }],
-    cutRunways: [],
     deviceLimits: { maxTextureSize: 4_096, maxArrayTextureLayers: 128 }
   });
   return {
@@ -301,12 +286,127 @@ function createFixture(
   };
 }
 
-function frames(unit: string, count: number) {
-  return Array.from({ length: count }, (_, localFrame) => ({
+function reversibleManifest(
+  endpoints: Readonly<{ source: string; target: string }>
+): CompiledManifest {
+  const sourceBody = `${endpoints.source}-body`;
+  const targetBody = `${endpoints.target}-body`;
+  const units: readonly Unit[] = [
+    body(sourceBody, 0),
+    body(targetBody, 6),
+    {
+      id: "rev",
+      kind: "reversible",
+      frameCount: 6,
+      residency: {
+        endpoints: [
+          { state: endpoints.source, port: "default", frames: 6 },
+          { state: endpoints.target, port: "default", frames: 6 }
+        ]
+      },
+      chunks: [chunk(12, 6)]
+    }
+  ];
+  return {
+    formatVersion: "1.1",
+    generator: "integrated-reversible-tests",
+    codec: "h264",
+    bitstream: "annex-b",
+    layout: "opaque",
+    canvas: {
+      width: 4,
+      height: 4,
+      fit: "contain",
+      pixelAspect: [1, 1],
+      colorSpace: "srgb"
+    },
+    frameRate: { numerator: 30, denominator: 1 },
+    renditions: [{
+      id: "opaque",
+      codec: "avc1.42E020",
+      bitDepth: 8,
+      codedWidth: 4,
+      codedHeight: 4,
+      alphaLayout: { type: "opaque", colorRect: [0, 0, 4, 4] },
+      bitrate: { average: 1, peak: 1 }
+    }],
+    units,
+    initialState: endpoints.source,
+    states: [
+      { id: endpoints.source, bodyUnit: sourceBody },
+      { id: endpoints.target, bodyUnit: targetBody }
+    ],
+    edges: [
+      {
+        id: "edge-forward",
+        from: endpoints.source,
+        to: endpoints.target,
+        start: {
+          type: "portal",
+          sourcePort: "default",
+          targetPort: "default",
+          maxWaitFrames: 1
+        },
+        transition: { kind: "reversible", unit: "rev", direction: "forward" },
+        continuity: "exact-authored"
+      },
+      {
+        id: "edge-reverse",
+        from: endpoints.target,
+        to: endpoints.source,
+        start: {
+          type: "portal",
+          sourcePort: "default",
+          targetPort: "default",
+          maxWaitFrames: 1
+        },
+        transition: {
+          kind: "reversible",
+          unit: "rev",
+          direction: "reverse",
+          reverseOf: "edge-forward"
+        },
+        continuity: "exact-reverse"
+      }
+    ],
+    bindings: [],
+    readiness: {
+      policy: "all-routes",
+      bootstrapUnits: [sourceBody],
+      immediateEdges: ["edge-forward"]
+    },
+    limits: {
+      maxCompiledBytes: 64 * 1024,
+      maxRuntimeBytes: 1024 * 1024,
+      decodedPixelBytes: 64,
+      persistentCacheBytes: 18 * 64,
+      runtimeWorkingSetBytes: 18 * 64
+    }
+  };
+}
+
+function body(
+  id: string,
+  chunkStart: number
+): Extract<Unit, { readonly kind: "body" }> {
+  return {
+    id,
+    kind: "body",
+    playback: "finite",
+    frameCount: 6,
+    ports: [{ id: "default", entryFrame: 0, portalFrames: [5] }],
+    chunks: [chunk(chunkStart, 6)]
+  };
+}
+
+function chunk(chunkStart: number, frameCount: number) {
+  return {
     rendition: "opaque",
-    unit,
-    localFrame
-  }));
+    chunkStart,
+    chunkCount: frameCount,
+    frameCount,
+    sha256: "0".repeat(64)
+  };
 }
 
 function presentation(

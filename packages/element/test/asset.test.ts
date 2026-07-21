@@ -9,7 +9,7 @@ import type { CanonicalAssetInput } from "../../format/src/model.js";
 import { Asset } from "../src/asset.js";
 
 const URL = "https://example.test/motion.avl";
-const CODEC = "avc1.640020";
+const CODEC = "avc1.42E020";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -79,44 +79,14 @@ describe("Asset manifest parity", () => {
     await range.dispose();
   });
 
-  it("retains strict legacy 1.0 inspection without inventing a witness", async () => {
-    const body = assetBytes(1, new Uint8Array([1, 2, 3, 4]));
-    vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(body)));
-
-    const asset = await open(`sha256-${"A".repeat(43)}=`);
-    expect(asset.manifest.formatVersion).toBe("1.0");
-    expect(asset.manifest.renditions[0]?.outputQualification).toBeUndefined();
-    await asset.dispose();
-
-    const legacyPacked = rewriteManifest(qualifiedPackedAssetBytes(), (manifest) => {
-      manifest.formatVersion = "1.0";
-      delete manifest.renditions[0].outputQualification;
-    });
-    vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(legacyPacked)));
-    const packed = await open(`sha256-${"A".repeat(43)}=`);
-    expect(packed.manifest).toMatchObject({
-      formatVersion: "1.0",
-      layout: "packed-alpha"
-    });
-    expect(packed.manifest.renditions[0]?.outputQualification).toBeUndefined();
-    await packed.dispose();
-
-    const qualifiedOpaque = rewriteManifest(body, (manifest) => {
-      manifest.formatVersion = "1.1";
-    });
-    vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(qualifiedOpaque)));
-    const opaque = await open(`sha256-${"A".repeat(43)}=`);
-    expect(opaque.manifest).toMatchObject({
-      formatVersion: "1.1",
-      layout: "opaque"
-    });
-    await opaque.dispose();
-  });
-
   it("rejects both header and manifest version mismatches", async () => {
+    const legacyManifest = rewriteManifest(
+      assetBytes(1, new Uint8Array([1, 2, 3, 4])),
+      (manifest) => { manifest.formatVersion = "1.0"; }
+    );
     const cases = [
       mutateHeaderMinor(qualifiedPackedAssetBytes(), 0),
-      mutateHeaderMinor(assetBytes(1, new Uint8Array([1, 2, 3, 4])), 1)
+      mutateHeaderMinor(legacyManifest, 1)
     ];
     for (const body of cases) {
       vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(body)));
@@ -128,16 +98,12 @@ describe("Asset manifest parity", () => {
 
   it("rejects versioned witness exact-key, bound, and relation failures", async () => {
     const qualified = qualifiedPackedAssetBytes();
-    const legacy = assetBytes(1, new Uint8Array([1, 2, 3, 4]));
+    const opaque = assetBytes(1, new Uint8Array([1, 2, 3, 4]));
     const cases = [
       rewriteManifest(qualified, (manifest) => {
         delete manifest.renditions[0].outputQualification;
       }),
-      rewriteManifest(legacy, (manifest) => {
-        manifest.renditions[0].outputQualification = witness();
-      }),
-      rewriteManifest(legacy, (manifest) => {
-        manifest.formatVersion = "1.1";
+      rewriteManifest(opaque, (manifest) => {
         manifest.renditions[0].outputQualification = witness();
       }),
       rewriteManifest(qualified, (manifest) => {
@@ -207,7 +173,7 @@ describe("Asset transport ownership", () => {
     }));
 
     const asset = await open(`sha256-${"A".repeat(43)}=`);
-    expect(asset.fileBytes?.byteLength).toBe(body.byteLength);
+    expect(asset.snapshot().declaredFileBytes).toBe(body.byteLength);
     await asset.dispose();
   });
 
@@ -249,6 +215,71 @@ describe("Asset transport ownership", () => {
     expect(attemptedFrontEndAllocation).toBe(false);
   });
 
+  it("admits a range index only after the bounded manifest prefix", async () => {
+    const NativeUint8Array = Uint8Array;
+    const body = assetBytes(1, new NativeUint8Array([1, 2, 3, 4]), 9_000_000);
+    const view = new DataView(body.buffer, body.byteOffset, 64);
+    const indexOffset = Number(view.getBigUint64(48, true));
+    const maliciousIndexLength = 16 + 80_000 * 48;
+    const maliciousFrontEnd = indexOffset + maliciousIndexLength;
+    expect(maliciousFrontEnd).toBeLessThan(9_000_000);
+    view.setBigUint64(24, BigInt(maliciousFrontEnd), true);
+    view.setBigUint64(56, BigInt(maliciousIndexLength), true);
+
+    const requested: (readonly [number, number])[] = [];
+    const attemptedAllocations: number[] = [];
+    const GuardedUint8Array = new Proxy(NativeUint8Array, {
+      construct(target, args, newTarget) {
+        if (typeof args[0] === "number") attemptedAllocations.push(args[0]);
+        if (
+          args[0] === maliciousFrontEnd ||
+          args[0] === maliciousFrontEnd - 64
+        ) {
+          throw new Error("raw index allocation was attempted");
+        }
+        return Reflect.construct(target, args, newTarget);
+      }
+    });
+    vi.stubGlobal("Uint8Array", GuardedUint8Array);
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const range = requestedRange(init);
+      requested.push(range);
+      return rangeResponse(body, range, maliciousFrontEnd);
+    }));
+
+    await expect(open()).rejects.toThrow("Invalid AVAL asset");
+    expect(requested).toEqual([
+      [0, 63],
+      [64, indexOffset - 1]
+    ]);
+    expect(attemptedAllocations).not.toContain(maliciousFrontEnd);
+    expect(attemptedAllocations).not.toContain(maliciousFrontEnd - 64);
+  });
+
+  it("accepts an honest full replacement at the exact index stage", async () => {
+    const body = assetBytes(1, new Uint8Array([1, 2, 3, 4]));
+    const view = new DataView(body.buffer, body.byteOffset, 64);
+    const indexOffset = Number(view.getBigUint64(48, true));
+    const frontLength = indexOffset + Number(view.getBigUint64(56, true));
+    const requested: (readonly [number, number])[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const range = requestedRange(init);
+      requested.push(range);
+      return requested.length === 3
+        ? wholeResponse(body)
+        : rangeResponse(body, range);
+    }));
+
+    const asset = await open();
+    expect(asset.mode).toBe("full");
+    expect(requested).toEqual([
+      [0, 63],
+      [64, indexOffset - 1],
+      [indexOffset, frontLength - 1]
+    ]);
+    await asset.dispose();
+  });
+
   it("rejects a declared SRI body above the manifest ceiling before allocating it", async () => {
     const NativeUint8Array = Uint8Array;
     const declared = Number.MAX_SAFE_INTEGER;
@@ -286,7 +317,7 @@ describe("Asset transport ownership", () => {
 
     const asset = await open(`sha256-${"A".repeat(43)}=`);
     expect(asset.mode).toBe("full");
-    expect(asset.fileBytes?.byteLength).toBe(body.byteLength);
+    expect(asset.snapshot().declaredFileBytes).toBe(body.byteLength);
     await expect(asset.unitBytes("video", "body-00")).resolves.toEqual(payload);
     await asset.dispose();
   });
@@ -527,7 +558,7 @@ function assetBytes(
   const payloadBytes = payload.byteLength * unitCount;
   const input = {
     manifest: {
-      formatVersion: "1.0",
+      formatVersion: "1.1",
       generator: "asset-tests",
       codec: "h264",
       bitstream: "annex-b",
@@ -736,7 +767,7 @@ function transitionedCompletionCycleBytes(): Uint8Array {
   ];
   const input: CanonicalAssetInput = {
     manifest: {
-      formatVersion: "1.0",
+      formatVersion: "1.1",
       generator: "asset-cycle-tests",
       codec: "h264",
       bitstream: "annex-b",
@@ -813,13 +844,17 @@ function requestedRange(init?: RequestInit): readonly [number, number] {
   return [Number(match[1]), Number(match[2])];
 }
 
-function rangeResponse(bytes: Uint8Array, range: readonly [number, number]): Response {
+function rangeResponse(
+  bytes: Uint8Array,
+  range: readonly [number, number],
+  total = bytes.byteLength
+): Response {
   const [start, end] = range;
   const response = new Response(bytes.slice(start, end + 1), {
     status: 206,
     headers: {
       "Content-Length": String(end - start + 1),
-      "Content-Range": `bytes ${String(start)}-${String(end)}/${String(bytes.byteLength)}`,
+      "Content-Range": `bytes ${String(start)}-${String(end)}/${String(total)}`,
       ETag: '"asset-test"'
     }
   });

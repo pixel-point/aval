@@ -75,7 +75,6 @@ test("captures bounded query-only browser diagnostics", async ({
         demoId: "end-user-playground",
         checkpoint: "idle"
       }),
-      advancingFrame: ready.outcome === "completed",
       onEvidenceWritten: (artifacts) => evidenceCheckpoints.push(artifacts)
     }
   );
@@ -117,7 +116,6 @@ test("captures bounded query-only browser diagnostics", async ({
         demoId: "end-user-playground",
         checkpoint: "engaged"
       }),
-      advancingFrame: ready.outcome === "completed",
       onEvidenceWritten: (artifacts) => evidenceCheckpoints.push(artifacts)
     }
   );
@@ -367,7 +365,7 @@ test("captures bounded query-only browser diagnostics", async ({
         const source = document.createElement("source");
         source.type = playerIndex === 39 && sourceIndex === 0
           ? `video/mp4; codecs="${"c".repeat(5_000)}"`
-          : `video/mp4; codecs="avc1.6400${String(sourceIndex)}"`;
+          : `video/mp4; codecs="avc1.42E0${String(sourceIndex)}"`;
         probe.append(source);
       }
       probe.getDiagnostics = () => ({ playerIndex });

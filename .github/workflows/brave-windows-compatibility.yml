@@ -37,7 +37,7 @@ jobs:
       INPUT_SOURCE_COMMIT: ${{ inputs.source_commit }}
       INPUT_SESSION_ID: ${{ inputs.session_id }}
       INPUT_TUNNEL_CREATED_AT: ${{ inputs.tunnel_created_at }}
-      POLICY_PATH: scripts/browser-compatibility/certification-policy.json
+      POLICY_PATH: config/release/browser-certification-policy.json
     steps:
       - name: Validate dispatch inputs before use
         shell: pwsh
@@ -78,13 +78,17 @@ jobs:
           node-version: 22.12.0
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Build canonical codec authority
+        run: >-
+          npm run build -w @pixel-point/aval-graph &&
+          npm run build -w @pixel-point/aval-format
       - name: Verify official Brave resolution still matches checked-in policy
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
           node scripts/browser-compatibility/brave/resolve-builds.mjs
           --boundary-date 2024-07-19
-          --policy scripts/browser-compatibility/certification-policy.json
+          --policy config/release/browser-certification-policy.json
           --check
       - name: Allocate caller-owned install and evidence roots
         shell: pwsh
@@ -110,7 +114,7 @@ jobs:
       - name: Acquire exact official standalone Brave builds
         run: >-
           node scripts/browser-compatibility/brave/acquire-builds.mjs
-          --policy scripts/browser-compatibility/certification-policy.json
+          --policy config/release/browser-certification-policy.json
           --platform windows-x64
           --output "$env:BRAVE_INSTALL_ROOT"
       - name: Independently verify extracted Brave executables

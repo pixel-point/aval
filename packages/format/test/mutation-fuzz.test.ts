@@ -304,7 +304,7 @@ describe("seeded complete-asset mutation fuzzing", () => {
       ["padding byte", () => withByte(source, padding.offset, 1)],
       [
         "manifest codec",
-        () => replaceAscii(source, "avc1.640020", "avc1.64002G")
+        () => replaceAscii(source, "avc1.42E020", "avc1.42E02G")
       ],
       [
         "opaque encoded payload",

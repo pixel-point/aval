@@ -43,9 +43,3 @@ export class ElementCleanupIncompleteError extends Error {
     this.name = "OperationError";
   }
 }
-
-export function avalAbortError(message = "aval-player operation was aborted"): Error {
-  const error = new Error(message);
-  error.name = "AbortError";
-  return error;
-}

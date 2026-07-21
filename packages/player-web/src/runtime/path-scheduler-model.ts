@@ -101,8 +101,8 @@ export interface PathSchedulerResidentRunwayTransaction {
 }
 
 export interface CommitResidentRunwayOptions {
-  /** Browser draw-barrier commits frame zero; compatibility activation uses 0. */
-  readonly alreadyPresented?: 0 | 1;
+  /** Frame zero crossed the browser draw barrier before scheduler commit. */
+  readonly alreadyPresented: 1;
 }
 
 /** One-shot lazy worker activation; invoke only inside the media lane. */

@@ -55,7 +55,7 @@ function addPaddingRange(ranges: ByteRange[], offset: number, end: number): void
   if (end > offset) ranges.push(freezeRange(offset, end - offset));
 }
 
-/** Build the sole legal 1.0 file layout from bounded chunk descriptors. */
+/** Build the sole legal 1.1 file layout from bounded chunk descriptors. */
 export function planCanonicalAssetLayout(
   manifestLength: number,
   manifest: CompiledManifest,
@@ -223,7 +223,7 @@ export function planCanonicalAssetLayout(
   }
 }
 
-/** Derive and validate the sole legal 1.0 byte layout. */
+/** Derive and validate the sole legal 1.1 byte layout. */
 export function deriveCanonicalAssetLayout(
   header: FormatHeader,
   manifest: CompiledManifest,

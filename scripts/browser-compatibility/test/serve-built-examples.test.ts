@@ -212,7 +212,7 @@ describe("built browser-compatibility endpoint", () => {
       );
       const rendererReport = await readRendererReport(rendererPage);
       assertRendererReport(rendererReport, expectedCase);
-      expect(await rendererPage.locator("article[data-mode]").count()).toBe(3);
+      expect(await rendererPage.locator("article[data-mode]").count()).toBe(2);
     }
 
     const invalidPage = await browser.newPage();
@@ -432,7 +432,6 @@ function assertRendererReport(
   expect(report.environment.devicePixelRatio).toEqual(expect.any(Number));
   expect(report.modes.map((entry) => entry.mode)).toEqual([
     "production",
-    "legacy-desynchronized",
     "browser-defaults"
   ]);
 
@@ -468,13 +467,6 @@ function assertRendererReport(
         result.context.forwardedAttributes ?? {},
         PRODUCTION_FORWARDED_KEYS
       );
-    } else if (index === 1) {
-      expectExactKeys(
-        result.context.forwardedAttributes ?? {},
-        [...PRODUCTION_FORWARDED_KEYS, "desynchronized"]
-      );
-      expect(result.context.forwardedAttributes)
-        .toHaveProperty("desynchronized", true);
     } else {
       expect(result.context.forwardedAttributes).toBeNull();
     }

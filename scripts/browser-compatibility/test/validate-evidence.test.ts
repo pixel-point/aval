@@ -463,7 +463,7 @@ async function saveManifest() {
 async function createValidFixture() {
   const repoRoot = await mkdtemp(resolve(tmpdir(), "aval-evidence-validator-"));
   const policy = JSON.parse(await readFile(
-    resolve(SOURCE_ROOT, "scripts/browser-compatibility/certification-policy.json"),
+    resolve(SOURCE_ROOT, "config/release/browser-certification-policy.json"),
     "utf8"
   ));
   policy.inventoryState = "resolved";
@@ -474,14 +474,17 @@ async function createValidFixture() {
     slot.browser.engineVersion = "150.0";
     slot.provider.browserVersionLabel = "150.0";
   }
-  const policyDirectory = resolve(repoRoot, "scripts/browser-compatibility");
+  const policyDirectory = resolve(repoRoot, "config/release");
   await mkdir(policyDirectory, { recursive: true });
   await Promise.all([
-    writeJson(resolve(policyDirectory, "certification-policy.json"), policy),
+    writeJson(
+      resolve(policyDirectory, "browser-certification-policy.json"),
+      policy
+    ),
     writeFile(
-      resolve(policyDirectory, "certification-policy.schema.json"),
+      resolve(policyDirectory, "browser-certification-policy.schema.json"),
       await readFile(
-        resolve(SOURCE_ROOT, "scripts/browser-compatibility/certification-policy.schema.json")
+        resolve(SOURCE_ROOT, "config/release/browser-certification-policy.schema.json")
       )
     )
   ]);
@@ -534,7 +537,7 @@ async function createValidFixture() {
         const expectedOutcome = slot.expectation === "playback"
           ? "playback"
           : "deterministic-error";
-        const expectedAuthoredCodecs = expectedCodecs(policy, demo, mode);
+        const expectedAuthoredCodecs = expectedCodecs(policy, mode);
         const checkpointStates = expectedOutcome === "playback"
           ? demo.states
           : [null, null];
@@ -660,8 +663,8 @@ function diagnosticReport(
   mode: string
 ) {
   const codecStrings: Record<string, string> = {
-    av1: "av01.0.08M.08",
-    vp9: "vp09.00.10.08",
+    av1: "av01.0.08M.08.0.110.01.01.01.0",
+    vp9: "vp09.00.10.08.01.01.01.01.00",
     h265: "hvc1.1.6.L93.B0",
     h264: "avc1.42E020"
   };
@@ -848,8 +851,7 @@ function requiredEdges(demo: any) {
       ];
 }
 
-function expectedCodecs(policy: any, demo: any, mode: string) {
-  if (demo.sourceContract === "h264-only") return ["h264"];
+function expectedCodecs(policy: any, mode: string) {
   return [...policy.requirements.authoredCodecsByMode[mode]];
 }
 

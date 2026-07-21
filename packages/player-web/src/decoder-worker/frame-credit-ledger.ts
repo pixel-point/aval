@@ -19,13 +19,6 @@ export class FrameCreditLedger {
     return this.#decodedBytes;
   }
 
-  public hasSubmissionCredit(
-    submittedFrames: number,
-    maximumOutstandingFrames: number
-  ): boolean {
-    return submittedFrames + this.#leases.size < maximumOutstandingFrames;
-  }
-
   public lease(
     generation: number,
     decodedBytes: number,

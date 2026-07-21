@@ -26,14 +26,10 @@ export const VIDEO_BITSTREAM_BY_CODEC: Readonly<
 
 export type ParsedVideoCodecString =
   | { readonly family: "h264"; readonly bitDepth: 8 }
-  | { readonly family: "h265"; readonly bitDepth: 8 | 10 }
+  | { readonly family: "h265"; readonly bitDepth: 8 }
   | { readonly family: "vp9"; readonly bitDepth: 8 }
   | { readonly family: "av1"; readonly bitDepth: 8 | 10 };
 
-const VP9_SHORT =
-  /^vp09\.00\.(?:10|11|20|21|30|31|40|41|50|51|52|60|61|62)\.08$/u;
-const AV1_SHORT =
-  /^av01\.0\.(?:0[0-9]|[12][0-9]|3[01])[MH]\.(08|10)$/u;
 /** Parse one canonical WebCodecs codec string supported by the AVAL format. */
 export function parseVideoCodecString(
   value: string
@@ -47,13 +43,12 @@ export function parseVideoCodecString(
     return Object.freeze({ family: "h265", bitDepth: h265.bitDepth });
   }
 
-  if (isVp9Codec(value) || VP9_SHORT.test(value)) {
+  if (isVp9Codec(value)) {
     return Object.freeze({ family: "vp9", bitDepth: 8 });
   }
 
-  const av1Short = AV1_SHORT.exec(value);
-  if (isAv1Codec(value) || av1Short !== null) {
-    const bitDepthTerm = av1Short?.[1] ?? value.split(".")[3];
+  if (isAv1Codec(value)) {
+    const bitDepthTerm = value.split(".")[3];
     return Object.freeze({
       family: "av1",
       bitDepth: bitDepthTerm === "10" ? 10 : 8

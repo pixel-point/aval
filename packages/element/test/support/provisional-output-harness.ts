@@ -1,8 +1,6 @@
 import type {
-  LegacyManifest,
-  OpaqueQualifiedManifest,
-  PackedAlphaQualifiedManifest
-} from "../../src/asset.js";
+  CompiledManifest
+} from "@pixel-point/aval-format";
 import type {
   MaterializedRgbaFrame,
   MaterializedRgbaFrameReference
@@ -24,7 +22,9 @@ export const witnessLayout: Readonly<RenderLayout> = deriveRenderLayout({
   alphaRect: [0, 10, 2, 2]
 });
 
-export function packedQualifiedManifest(): Readonly<PackedAlphaQualifiedManifest> {
+export function packedQualifiedManifest(): Readonly<
+  Extract<CompiledManifest, { readonly layout: "packed-alpha" }>
+> {
   return Object.freeze({
     ...manifestBase(),
     formatVersion: "1.1",
@@ -50,7 +50,9 @@ export function packedQualifiedManifest(): Readonly<PackedAlphaQualifiedManifest
   });
 }
 
-export function opaqueQualifiedManifest(): Readonly<OpaqueQualifiedManifest> {
+export function opaqueQualifiedManifest(): Readonly<
+  Extract<CompiledManifest, { readonly layout: "opaque" }>
+> {
   return Object.freeze({
     ...manifestBase(),
     formatVersion: "1.1",
@@ -60,22 +62,6 @@ export function opaqueQualifiedManifest(): Readonly<OpaqueQualifiedManifest> {
       alphaLayout: Object.freeze({
         type: "opaque",
         colorRect: Object.freeze([0, 0, 2, 2] as const)
-      })
-    })])
-  });
-}
-
-export function legacyPackedManifest(): Readonly<LegacyManifest> {
-  return Object.freeze({
-    ...manifestBase(),
-    formatVersion: "1.0",
-    layout: "packed-alpha",
-    renditions: Object.freeze([Object.freeze({
-      ...renditionBase(),
-      alphaLayout: Object.freeze({
-        type: "stacked",
-        colorRect: Object.freeze([0, 0, 2, 2] as const),
-        alphaRect: Object.freeze([0, 10, 2, 2] as const)
       })
     })])
   });
@@ -156,7 +142,7 @@ function manifestBase() {
 function renditionBase() {
   return {
     id: "main",
-    codec: "avc1.64000A",
+    codec: "avc1.42E00A",
     bitDepth: 8 as const,
     codedWidth: 2,
     codedHeight: 12,

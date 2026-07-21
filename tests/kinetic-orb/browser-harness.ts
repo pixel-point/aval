@@ -6,6 +6,12 @@ export interface BrowserFailures {
   readonly pageErrors: string[];
 }
 
+export interface RenderedColorWitness {
+  readonly greenDominantRatio: number;
+  readonly vividGreenRatio: number;
+  readonly quantizedColorCount: number;
+}
+
 export interface InteractionLedger {
   pointerEnters: number;
   pointerLeaves: number;
@@ -175,4 +181,56 @@ export async function readOrbHealth(motion: Locator) {
 
 export function sampleRenderedFrame(motion: Locator): Promise<Buffer> {
   return motion.screenshot({ animations: "allow" });
+}
+
+export async function analyzeRenderedFrame(
+  page: Page,
+  screenshot: Buffer
+): Promise<Readonly<RenderedColorWitness>> {
+  const encoded = screenshot.toString("base64");
+  return page.evaluate(async (base64) => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d", {
+        alpha: true,
+        willReadFrequently: true
+      });
+      if (context === null) throw new Error("screenshot color witness is unavailable");
+      context.drawImage(bitmap, 0, 0);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let visible = 0;
+      let greenDominant = 0;
+      let vividGreen = 0;
+      const colors = new Set<number>();
+      for (let offset = 0; offset < pixels.byteLength; offset += 4) {
+        const red = pixels[offset] ?? 0;
+        const green = pixels[offset + 1] ?? 0;
+        const blue = pixels[offset + 2] ?? 0;
+        const alpha = pixels[offset + 3] ?? 0;
+        if (alpha <= 16) continue;
+        visible += 1;
+        colors.add((red >> 4) << 8 | (green >> 4) << 4 | blue >> 4);
+        if (green >= 32 && green - red >= 48 && green - blue >= 48) {
+          greenDominant += 1;
+          if (green >= 96) vividGreen += 1;
+        }
+      }
+      if (visible === 0) throw new Error("screenshot color witness has no visible pixels");
+      return Object.freeze({
+        greenDominantRatio: greenDominant / visible,
+        vividGreenRatio: vividGreen / visible,
+        quantizedColorCount: colors.size
+      });
+    } finally {
+      bitmap.close();
+    }
+  }, encoded);
 }

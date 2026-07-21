@@ -23,9 +23,6 @@ const certificationFixtureReport = resolve(
   CERTIFICATION_FIXTURE_DIRECTORY,
   "build.json"
 );
-const legacyFixturePath = "fixtures/conformance/v1/h264.avl";
-const legacyFixtureSource = resolve(legacyFixturePath);
-const legacyFixtureReport = resolve("fixtures/conformance/v1/build.json");
 
 describe("candidate fixture authority stable reads", () => {
   it("binds the functional authority to the qualified H.264 certification fixture", async () => {
@@ -76,36 +73,6 @@ describe("candidate fixture authority stable reads", () => {
       expect(authority.models.has(fixtureEntry.sha256)).toBe(true);
       expect(authority.fatalBoundaryFixtureDigests).toEqual(new Set([fixtureEntry.sha256]));
       expect(authority.harnessDigests).toEqual(new Set([harnessEntry.sha256]));
-    } finally { await rm(root, { recursive: true, force: true }); }
-  });
-
-  it("preserves frozen wire-1.0 packed alpha only as a legacy unsupported fixture", async () => {
-    const root = await temporaryRoot("legacy-unsupported");
-    try {
-      const bytes = await readFile(legacyFixtureSource);
-      const report = JSON.parse(await readFile(legacyFixtureReport, "utf8")) as {
-        assets: readonly Readonly<{ codec: string; sha256: string }>[];
-      };
-      const digest = createHash("sha256").update(bytes).digest("hex");
-      const frontIndex = parseFrontIndex(bytes);
-      await installFixture(root, legacyFixturePath, legacyFixtureSource);
-      const fixtureEntry = { ...artifact(bytes), path: legacyFixturePath };
-      const authority = await loadCandidateFixtureAuthority(
-        { artifacts: [fixtureEntry] },
-        join(root, "candidate-manifest.json"),
-        certification
-      );
-
-      expect(report.assets.find(({ codec }) => codec === "h264")?.sha256).toBe(digest);
-      expect(digest).toBe("2c3d03e20655cb6a6fdf5c889f2d30ac0ad67ee3a7183e80286c2b38da34461b");
-      expect(frontIndex.header).toMatchObject({ major: 1, minor: 0 });
-      expect(frontIndex.manifest).toMatchObject({
-        formatVersion: "1.0",
-        layout: "packed-alpha"
-      });
-      expect(frontIndex.manifest.renditions[0]?.outputQualification).toBeUndefined();
-      expect(authority.digests).toContain(digest);
-      expect(authority.fatalBoundaryFixtureDigests).not.toContain(digest);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

@@ -2,18 +2,29 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { PUBLIC_RELEASE_PACKAGES } from "../src/compatibility.js";
-import { evaluateNamedProfileMatrix, type NamedProfileMatrixPolicy } from "../src/report-index-criteria.js";
+import { evaluateNamedProfileMatrix } from "../src/report-index-criteria.js";
+import {
+  BROWSER_CERTIFICATION_POLICY_PATH,
+  deriveNamedProfileMatrixPolicy,
+  resolveBrowserCertificationPolicyPath
+} from "../../../scripts/certification/named-profile-policy.mjs";
 
 describe("release policy", () => {
   it("pins the candidate and trusted-publishing toolchains without conflating them", async () => {
     const policy = JSON.parse(await readFile("config/release/release-policy.json", "utf8")) as {
+      releaseStage: string;
+      wireFormatVersion: string;
+      projectSchemaVersion: string;
       publicPackages: readonly string[];
       registry: { url: string };
       toolchain: Record<string, string>;
       trustedPublishing: { minimumNode: string; minimumNpm: string; oidcOperations: readonly string[]; distTagPromotionRequiresSeparateShortLivedAuthorization: boolean };
       ci: { playwrightBrowserManifestSha256: string };
-      namedProfiles: NamedProfileMatrixPolicy;
+      namedProfiles: RawNamedProfilePolicy;
     };
+    expect(policy.releaseStage).toBe("technical-preview");
+    expect(policy.wireFormatVersion).toBe("1.1");
+    expect(policy.projectSchemaVersion).toBe("1.0");
     expect(policy.publicPackages).toEqual(PUBLIC_RELEASE_PACKAGES);
     expect(policy.registry.url).toBe("https://registry.npmjs.org/");
     expect(Object.values(policy.toolchain).every((version) => /^\d+\.\d+\.\d+$/u.test(version))).toBe(true);
@@ -29,28 +40,136 @@ describe("release policy", () => {
     expect(policy.trustedPublishing.distTagPromotionRequiresSeparateShortLivedAuthorization).toBe(true);
     const browsers = await readFile("node_modules/playwright-core/browsers.json");
     expect(createHash("sha256").update(browsers).digest("hex")).toBe(policy.ci.playwrightBrowserManifestSha256);
-    expect(() => evaluateNamedProfileMatrix([], policy.namedProfiles)).not.toThrow();
-    expect(policy.namedProfiles.requiredPlatformClasses).toEqual(expect.arrayContaining([
-      "windows-11-uhd620-or-better",
-      "ios-26-iphone-real-device",
-      "ios-18-iphone-real-device",
-      "android-15-samsung-midrange-real-device"
-    ]));
-    expect(policy.namedProfiles.requiredBrowsersByPlatform["windows-11-uhd620-or-better"])
+    const compatibility = JSON.parse(await readFile(
+      "config/release/browser-certification-policy.json",
+      "utf8"
+    )) as BrowserPolicy;
+    const matrix = deriveNamedProfileMatrixPolicy(
+      policy.namedProfiles,
+      compatibility
+    );
+    expect(policy.namedProfiles.browserCertificationPolicy).toBe(
+      BROWSER_CERTIFICATION_POLICY_PATH
+    );
+    expect(() => evaluateNamedProfileMatrix([], matrix)).not.toThrow();
+    expect(Object.values(matrix.requiredBrowsersByPlatform).flat()).toHaveLength(
+      compatibility.slots.filter(({ expectation }) => expectation === "playback").length
+    );
+    expect(matrix.requiredBrowsersByPlatform["ios-26-iphone-real-device"])
       .toEqual(expect.arrayContaining([
-        expect.objectContaining({ browserProduct: "Chrome", browserVersion: "150", browserChannel: "stable", osProduct: "Windows", osVersion: "11" }),
-        expect.objectContaining({ browserProduct: "Chrome", browserVersion: "149", browserChannel: "stable", osProduct: "Windows", osVersion: "11" }),
-        expect.objectContaining({ browserProduct: "Chrome", browserVersion: "148", browserChannel: "stable", osProduct: "Windows", osVersion: "11" }),
-        expect.objectContaining({ browserProduct: "Chrome", browserVersion: "127", browserChannel: "stable", osProduct: "Windows", osVersion: "11" })
+        expect.objectContaining({
+          browserProduct: "Safari",
+          browserVersion: "26.5",
+          osProduct: "iOS",
+          osVersion: "26.5",
+          deviceClass: "iPhone-real-device",
+          virtualization: "none"
+        })
       ]));
-    expect(policy.namedProfiles.requiredBrowsersByPlatform["ios-26-iphone-real-device"])
-      .toEqual(expect.arrayContaining([
-        expect.objectContaining({ browserProduct: "Mobile Safari", browserVersion: "26.5", osProduct: "iOS", osVersion: "26.5", virtualization: "none" }),
-        expect.objectContaining({ browserProduct: "Mobile Safari", browserVersion: "26.4", osProduct: "iOS", osVersion: "26.4", virtualization: "none" }),
-        expect.objectContaining({ browserProduct: "Mobile Safari", browserVersion: "26.0", osProduct: "iOS", osVersion: "26.0", virtualization: "none" })
-      ]));
-    expect(policy.namedProfiles.requiredBrowsersByPlatform["android-15-samsung-midrange-real-device"])
-      .toContainEqual(expect.objectContaining({ browserProduct: "Chrome", browserVersion: "145", browserChannel: "stable", osProduct: "Android", osVersion: "15", deviceClass: "Samsung-midrange-real-device", virtualization: "none" }));
-    expect(policy.namedProfiles.requiredBrowsersByPlatform["android-16-flagship-real-device"]).toBeUndefined();
+    expect(resolveBrowserCertificationPolicyPath(policy.namedProfiles, {
+      candidateManifestPath: "/candidate/candidate-manifest.json",
+      repositoryRoot: "/ignored"
+    })).toBe(`/candidate/${BROWSER_CERTIFICATION_POLICY_PATH}`);
+  });
+
+  it.each([
+    ["duplicate", (named: RawNamedProfilePolicy, browser: BrowserPolicy) => {
+      named.platformGroups["ios-18-iphone-real-device"]!.slotIds.push(
+        named.platformGroups["ios-26-iphone-real-device"]!.slotIds[0]!
+      );
+    }, /assigned more than once/u],
+    ["unknown", (named: RawNamedProfilePolicy) => {
+      named.platformGroups["ios-18-iphone-real-device"]!.slotIds[0] = "absent-slot";
+    }, /slot is unknown/u],
+    ["non-playback", (named: RawNamedProfilePolicy, browser: BrowserPolicy) => {
+      const sentinel = browser.slots.find(({ expectation }) =>
+        expectation !== "playback"
+      );
+      expect(sentinel).toBeDefined();
+      named.platformGroups["ios-18-iphone-real-device"]!.slotIds[0] = sentinel!.id;
+    }, /not a playback slot/u]
+  ])("rejects a %s browser-slot assignment", async (
+    _label,
+    mutate,
+    message
+  ) => {
+    const named = structuredClone((JSON.parse(await readFile(
+      "config/release/release-policy.json", "utf8"
+    )) as { namedProfiles: RawNamedProfilePolicy }).namedProfiles);
+    const browser = structuredClone(JSON.parse(await readFile(
+      "config/release/browser-certification-policy.json", "utf8"
+    )) as BrowserPolicy);
+    mutate(named, browser);
+    expect(() => deriveNamedProfileMatrixPolicy(named, browser)).toThrow(message);
+  });
+
+  it("rejects a named profile that omits a playback slot", async () => {
+    const { named, browser } = await loadPolicies();
+    const omitted = named.platformGroups["ios-26-iphone-real-device"]!
+      .slotIds.pop();
+    expect(omitted).toBeDefined();
+
+    expect(() => deriveNamedProfileMatrixPolicy(named, browser)).toThrow(
+      new RegExp(`omits playback slots: ${omitted}`, "u")
+    );
+  });
+
+  it("rejects a malformed named-profile platform group", async () => {
+    const { named, browser } = await loadPolicies();
+    Object.assign(named.platformGroups["ios-18-iphone-real-device"]!, {
+      copiedBrowserRows: []
+    });
+
+    expect(() => deriveNamedProfileMatrixPolicy(named, browser)).toThrow(
+      /named profile platform group is invalid/u
+    );
+  });
+
+  it("rejects a non-canonical browser-policy authority path", async () => {
+    const { named, browser } = await loadPolicies();
+    named.browserCertificationPolicy = "config/release/copied-browser-policy.json";
+
+    expect(() => deriveNamedProfileMatrixPolicy(named, browser)).toThrow(
+      /browser certification policy path is invalid/u
+    );
+    expect(() => resolveBrowserCertificationPolicyPath(named, {
+      repositoryRoot: "/repository"
+    })).toThrow(/browser certification policy path is invalid/u);
   });
 });
+
+async function loadPolicies(): Promise<{
+  named: RawNamedProfilePolicy;
+  browser: BrowserPolicy;
+}> {
+  const named = structuredClone((JSON.parse(await readFile(
+    "config/release/release-policy.json", "utf8"
+  )) as { namedProfiles: RawNamedProfilePolicy }).namedProfiles);
+  const browser = structuredClone(JSON.parse(await readFile(
+    "config/release/browser-certification-policy.json", "utf8"
+  )) as BrowserPolicy);
+  return { named, browser };
+}
+
+interface RawNamedProfilePolicy {
+  browserCertificationPolicy: string;
+  platformGroups: Record<string, {
+    slotIds: string[];
+    deviceClass: string;
+    virtualization: string;
+  }>;
+  requiredRefreshMilliHz: number[];
+  conditionalRefreshMilliHz: number;
+  requiredScenarioIds: string[];
+  repetitions: number;
+  minimumThroughputMillionths: number;
+}
+
+interface BrowserPolicy {
+  slots: Array<{
+    id: string;
+    expectation: string;
+    browser: { brand: string; version: string; channel: string };
+    os: { name: string; version: string };
+  }>;
+}

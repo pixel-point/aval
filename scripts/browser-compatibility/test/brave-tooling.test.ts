@@ -62,8 +62,8 @@ afterEach(async () => {
 describe("rolling certification inventory", () => {
   it("is closed by its schema and freezes every provider slot without a moving browser alias", async () => {
     const [policy, schema] = await Promise.all([
-      readJson("scripts/browser-compatibility/certification-policy.json"),
-      readJson("scripts/browser-compatibility/certification-policy.schema.json")
+      readJson("config/release/browser-certification-policy.json"),
+      readJson("config/release/browser-certification-policy.schema.json")
     ]);
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     addFormats(ajv);
@@ -106,9 +106,9 @@ describe("rolling certification inventory", () => {
       "forced-h264": ["h264"],
       "full-ladder": ["av1", "vp9", "h265", "h264"]
     });
-    expect(policy.requirements.demos.map((demo: { sourceContract: string }) =>
-      demo.sourceContract
-    )).toEqual(["multi-source", "multi-source", "multi-source", "multi-source"]);
+    expect(policy.requirements.demos.every((demo: Record<string, unknown>) =>
+      !("sourceContract" in demo)
+    )).toBe(true);
     expect(policy.requirements.soakSeconds).toBe(60);
     expect(new Set(policy.slots.map(({ id }: { id: string }) => id)).size)
       .toBe(policy.slots.length);
@@ -129,7 +129,7 @@ describe("rolling certification inventory", () => {
   });
 
   it("pins the exact signed-in BrowserStack desktop and mobile catalog", async () => {
-    const policy = await readJson("scripts/browser-compatibility/certification-policy.json");
+    const policy = await readJson("config/release/browser-certification-policy.json");
     const byId = new Map(policy.slots.map((slot: { id: string }) => [slot.id, slot]));
     expect([...byId.keys()].filter((id) => id.startsWith("ios-"))).toEqual([
       "ios-26-5-iphone-17-safari",
@@ -172,7 +172,7 @@ describe("rolling certification inventory", () => {
   });
 
   it("pins the required Windows browser generations and deterministic Firefox sentinels", async () => {
-    const policy = await readJson("scripts/browser-compatibility/certification-policy.json");
+    const policy = await readJson("config/release/browser-certification-policy.json");
     const windows = policy.slots.filter((slot: { platform: string }) => slot.platform === "windows");
     expect(windows.filter((slot: { browser: { brand: string } }) => slot.browser.brand === "Chrome")
       .map((slot: { browser: { version: string } }) => slot.browser.version)).toEqual([
@@ -289,7 +289,7 @@ describe("official Brave release resolution", () => {
   });
 
   it("updates only exact Brave versions/engine versions and preserves a closed unique slot set", async () => {
-    const policy = await readJson("scripts/browser-compatibility/certification-policy.json");
+    const policy = await readJson("config/release/browser-certification-policy.json");
     for (const slot of policy.slots) {
       if (slot.browser.brand !== "Brave") continue;
       slot.id = slot.id.replace(/-brave-[0-9-]+$/u, "-brave-1-0-0");
@@ -431,7 +431,7 @@ describe("bounded transport and binary proof", () => {
   it("writes acquisition provenance for both builds without accepting an unlisted role", async () => {
     const root = await temporaryRoot("aval-brave-test-");
     const output = resolve(root, "owned-output");
-    const policy = await readJson("scripts/browser-compatibility/certification-policy.json");
+    const policy = await readJson("config/release/browser-certification-policy.json");
     const manifest = await acquireBuilds({
       policy,
       platform: "macos-arm64",
@@ -476,6 +476,26 @@ describe("Brave matrix planning", () => {
     );
     expect(workflow).toContain("runs-on: windows-2025");
     expect(workflow).not.toContain("runs-on: windows-11");
+    expect(workflow).toContain(
+      "POLICY_PATH: config/release/browser-certification-policy.json"
+    );
+    expect(workflow).not.toContain(
+      "scripts/browser-compatibility/certification-policy.json"
+    );
+    const installIndex = workflow.indexOf("npm ci --ignore-scripts");
+    const graphBuildIndex = workflow.indexOf(
+      "npm run build -w @pixel-point/aval-graph"
+    );
+    const formatBuildIndex = workflow.indexOf(
+      "npm run build -w @pixel-point/aval-format"
+    );
+    const matrixRunIndex = workflow.indexOf(
+      "node scripts/browser-compatibility/brave/run-matrix.mjs"
+    );
+    expect(installIndex).toBeGreaterThanOrEqual(0);
+    expect(installIndex).toBeLessThan(graphBuildIndex);
+    expect(graphBuildIndex).toBeLessThan(formatBuildIndex);
+    expect(formatBuildIndex).toBeLessThan(matrixRunIndex);
     expect(workflow).toContain("hostOperatingSystem = 'Windows Server 2025'");
     expect(workflow).toContain("hostKernelVersion = [System.Environment]::OSVersion.Version.ToString()");
     expect(workflow).toContain("Get-AuthenticodeSignature");
@@ -505,7 +525,7 @@ describe("Brave matrix planning", () => {
   });
 
   it("plans four demos in H.264 and ladder modes for each exact branded build", async () => {
-    const policy = await readJson("scripts/browser-compatibility/certification-policy.json");
+    const policy = await readJson("config/release/browser-certification-policy.json");
     const manifest = acquisitionManifest(policy, "windows-x64");
     const plans = validateBraveEvidencePlan(planBraveRuns(policy, {
       platform: "windows",
@@ -540,7 +560,7 @@ describe("Brave matrix planning", () => {
   });
 
   it("selects the exact macOS generation and rejects Chrome as a Brave substitute", async () => {
-    const policy = await readJson("scripts/browser-compatibility/certification-policy.json");
+    const policy = await readJson("config/release/browser-certification-policy.json");
     const manifest = acquisitionManifest(policy, "macos-arm64");
     expect(planBraveRuns(policy, {
       platform: "macos",
@@ -616,7 +636,7 @@ describe("certifying Brave evidence invariants", () => {
   });
 
   it("emits Task 7 session, flat checkpoint, ledger, and assembly-fragment shapes", async () => {
-    const policy = await readJson("scripts/browser-compatibility/certification-policy.json");
+    const policy = await readJson("config/release/browser-certification-policy.json");
     const slot = policy.slots.find(({ id }: { id: string }) =>
       id === "windows-server-2025-brave-1-92-141"
     );
@@ -649,7 +669,7 @@ describe("certifying Brave evidence invariants", () => {
     const ledgers = [];
     for (const demo of policy.requirements.demos) {
       for (const mode of ["forced-h264", "full-ladder"] as const) {
-        const expectedCodecs = expectedTask7Codecs(policy, demo, mode);
+        const expectedCodecs = expectedTask7Codecs(policy, mode);
         const checkpointInputs = demo.states.map((state: string, index: number) => {
           const beforeCanvasSha256 = createHash("sha256")
             .update(`${demo.id}:${mode}:${state}:before`)
@@ -770,8 +790,8 @@ describe("certifying Brave evidence invariants", () => {
   });
 
   it("requires the selected codec and proof for every earlier ladder skip", async () => {
-    const policy = await readJson("scripts/browser-compatibility/certification-policy.json");
-    const selectedAv1 = codecSelectionReport("av01.0.08M.08", []);
+    const policy = await readJson("config/release/browser-certification-policy.json");
+    const selectedAv1 = codecSelectionReport("av01.0.08M.08.0.110.01.01.01.0", []);
     expect(assertCodecSelection(
       selectedAv1,
       "end-user-playground",
@@ -852,7 +872,7 @@ describe("certifying Brave evidence invariants", () => {
       policy
     )).toThrowError("brave-run-unproven-codec-skip");
     expect(() => assertCodecSelection(
-      codecSelectionReport("vp09.00.10.08", []),
+      codecSelectionReport("vp09.00.10.08.01.01.01.01.00", []),
       "end-user-playground",
       "forced-h264",
       policy
@@ -1005,8 +1025,8 @@ function codecSelectionReport(
   rendererDiagnostics: readonly Readonly<{ sourceIndex: number }>[] = []
 ) {
   const authoredSources = [
-    { playerId: "player-1", index: 0, codec: "av01.0.08M.08" },
-    { playerId: "player-1", index: 1, codec: "vp09.00.10.08" },
+    { playerId: "player-1", index: 0, codec: "av01.0.08M.08.0.110.01.01.01.0" },
+    { playerId: "player-1", index: 1, codec: "vp09.00.10.08.01.01.01.01.00" },
     { playerId: "player-1", index: 2, codec: "hvc1.1.6.L93.B0" },
     { playerId: "player-1", index: 3, codec: "avc1.42E020" }
   ];
@@ -1047,8 +1067,7 @@ function codecSelectionReport(
   };
 }
 
-function expectedTask7Codecs(policy: any, demo: any, mode: "forced-h264" | "full-ladder") {
-  if (demo.sourceContract === "h264-only") return ["h264"];
+function expectedTask7Codecs(policy: any, mode: "forced-h264" | "full-ladder") {
   return [...policy.requirements.authoredCodecsByMode[mode]];
 }
 
@@ -1095,8 +1114,8 @@ function task7BraveDiagnosticReport(
   visualState: string
 ) {
   const codecStrings: Record<string, string> = {
-    av1: "av01.0.08M.08",
-    vp9: "vp09.00.10.08",
+    av1: "av01.0.08M.08.0.110.01.01.01.0",
+    vp9: "vp09.00.10.08.01.01.01.01.00",
     h265: "hvc1.1.6.L93.B0",
     h264: "avc1.42E020"
   };

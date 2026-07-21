@@ -1,11 +1,11 @@
-import type { CompiledManifestV1_0 } from "../src/model.js";
+import type { OpaqueCompiledManifestV1_1 } from "../src/model.js";
 
 const DIGEST = "0".repeat(64);
 
-/** A fresh compact manifest covering every graph-bearing 1.0 unit kind. */
-export function validManifest(): CompiledManifestV1_0 {
+/** A fresh compact manifest covering every graph-bearing unit kind. */
+export function validManifest(): OpaqueCompiledManifestV1_1 {
   return {
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "aval-tests",
     codec: "h264",
     bitstream: "annex-b",
@@ -21,7 +21,7 @@ export function validManifest(): CompiledManifestV1_0 {
     renditions: [
       {
         id: "video",
-        codec: "avc1.640020",
+        codec: "avc1.42E020",
         bitDepth: 8,
         codedWidth: 16,
         codedHeight: 16,
@@ -154,7 +154,7 @@ export function validManifest(): CompiledManifestV1_0 {
 }
 
 /** A valid manifest exactly at the state/edge/unit/blob/frame ceilings. */
-export function limitManifest(): CompiledManifestV1_0 {
+export function limitManifest(): OpaqueCompiledManifestV1_1 {
   const bodyUnits = Array.from({ length: 32 }, (_, index) => ({
     id: numbered("body", index),
     kind: "body" as const,
@@ -220,7 +220,7 @@ export function limitManifest(): CompiledManifestV1_0 {
   });
 
   return {
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "aval-limit-tests",
     codec: "h264",
     bitstream: "annex-b",
@@ -236,7 +236,7 @@ export function limitManifest(): CompiledManifestV1_0 {
     renditions: [
       {
         id: "video",
-        codec: "avc1.640020",
+        codec: "avc1.42E020",
         bitDepth: 8,
         codedWidth: 16,
         codedHeight: 16,
@@ -280,7 +280,7 @@ function body(
   frameCount: number,
   portalFrames: readonly number[],
   chunkStart: number
-): Extract<CompiledManifestV1_0["units"][number], { readonly kind: "body" }> {
+): Extract<OpaqueCompiledManifestV1_1["units"][number], { readonly kind: "body" }> {
   return {
     id,
     kind: "body",
@@ -296,7 +296,7 @@ function basicUnit(
   kind: "bridge" | "one-shot",
   frameCount: number,
   chunkStart: number
-): Extract<CompiledManifestV1_0["units"][number], { readonly kind: typeof kind }> {
+): Extract<OpaqueCompiledManifestV1_1["units"][number], { readonly kind: typeof kind }> {
   return { id, kind, frameCount, chunks: [chunk(chunkStart, frameCount)] };
 }
 

@@ -1,11 +1,7 @@
 import {
   FORMAT_HEADER_LENGTH,
-  FormatError,
-  parseFrontIndex,
-  parseHeader,
-  validateCompleteAsset,
-  type FormatHeader,
-  type ParsedFrontIndex
+  type ParsedFrontIndex,
+  type ParsedManifestPrefix
 } from "@pixel-point/aval-format";
 import type {
   NormalizedRuntimeAssetRequest,
@@ -22,10 +18,7 @@ import {
   type BoundedBodyResult
 } from "./bounded-body-reader.js";
 import {
-  RuntimePlaybackError,
   isRuntimePlaybackError,
-  normalizeRuntimeFailure,
-  type RuntimeFailureCode,
   type RuntimeFailureContext
 } from "./errors.js";
 import {
@@ -33,7 +26,6 @@ import {
   fetchFullAsset,
   fetchRuntimeResponseSnapshot,
   runtimeResponseHeadersView,
-  type RuntimeFullAssetFormatAdapter,
   type RuntimeFullAssetResult
 } from "./full-asset-fetch.js";
 import {
@@ -58,6 +50,20 @@ import {
 } from "./load-watchdogs.js";
 import type { RuntimeEntityIdentity } from "./model.js";
 import {
+  captureRuntimeRangeAssetFormatAdapter,
+  DEFAULT_RUNTIME_RANGE_ASSET_FORMAT_ADAPTER,
+  type RuntimeRangeAssetFormatAdapter
+} from "./range-asset-format-adapter.js";
+import {
+  assertCurrent,
+  failureContext,
+  normalizeRangeFailure,
+  operationIsCurrent,
+  runtimeError,
+  safeRelease,
+  type RuntimeRangeLifecyclePhase
+} from "./range-asset-operation.js";
+import {
   captureRuntimePayloadOptions,
   createRuntimeRangeBodyResult,
   validateRuntimePayloadRange,
@@ -65,14 +71,7 @@ import {
 } from "./range-payload-contracts.js";
 import type { Sha256DigestAdapter } from "./sha256-verifier.js";
 
-export interface RuntimeRangeAssetFormatAdapter
-extends RuntimeFullAssetFormatAdapter {
-  parseHeader(bytes: Uint8Array, maximumFileBytes: number): Readonly<FormatHeader>;
-  parseFrontIndex(
-    bytes: Uint8Array,
-    maximumFileBytes: number
-  ): Readonly<ParsedFrontIndex>;
-}
+export type { RuntimeRangeAssetFormatAdapter } from "./range-asset-format-adapter.js";
 export interface OpenRangeAssetSessionInput {
   readonly request: Readonly<NormalizedRuntimeAssetRequest>;
   readonly fetcher: RuntimeFetchAdapter;
@@ -124,22 +123,6 @@ interface RequestOperation {
   readonly watchdogs: RuntimeLoadWatchdogs;
 }
 
-const DEFAULT_FORMAT: Readonly<RuntimeRangeAssetFormatAdapter> = Object.freeze({
-  parseHeader(bytes: Uint8Array, maximumFileBytes: number) {
-    return parseHeader(bytes, { budgets: { maxFileBytes: maximumFileBytes } });
-  },
-  parseFrontIndex(bytes: Uint8Array, maximumFileBytes: number) {
-    return parseFrontIndex(bytes, {
-      budgets: { maxFileBytes: maximumFileBytes }
-    });
-  },
-  validateCompleteAsset(bytes: Uint8Array, maximumFileBytes: number) {
-    return validateCompleteAsset({
-      bytes,
-      options: { budgets: { maxFileBytes: maximumFileBytes } }
-    });
-  }
-});
 export async function openRangeAssetSession(
   inputValue: Readonly<OpenRangeAssetSessionInput>
 ): Promise<OpenedRuntimeAsset> {
@@ -173,7 +156,9 @@ export async function openRangeAssetSession(
   }
 
   let headerBody: Readonly<BoundedBodyResult> | null = null;
-  let frontBody: Readonly<BoundedBodyResult> | null = null;
+  let manifestBody: Readonly<BoundedBodyResult> | null = null;
+  let indexBody: Readonly<BoundedBodyResult> | null = null;
+  let manifestPrefixLease: BoundedBodyByteLease | null = null;
   let prefixLease: BoundedBodyByteLease | null = null;
   try {
     const first = await beginRequest(
@@ -258,16 +243,15 @@ export async function openRangeAssetSession(
         observedBytes: header.declaredFileLength
       });
     }
-    const frontEnd = header.indexOffset + header.indexLength;
-    const frontRange = Object.freeze({
+    const manifestRange = Object.freeze({
       start: FORMAT_HEADER_LENGTH,
-      end: frontEnd - 1
+      end: header.indexOffset - 1
     });
     const second = await beginRequest(
       input,
       controller.signal,
       Object.freeze({
-        Range: formatInclusiveByteRange(frontRange),
+        Range: formatInclusiveByteRange(manifestRange),
         "If-Range": strongEntityTag
       }),
       deadline
@@ -302,22 +286,116 @@ export async function openRangeAssetSession(
     try {
       validatePartialResponse(
         second.response,
-        frontRange,
+        manifestRange,
         initialRange.total,
-      Object.freeze({ finalUrl: initialRange.finalUrl, strongEntityTag }),
-      input.request.policy.maximumFileBytes,
-        failureContext(input, 2, "front-index")
+        Object.freeze({ finalUrl: initialRange.finalUrl, strongEntityTag }),
+        input.request.policy.maximumFileBytes,
+        failureContext(input, 2, "manifest-prefix")
       );
     } catch (cause) {
       await retireOperation(second);
       throw cause;
     }
-    frontBody = await consumeExactBody(
+    manifestBody = await consumeExactBody(
       input,
       controller.signal,
       second,
-      frontEnd - FORMAT_HEADER_LENGTH,
+      header.indexOffset - FORMAT_HEADER_LENGTH,
       2,
+      "manifest-prefix",
+      null,
+      deadline
+    );
+
+    manifestPrefixLease = await reserveBytes(
+      input.resources,
+      header.indexOffset,
+      input,
+      controller.signal,
+      deadline
+    );
+    deadline.assertActive();
+    assertCurrent(input, controller.signal);
+    const manifestPrefix = allocateExact(input.allocate, header.indexOffset);
+    Uint8Array.prototype.set.call(manifestPrefix, headerBody.bytes, 0);
+    Uint8Array.prototype.set.call(
+      manifestPrefix,
+      manifestBody.bytes,
+      FORMAT_HEADER_LENGTH
+    );
+    let admission: Readonly<ParsedManifestPrefix>;
+    try {
+      deadline.assertActive();
+      admission = input.format.parseManifestPrefix(
+        manifestPrefix,
+        input.request.policy.maximumFileBytes
+      );
+      deadline.assertActive();
+    } catch (cause) {
+      throw normalizeRangeFailure(
+        cause,
+        failureContext(input, 2, "manifest-prefix")
+      );
+    }
+    headerBody.release();
+    headerBody = null;
+    manifestBody.release();
+    manifestBody = null;
+
+    const indexOffset = admission.header.indexOffset;
+    const frontEnd = admission.frontIndexRange.length;
+    const indexRange = Object.freeze({ start: indexOffset, end: frontEnd - 1 });
+    const third = await beginRequest(
+      input,
+      controller.signal,
+      Object.freeze({
+        Range: formatInclusiveByteRange(indexRange),
+        "If-Range": strongEntityTag
+      }),
+      deadline
+    );
+    if (third.response.status === 200) {
+      const replacement = await acceptRuntimeFullAssetResponse({
+        request: input.request,
+        resources: input.fullResources,
+        generation: input.generation,
+        isGenerationCurrent: input.isGenerationCurrent,
+        format: input.format,
+        pinnedEntity: {
+          finalUrl: initialRange.finalUrl,
+          strongEntityTag
+        },
+        requestOrdinal: 3,
+        response: third.response,
+        watchdogs: third.watchdogs,
+        signal: controller.signal,
+        deadline
+      });
+      safeRelease(manifestPrefixLease);
+      manifestPrefixLease = null;
+      controller.abort();
+      return replacement;
+    }
+
+    try {
+      validatePartialResponse(
+        third.response,
+        indexRange,
+        initialRange.total,
+        Object.freeze({ finalUrl: initialRange.finalUrl, strongEntityTag }),
+        input.request.policy.maximumFileBytes,
+        failureContext(input, 3, "front-index")
+      );
+    } catch (cause) {
+      await retireOperation(third);
+      throw cause;
+    }
+    indexBody = await consumeExactBody(
+      input,
+      controller.signal,
+      third,
+      frontEnd - indexOffset,
+      3,
       "front-index",
       null,
       deadline
@@ -333,8 +411,8 @@ export async function openRangeAssetSession(
     deadline.assertActive();
     assertCurrent(input, controller.signal);
     const prefix = allocateExact(input.allocate, frontEnd);
-    Uint8Array.prototype.set.call(prefix, headerBody.bytes, 0);
-    Uint8Array.prototype.set.call(prefix, frontBody.bytes, FORMAT_HEADER_LENGTH);
+    Uint8Array.prototype.set.call(prefix, manifestPrefix, 0);
+    Uint8Array.prototype.set.call(prefix, indexBody.bytes, indexOffset);
     let parsed: Readonly<ParsedFrontIndex>;
     try {
       deadline.assertActive();
@@ -346,13 +424,13 @@ export async function openRangeAssetSession(
     } catch (cause) {
       throw normalizeRangeFailure(
         cause,
-        failureContext(input, 2, "front-index")
+        failureContext(input, 3, "front-index")
       );
     }
-    headerBody.release();
-    headerBody = null;
-    frontBody.release();
-    frontBody = null;
+    indexBody.release();
+    indexBody = null;
+    safeRelease(manifestPrefixLease);
+    manifestPrefixLease = null;
     const transferredLease = prefixLease;
     prefixLease = null;
     const session = new RangeAssetSessionImpl(
@@ -371,13 +449,15 @@ export async function openRangeAssetSession(
     );
     if (session.disposed) {
       await session.dispose();
-      throw runtimeError("abort", failureContext(input, 2, "front-index"));
+      throw runtimeError("abort", failureContext(input, 3, "front-index"));
     }
     return session;
   } catch (cause) {
     controller.abort();
     headerBody?.release();
-    frontBody?.release();
+    manifestBody?.release();
+    indexBody?.release();
+    safeRelease(manifestPrefixLease);
     safeRelease(prefixLease);
     throw normalizeRangeFailure(cause, failureContext(input, 1, "initial-range"));
   } finally {
@@ -397,7 +477,7 @@ class RangeAssetSessionImpl implements RuntimeRangeAssetSession {
     readonly signal: AbortSignal;
     readonly listener: () => void;
   } | null = null;
-  #requestOrdinal = 2;
+  #requestOrdinal = 3;
   #activePayloadBodies = 0;
   #disposed = false;
   #metadataReleased = false;
@@ -708,7 +788,7 @@ async function consumeExactBody(
   operation: RequestOperation,
   expectedBytes: number,
   requestOrdinal: number,
-  lifecyclePhase: "initial-range" | "front-index" | "payload-range",
+  lifecyclePhase: RuntimeRangeLifecyclePhase,
   operationSignal: AbortSignal | null = null,
   deadline: RuntimeLoadOperationDeadline | null = null
 ): Promise<Readonly<BoundedBodyResult>> {
@@ -831,7 +911,9 @@ function captureOpenInput(
     throw runtimeError("load-failure");
   }
   const fetcher = captureFetcher(fetcherValue);
-  const format = captureFormat(formatValue ?? DEFAULT_FORMAT);
+  const format = captureRuntimeRangeAssetFormatAdapter(
+    formatValue ?? DEFAULT_RUNTIME_RANGE_ASSET_FORMAT_ADAPTER
+  );
   const allocate = captureAllocator(allocateValue ?? allocateBytes);
   return Object.freeze({
     request,
@@ -857,36 +939,6 @@ function captureFetcher(value: RuntimeFetchAdapter): RuntimeFetchAdapter {
       return Reflect.apply(fetchMethod, value, [url, init]) as
         PromiseLike<RuntimeFetchResponseView>;
     }
-  });
-}
-
-function captureFormat(
-  value: RuntimeRangeAssetFormatAdapter
-): RuntimeRangeAssetFormatAdapter {
-  let header: unknown;
-  let front: unknown;
-  let complete: unknown;
-  try {
-    header = Reflect.get(value, "parseHeader");
-    front = Reflect.get(value, "parseFrontIndex");
-    complete = Reflect.get(value, "validateCompleteAsset");
-  } catch {}
-  if (
-    typeof header !== "function" ||
-    typeof front !== "function" ||
-    typeof complete !== "function"
-  ) {
-    throw runtimeError("load-failure");
-  }
-  return Object.freeze({
-    parseHeader: (bytes: Uint8Array, cap: number) =>
-      Reflect.apply(header, value, [bytes, cap]) as Readonly<FormatHeader>,
-    parseFrontIndex: (bytes: Uint8Array, cap: number) =>
-      Reflect.apply(front, value, [bytes, cap]) as Readonly<ParsedFrontIndex>,
-    validateCompleteAsset: (bytes: Uint8Array, cap: number) =>
-      Reflect.apply(complete, value, [bytes, cap]) as ReturnType<
-        RuntimeFullAssetFormatAdapter["validateCompleteAsset"]
-      >
   });
 }
 
@@ -931,65 +983,4 @@ function captureLease(value: BoundedBodyByteLease): BoundedBodyByteLease {
       Reflect.apply(release, value, []);
     }
   });
-}
-
-function failureContext(
-  input: { readonly generation: number },
-  requestOrdinal: number,
-  lifecyclePhase: "initial-range" | "front-index" | "payload-range"
-): Readonly<RuntimeFailureContext> {
-  return Object.freeze({ generation: input.generation, requestOrdinal, lifecyclePhase });
-}
-
-function normalizeRangeFailure(
-  cause: unknown,
-  context: Readonly<RuntimeFailureContext>
-): RuntimePlaybackError {
-  if (isRuntimePlaybackError(cause)) {
-    return runtimeError(cause.code, {
-      ...context,
-      ...cause.failure.context
-    });
-  }
-  if (cause instanceof FormatError) {
-    return runtimeError("invalid-asset", {
-      ...context,
-      sourceCode: cause.code,
-      ...(cause.offset === undefined ? {} : { offset: cause.offset }),
-      ...(cause.path === undefined ? {} : { sourcePath: cause.path })
-    });
-  }
-  if (cause instanceof DOMException && cause.name === "AbortError") {
-    return runtimeError("abort", context);
-  }
-  return runtimeError("load-failure", context);
-}
-
-function runtimeError(
-  code: RuntimeFailureCode,
-  context: Readonly<RuntimeFailureContext> = {}
-): RuntimePlaybackError {
-  return new RuntimePlaybackError(normalizeRuntimeFailure(code, undefined, context));
-}
-
-function assertCurrent(
-  input: Readonly<CapturedOpenInput>,
-  signal: AbortSignal
-): void {
-  if (!operationIsCurrent(input, signal)) throw runtimeError("abort");
-}
-
-function operationIsCurrent(
-  input: Readonly<CapturedOpenInput>,
-  signal: AbortSignal
-): boolean {
-  if (signal.aborted || input.request.signal?.aborted === true) return false;
-  try { return input.isGenerationCurrent(input.generation) === true; } catch {
-    return false;
-  }
-}
-
-function safeRelease(lease: BoundedBodyByteLease | null): void {
-  if (lease === null) return;
-  try { lease.release(); } catch {}
 }

@@ -497,7 +497,7 @@ Set the API default classification to `experimental`, change the API-change desc
 
 - [ ] **Step 4: Remove browser-matrix drift**
 
-Replace hand-maintained release expectations with a derived/current mapping from `scripts/browser-compatibility/certification-policy.json`, or add a parity gate that fails whenever release-required slots omit a required 24-month playback case. Update `release-policy.test.ts` so Android 16/17 and the current Firefox set cannot silently disappear.
+Replace hand-maintained release expectations with a derived/current mapping from `config/release/browser-certification-policy.json`, or add a parity gate that fails whenever release-required slots omit a required 24-month playback case. Update `release-policy.test.ts` so Android 16/17 and the current Firefox set cannot silently disappear.
 
 - [ ] **Step 5: Run docs, examples, release, and API gates**
 

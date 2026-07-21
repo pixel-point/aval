@@ -16,16 +16,16 @@ const REQUIRED_RUNTIME_EXPORTS = Object.freeze([
   "CHUNK_INDEX_RECORD_LENGTH",
   "FORMAT_VERSION_MAJOR",
   "FORMAT_VERSION_MINOR",
-  "FORMAT_SUPPORTED_VERSIONS",
+  "H264_CONSTRAINED_BASELINE_CODECS",
   "PACKED_ALPHA_WITNESS_MAX_INTERVAL_WIDTH",
   "PACKED_ALPHA_WITNESS_MAX_REFERENCE_DELTA",
   "PACKED_ALPHA_WITNESS_MAX_SAMPLES",
   "FormatError",
   "classifyDecoderColor",
   "createCanonicalChunkPlan",
+  "createVideoPayloadValidator",
   "deriveVideoRenditionGeometry",
   "h264CodecForLevel",
-  "h264CodecForProfileLevel",
   "h264LevelLimits",
   "inspectH264AnnexBRendition",
   "minimumH264CompatibilityLevel",
@@ -38,6 +38,7 @@ const REQUIRED_RUNTIME_EXPORTS = Object.freeze([
   "inspectVp9Rendition",
   "inspectAv1Rendition",
   "parseFrontIndex",
+  "parseManifestPrefix",
   "validateCompleteAsset",
   "writeCanonicalAsset"
 ] as const);
@@ -66,7 +67,8 @@ describe("@pixel-point/aval-format public boundary", () => {
 
   it("keeps all public collection constants and resolved budgets immutable", () => {
     expect(Object.isFrozen(packageApi.FORMAT_MAGIC)).toBe(true);
-    expect(Object.isFrozen(packageApi.FORMAT_SUPPORTED_VERSIONS)).toBe(true);
+    expect(Object.isFrozen(packageApi.H264_CONSTRAINED_BASELINE_CODECS))
+      .toBe(true);
     expect(Object.isFrozen(packageApi.CHUNK_INDEX_MAGIC)).toBe(true);
     expect(Object.isFrozen(packageApi.IDENTIFIER_PATTERN)).toBe(true);
     expect(Object.isFrozen(packageApi.SHA256_HEX_PATTERN)).toBe(true);

@@ -32,8 +32,9 @@ dist/motion/
 `--out` always names the complete bundle directory. `--force` atomically
 replaces that directory as one unit.
 
-The project schema, every `.avl` file, and the build report are exact 1.0
-contracts. The ordered `encodings` array is also the browser preference order.
+The project schema and build report are exact 1.0 contracts. Every `.avl` file
+uses wire format 1.1. The ordered `encodings` array is also the browser
+preference order.
 This encoding fragment omits the required canvas, source, and graph fields:
 
 ```json

@@ -499,26 +499,11 @@ function validateOutputExpectation(
   ) {
     throw protocolError("expected visible rectangle exceeds coded dimensions");
   }
-  if (expected.colorSpace !== null) validateColorSpace(expected.colorSpace);
+  validateColorSpace(expected.colorSpace);
 }
 
 function validateColorSpace(value: DecoderWorkerColorSpaceExpectation): void {
-  if (!isRecord(value) || !hasExactKeys(value, [
-    "fullRange",
-    "matrix",
-    "primaries",
-    "transfer"
-  ])) {
-    throw protocolError("expected color space has unknown or missing fields");
-  }
-  if (value.fullRange !== null && typeof value.fullRange !== "boolean") {
-    throw protocolError("expected color-space fullRange is invalid");
-  }
-  for (const key of ["matrix", "primaries", "transfer"] as const) {
-    if (value[key] !== null && typeof value[key] !== "string") {
-      throw protocolError(`expected color-space ${key} is invalid`);
-    }
-  }
+  requireBt709Limited(value, "expected color space");
 }
 
 function validateLimits(limits: DecoderWorkerLimits): void {
@@ -577,34 +562,13 @@ function requireBt709Limited(
 
 function matchesDecodedBt709ColorSpace(
   actual: VideoColorSpace,
-  expected: DecoderWorkerColorSpaceExpectation | null
+  expected: DecoderWorkerColorSpaceExpectation
 ): boolean {
-  const actualTuple = decoderColorTuple(actual);
-  if (expected !== null) {
-    return classifyDecoderColor(
-      decoderColorTuple(expected),
-      actualTuple
-    ).kind !== "incompatible";
-  }
-  if (actualTuple.every((field) => field === null)) return true;
-  if (actualTuple.every((field) => field !== null)) {
-    return classifyDecoderColor(BT709_LIMITED, actualTuple).kind !==
-      "incompatible";
-  }
-  // Configuration-less validation may expose partially omitted metadata.
-  // Keep that legacy path permissive only when every concrete field is BT.709.
-  return actual.fullRange !== true &&
-    (actual.matrix === null || actual.matrix === "bt709") &&
-    (actual.primaries === null || actual.primaries === "bt709") &&
-    (actual.transfer === null || actual.transfer === "bt709");
+  return classifyDecoderColor(
+    decoderColorTuple(expected),
+    decoderColorTuple(actual)
+  ).kind !== "incompatible";
 }
-
-const BT709_LIMITED: Readonly<DecoderColorTuple> = Object.freeze([
-  "bt709",
-  "bt709",
-  "bt709",
-  false
-]);
 
 function decoderColorTuple(
   color: Pick<

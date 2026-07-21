@@ -26,6 +26,14 @@ const ANDROID_BT709_COLOR = Object.freeze({
   primaries: "bt709",
   transfer: "smpte170m"
 } as const);
+const DEFAULT_EXPECTATION = Object.freeze({
+  codedWidth: 16,
+  codedHeight: 16,
+  displayWidth: 2,
+  displayHeight: 2,
+  visibleRect: Object.freeze({ x: 0, y: 0, width: 2, height: 2 }),
+  colorSpace: BT709_LIMITED_COLOR
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -234,8 +242,8 @@ describe("Decoder output certification", () => {
   });
 
   it.each([
-    ["limited-range sRGB", "avc1.640020", false],
-    ["captured WebKit H.264", "avc1.640020", true],
+    ["limited-range sRGB", "avc1.42E020", false],
+    ["captured WebKit H.264", "avc1.42E020", true],
     ["captured WebKit HEVC", "hvc1.1.6.L93.B0", true]
   ] as const)(
     "accepts the %s transfer normalization of limited BT.709",
@@ -503,12 +511,19 @@ describe("Decoder output certification", () => {
       vi.stubGlobal("Worker", Worker);
       vi.stubGlobal("VideoFrame", VideoFrame);
       const decoder = new Decoder({
-        codec: "avc1.640020",
+        codec: "avc1.42E020",
         codedWidth,
         codedHeight,
         displayAspectWidth: storageWidth,
         displayAspectHeight: storageHeight
-      }, undefined, {
+      }, {
+        codedWidth,
+        codedHeight,
+        displayWidth: storageWidth,
+        displayHeight: storageHeight,
+        visibleRect: { x: 0, y: 0, width: storageWidth, height: storageHeight },
+        colorSpace: BT709_LIMITED_COLOR
+      }, {
         Worker,
         VideoFrame: VideoFrame as unknown as typeof globalThis.VideoFrame
       });
@@ -1327,12 +1342,12 @@ describe("Decoder output certification", () => {
 
 function configuredDecoder(limits: Readonly<DecoderLimits> = {}): Decoder {
   return new Decoder({
-    codec: "avc1.640020",
+    codec: "avc1.42E020",
     codedWidth: 16,
     codedHeight: 16,
     displayAspectWidth: 2,
     displayAspectHeight: 2
-  }, undefined, limits);
+  }, DEFAULT_EXPECTATION, limits);
 }
 
 function strictBt709Decoder(

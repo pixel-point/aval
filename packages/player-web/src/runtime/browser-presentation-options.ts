@@ -10,10 +10,11 @@ import type {
   BrowserCanvasBackingResourceTransition
 } from "./browser-presentation-planes.js";
 import {
-  MAX_PRESENTATION_BACKING_DIMENSION,
   PRESENTATION_FIT_MODES,
   type PresentationFit
 } from "./presentation-geometry.js";
+
+const UNBOUNDED_PRESENTATION_BACKING_DIMENSION = Number.MAX_SAFE_INTEGER;
 
 export interface CapturedBrowserPresentationPlanesOptions {
   readonly animatedCanvas: HTMLCanvasElement;
@@ -22,7 +23,6 @@ export interface CapturedBrowserPresentationPlanesOptions {
   readonly maxBackingHeight: number;
   readonly maxBackingBytes: number;
   readonly initialPresentation: Readonly<BrowserPresentationResizeInput> | null;
-  readonly onClamp: BrowserPresentationPlanesOptions["onClamp"];
   readonly createBackend: BrowserPresentationPlanesOptions["createBackend"];
   readonly backingResources: Readonly<BrowserCanvasBackingResourceHost> | null;
 }
@@ -47,7 +47,6 @@ export function capturePresentationPlaneOptions(
   let maximumHeightValue: unknown;
   let maximumBytes: unknown;
   let initialPresentationValue: unknown;
-  let onClamp: unknown;
   let createBackend: unknown;
   let backingResourcesValue: unknown;
   try {
@@ -70,7 +69,6 @@ export function capturePresentationPlaneOptions(
     maximumHeightValue = Reflect.get(options, "maxBackingHeight");
     maximumBytes = Reflect.get(options, "maxBackingBytes");
     initialPresentationValue = Reflect.get(options, "initialPresentation");
-    onClamp = Reflect.get(options, "onClamp");
     createBackend = Reflect.get(options, "createBackend");
     backingResourcesValue = Reflect.get(options, "backingResources");
   } catch {
@@ -79,7 +77,6 @@ export function capturePresentationPlaneOptions(
   if (
     animatedCanvas === null ||
     typeof animatedCanvas !== "object" ||
-    (onClamp !== undefined && typeof onClamp !== "function") ||
     (createBackend !== undefined && typeof createBackend !== "function")
   ) {
     throw new TypeError("browser presentation plane options are invalid");
@@ -99,9 +96,9 @@ export function capturePresentationPlaneOptions(
     throw new RangeError("browser presentation canvas descriptor is invalid");
   }
   const maximumWidth = maximumWidthValue ??
-    MAX_PRESENTATION_BACKING_DIMENSION;
+    UNBOUNDED_PRESENTATION_BACKING_DIMENSION;
   const maximumHeight = maximumHeightValue ??
-    MAX_PRESENTATION_BACKING_DIMENSION;
+    UNBOUNDED_PRESENTATION_BACKING_DIMENSION;
   for (const [value, label] of [
     [maximumWidth, "maximum backing width"],
     [maximumHeight, "maximum backing height"],
@@ -141,7 +138,6 @@ export function capturePresentationPlaneOptions(
     maxBackingHeight: maximumHeight as number,
     maxBackingBytes: maximumBytes as number,
     initialPresentation,
-    onClamp: onClamp as BrowserPresentationPlanesOptions["onClamp"],
     createBackend: createBackend as BrowserPresentationPlanesOptions["createBackend"],
     backingResources
   });

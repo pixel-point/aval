@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { parseVideoCodecString } from "@pixel-point/aval-format";
 
 import {
   DIAGNOSTIC_REPORT_SCHEMA,
@@ -36,9 +37,9 @@ import {
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = resolve(SCRIPT_DIRECTORY, "../..");
 const DEFAULT_POLICY_PATH =
-  "scripts/browser-compatibility/certification-policy.json";
+  "config/release/browser-certification-policy.json";
 const DEFAULT_POLICY_SCHEMA_PATH =
-  "scripts/browser-compatibility/certification-policy.schema.json";
+  "config/release/browser-certification-policy.schema.json";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const SESSION_PATTERN =
@@ -53,6 +54,12 @@ const BRAVE_PROVENANCE_PATTERN =
 const SCHEMA_VALIDATORS = compileSchemas();
 const POLICY_VALIDATOR_CACHE = new Map();
 export const LIVE_EVIDENCE_RUN_IDENTITY_FILENAME = "run-identity.json";
+
+function codecFamily(value) {
+  return typeof value === "string"
+    ? parseVideoCodecString(value)?.family ?? null
+    : null;
+}
 
 export async function assembleLiveEvidenceManifest({
   createAttestation = createSourceTreeAttestation,
@@ -398,7 +405,7 @@ async function assembleCase({
     }
     checkpoints.push(checkpoint.manifestCheckpoint);
   }
-  const requiredCodecs = expectedCodecsForCase(policy, demo, mode);
+  const requiredCodecs = expectedCodecsForCase(policy, mode);
   if (!sameArray(requiredCodecs, expectedAuthoredCodecs)) {
     throw new Error(`live-assembly-authored-codecs-mismatch:${caseId}`);
   }
@@ -546,14 +553,10 @@ async function assembleCheckpoint({
   });
 }
 
-function expectedCodecsForCase(policy, demo, mode) {
-  if (demo.sourceContract === "h264-only") return Object.freeze(["h264"]);
-  if (demo.sourceContract === "multi-source") {
-    return Object.freeze([
-      ...policy.requirements.authoredCodecsByMode[mode]
-    ]);
-  }
-  throw new Error(`live-assembly-demo-source-contract-invalid:${demo.id}`);
+function expectedCodecsForCase(policy, mode) {
+  return Object.freeze([
+    ...policy.requirements.authoredCodecsByMode[mode]
+  ]);
 }
 
 function assertPolicyReady(policy) {
@@ -871,15 +874,6 @@ function resolveContained(root, path, code) {
   if (relation === "" || relation === ".." || relation.startsWith(`..${sep}`) ||
       isAbsolute(relation)) throw new Error(code);
   return resolved;
-}
-
-function codecFamily(value) {
-  if (typeof value !== "string") return null;
-  if (/^av01(?:\.|$)/iu.test(value)) return "av1";
-  if (/^vp09(?:\.|$)/iu.test(value)) return "vp9";
-  if (/^(?:hvc1|hev1)(?:\.|$)/iu.test(value)) return "h265";
-  if (/^(?:avc1|avc3)(?:\.|$)/iu.test(value)) return "h264";
-  return null;
 }
 
 function sha256(value) {

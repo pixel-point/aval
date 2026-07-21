@@ -10,9 +10,6 @@ export const AVAL_ATTRIBUTES = Object.freeze([
   "height"
 ] as const);
 
-export type AvalAttribute =
-  (typeof AVAL_ATTRIBUTES)[number];
-
 export const AVAL_UPGRADE_PROPERTIES = Object.freeze([
   "crossOrigin",
   "motion",

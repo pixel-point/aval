@@ -1,6 +1,7 @@
 import "./style.css";
 import {
   parseCompileBundleReport,
+  parseVideoCodecString,
   VIDEO_CODECS,
   type VideoCodec
 } from "@pixel-point/aval-format";
@@ -230,10 +231,8 @@ function setControlsDisabled(disabled: boolean): void {
 }
 
 function familyForCodec(codec: string): Codec {
-  if (codec.startsWith("av01.")) return "av1";
-  if (codec.startsWith("vp09.")) return "vp9";
-  if (codec.startsWith("hvc1.")) return "h265";
-  if (codec.startsWith("avc1.")) return "h264";
+  const family = parseVideoCodecString(codec)?.family;
+  if (family !== undefined) return family;
   throw new TypeError(`unexpected selected codec: ${codec}`);
 }
 

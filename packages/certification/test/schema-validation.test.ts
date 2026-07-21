@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { validateDisplayReport, validateRuntimeReport } from "../src/schema-validation.js";
-import { loadCertificationSchema } from "../src/schema-loader.js";
 import { EXACT_BROWSER_BUILD_PATTERN_SOURCE, EXACT_PRODUCT_VERSION_PATTERN_SOURCE } from "../src/exact-version.js";
 import { FATAL_ERROR_BOUNDARY_ATTACHMENT_ID, REQUIRED_DISPLAY_CRITERION_IDS, REQUIRED_RUNTIME_CRITERION_IDS } from "../src/scenario-contract.js";
 import { validRuntimeReport } from "./test-report.js";
+import { loadCertificationSchema } from "./schema-test-support.js";
 
 const digest = "b".repeat(64);
 

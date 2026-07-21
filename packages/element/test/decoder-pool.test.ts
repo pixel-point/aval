@@ -17,11 +17,24 @@ import {
 } from "../src/decoder-protocol.js";
 
 const CONFIG = Object.freeze({
-  codec: "avc1.640020",
+  codec: "avc1.42E020",
   codedWidth: 16,
   codedHeight: 16,
   displayAspectWidth: 2,
   displayAspectHeight: 2
+});
+const EXPECTATION = Object.freeze({
+  codedWidth: 16,
+  codedHeight: 16,
+  displayWidth: 2,
+  displayHeight: 2,
+  visibleRect: Object.freeze({ x: 0, y: 0, width: 2, height: 2 }),
+  colorSpace: Object.freeze({
+    fullRange: false,
+    matrix: "bt709" as const,
+    primaries: "bt709" as const,
+    transfer: "bt709" as const
+  })
 });
 
 describe("DecoderPool", () => {
@@ -439,7 +452,7 @@ function configuredPool(
   harness: WorkerHarness,
   limits: Readonly<DecoderLimits> = {}
 ): DecoderPool {
-  return new DecoderPool(CONFIG, undefined, {
+  return new DecoderPool(CONFIG, EXPECTATION, {
     ...limits,
     Worker: harness.Worker,
     VideoFrame: FakeVideoFrame as unknown as typeof VideoFrame

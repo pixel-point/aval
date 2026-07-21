@@ -1,7 +1,7 @@
 import type {
   CompiledManifest,
-  CompiledManifestV1_0,
-  ProductionRenditionV1_0,
+  OpaqueProductionRenditionV1_1,
+  ProductionRendition,
   VideoCodec,
   VideoLayout
 } from "@pixel-point/aval-format";
@@ -11,7 +11,7 @@ import { certifyVideoRenditions } from "./video-rendition-certification.js";
 import { selectVideoRendition } from "./video-rendition-selection.js";
 
 const CODECS = Object.freeze({
-  h264: Object.freeze({ codec: "avc1.640020", bitstream: "annex-b" as const, bitDepth: 8 as const }),
+  h264: Object.freeze({ codec: "avc1.42E020", bitstream: "annex-b" as const, bitDepth: 8 as const }),
   h265: Object.freeze({ codec: "hvc1.1.6.L30.90", bitstream: "annex-b" as const, bitDepth: 8 as const }),
   vp9: Object.freeze({
     codec: "vp09.00.10.08.01.01.01.01.00",
@@ -149,6 +149,12 @@ describe("catalog-certified video rendition selection", () => {
           type: "stacked",
           colorRect: [0, 0, 63, 31],
           alphaRect: [0, 40, 63, 31]
+        },
+        outputQualification: {
+          kind: "packed-alpha-v1",
+          unit: "qualification",
+          frame: 0,
+          samples: [{ x: 0, y: 40, expectedRange: [0, 255] }]
         }
       }]
     }));
@@ -168,13 +174,13 @@ function createManifest(options: Readonly<{
   layout?: VideoLayout;
   width?: number;
   height?: number;
-  renditions?: readonly ProductionRenditionV1_0[];
-}>): CompiledManifestV1_0 {
+  renditions?: readonly ProductionRendition[];
+}>): CompiledManifest {
   const spec = CODECS[options.family];
   const width = options.width ?? 64;
   const height = options.height ?? 32;
   return {
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "selection-test",
     codec: options.family,
     bitstream: spec.bitstream,
@@ -195,7 +201,7 @@ function createManifest(options: Readonly<{
       persistentCacheBytes: 1,
       runtimeWorkingSetBytes: 1
     }
-  };
+  } as CompiledManifest;
 }
 
 function createRendition(
@@ -203,7 +209,7 @@ function createRendition(
   family: VideoCodec,
   width: number,
   height: number
-): ProductionRenditionV1_0 {
+): OpaqueProductionRenditionV1_1 {
   const spec = CODECS[family];
   return {
     id,

@@ -19,6 +19,10 @@ import { execFile as execFileCallback } from "node:child_process";
 import { inflateSync } from "node:zlib";
 
 import { chromium } from "playwright";
+import {
+  H264_CONSTRAINED_BASELINE_CODECS,
+  parseVideoCodecString
+} from "@pixel-point/aval-format";
 
 import { verifyBraveVersionOutput } from "./acquire-builds.mjs";
 
@@ -42,6 +46,12 @@ const PLAYBACK_LANE_COUNTER_KEYS = Object.freeze([
   "nativeDecoderCreatesByLane",
   "nativeDecoderClosesByLane"
 ]);
+
+function codecFamily(value) {
+  return typeof value === "string"
+    ? parseVideoCodecString(value)?.family ?? null
+    : null;
+}
 
 export function planBraveRuns(policy, { platform, hostOsVersion, manifest }) {
   const providerKind = platform === "macos"
@@ -931,12 +941,18 @@ function unfilterPngByte(filter, raw, left, above, upperLeft) {
 }
 
 async function installForcedH264SourcePolicy(page) {
-  await page.addInitScript(() => {
-    const h264 = /(?:avc1|avc3|h264)/iu;
+  await page.addInitScript((canonicalH264Codecs) => {
+    const h264 = new Set(canonicalH264Codecs);
+    const prefix = 'application/vnd.aval; codecs="';
+    const isH264 = (source) => {
+      const type = source.getAttribute("type");
+      return typeof type === "string" && type.startsWith(prefix) &&
+        type.endsWith('"') && h264.has(type.slice(prefix.length, -1));
+    };
     const prune = (root) => {
       if (!(root instanceof Element || root instanceof Document)) return;
       for (const source of root.querySelectorAll("aval-player > source")) {
-        if (!h264.test(source.getAttribute("type") ?? "")) source.remove();
+        if (!isH264(source)) source.remove();
       }
     };
     new MutationObserver((records) => {
@@ -945,7 +961,7 @@ async function installForcedH264SourcePolicy(page) {
       }
       prune(document);
     }).observe(document, { childList: true, subtree: true });
-  });
+  }, H264_CONSTRAINED_BASELINE_CODECS);
 }
 
 async function installPageLedger(player) {
@@ -1251,9 +1267,7 @@ export function assertAuthoredSources(report, demoId, mode, policy) {
     throw new Error(`brave-run-authored-codec-unrecognized:${demoId}:${mode}`);
   }
   const expected = policy.requirements.authoredCodecsByMode[mode];
-  const demo = policy.requirements.demos.find(({ id }) => id === demoId);
-  const exactExpected = demo?.sourceContract === "h264-only" ? ["h264"] : expected;
-  if (JSON.stringify(observed) === JSON.stringify(exactExpected)) return observed;
+  if (JSON.stringify(observed) === JSON.stringify(expected)) return observed;
   throw new Error(`brave-run-authored-sources-mismatch:${demoId}:${mode}:${JSON.stringify(observed)}`);
 }
 
@@ -1277,7 +1291,7 @@ export function assertCodecSelection(report, demoId, mode, policy) {
   if (runtime?.selectedRendition !== demo.renditionId) {
     throw new Error(`brave-run-selected-rendition-mismatch:${demoId}`);
   }
-  if (mode === "forced-h264" || demo.sourceContract === "h264-only") {
+  if (mode === "forced-h264") {
     if (selectedCodec !== "h264") {
       throw new Error(`brave-run-forced-h264-not-selected:${demoId}:${selectedCodec}`);
     }
@@ -1376,15 +1390,6 @@ function permittedStartupRendererFailure(diagnostic) {
     diagnostic?.glError === null &&
     diagnostic?.contextLost === false &&
     diagnostic?.uploadPath === "rgba-copy";
-}
-
-function codecFamily(value) {
-  if (typeof value !== "string") return null;
-  if (/^av01(?:\.|$)/iu.test(value)) return "av1";
-  if (/^vp09(?:\.|$)/iu.test(value)) return "vp9";
-  if (/^(?:hvc1|hev1)(?:\.|$)/iu.test(value)) return "h265";
-  if (/^(?:avc1|avc3)(?:\.|$)/iu.test(value)) return "h264";
-  return null;
 }
 
 function assertHealthyReport(report, slotId, demoId, mode) {

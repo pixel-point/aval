@@ -82,7 +82,7 @@ export interface SpsFixtureOptions {
 }
 
 export function makeSps(options: SpsFixtureOptions = {}): Uint8Array {
-  const profileIdc = options.profileIdc ?? 100;
+  const profileIdc = options.profileIdc ?? 66;
   const highProfileSyntax = profileIdc !== 66;
   const writer = new BitWriter()
     .bits(profileIdc, 8)
@@ -106,7 +106,7 @@ export function makeSps(options: SpsFixtureOptions = {}): Uint8Array {
     writer.bit(true).se(0).se(0).ue(1).se(2);
   }
   writer
-    .ue(options.maxNumRefFrames ?? 4)
+    .ue(options.maxNumRefFrames ?? (highProfileSyntax ? 4 : 1))
     .bit(false)
     .ue((options.widthInMacroblocks ?? 4) - 1)
     .ue((options.heightInMacroblocks ?? 4) - 1)
@@ -154,8 +154,8 @@ export function makeSps(options: SpsFixtureOptions = {}): Uint8Array {
         .ue(1)
         .ue(16)
         .ue(16)
-        .ue(options.maxNumReorderFrames ?? 2)
-        .ue(options.maxDecFrameBuffering ?? 4);
+        .ue(options.maxNumReorderFrames ?? (highProfileSyntax ? 2 : 0))
+        .ue(options.maxDecFrameBuffering ?? (highProfileSyntax ? 4 : 1));
     }
   }
   return nal(0x67, writer.trailing().toBytes(), 4);
@@ -198,7 +198,7 @@ export interface PpsFixtureOptions {
 }
 
 export function makePps(options: PpsFixtureOptions = {}): Uint8Array {
-  const highProfileSyntax = (options.profileIdc ?? 100) === 100;
+  const highProfileSyntax = (options.profileIdc ?? 66) === 100;
   const includeExtension = highProfileSyntax || options.transform8x8 !== undefined;
   const writer = new BitWriter()
     .ue(options.ppsId ?? 0)
@@ -235,6 +235,7 @@ export interface SliceFixtureOptions {
   readonly idrPicId?: number;
   readonly picOrderCountType?: 0 | 1 | 2;
   readonly picOrderCntLsb?: number;
+  readonly numRefIdxL0ActiveMinus1?: number;
   readonly referenceListModification?: boolean;
   readonly adaptiveMarking?: boolean;
   readonly adaptiveMarkingOperation?: 0 | 1 | 2;
@@ -261,7 +262,11 @@ export function makeSlice(options: SliceFixtureOptions): Uint8Array {
     writer.bit(false); // direct_spatial_mv_pred_flag
   }
   if (normalizedType === 0 || normalizedType === 1) {
-    writer.bit(false); // num_ref_idx_active_override_flag
+    const referenceOverride = options.numRefIdxL0ActiveMinus1;
+    writer.bit(referenceOverride !== undefined); // num_ref_idx_active_override_flag
+    if (referenceOverride !== undefined) {
+      writer.ue(referenceOverride);
+    }
     writer.bit(options.referenceListModification === true);
     if (options.referenceListModification === true) {
       writer.ue(3);
@@ -364,7 +369,7 @@ export function validInspectionInput(options: {
   readonly requireBt709LimitedRange?: boolean;
   readonly units?: H264RenditionInspectionInput["units"];
 } = {}): MutableInspectionInput {
-  const profileIdc = options.spsOptions?.profileIdc ?? 100;
+  const profileIdc = options.spsOptions?.profileIdc ?? 66;
   const entropyCoding = profileIdc !== 66;
   const sps = makeSps({
     ...options.spsOptions,

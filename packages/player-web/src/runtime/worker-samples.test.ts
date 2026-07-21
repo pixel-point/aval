@@ -28,7 +28,7 @@ const LIMITS = Object.freeze({
 
 const RENDITION = Object.freeze({
   id: "vp9-main",
-  codec: "vp09.00.10.08",
+  codec: "vp09.00.10.08.01.01.01.01.00",
   bitDepth: 8,
   codedWidth: 64,
   codedHeight: 64,

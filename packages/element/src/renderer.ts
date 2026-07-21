@@ -43,7 +43,9 @@ export class Renderer implements RendererRuntime {
     this.#runtime.resize(cssWidth, cssHeight, devicePixelRatio, fit);
   }
 
-  public draw(frame: VideoFrame): Promise<void> { return this.#runtime.draw(frame); }
+  public draw(frame: VideoFrame, newDecoderRun: boolean): Promise<void> {
+    return this.#runtime.draw(frame, newDecoderRun);
+  }
 
   public inspectAndPrime(
     frame: VideoFrame,
@@ -52,8 +54,13 @@ export class Renderer implements RendererRuntime {
     return this.#runtime.inspectAndPrime(frame, inspect);
   }
 
-  public store(group: string, index: number, frame: VideoFrame): Promise<void> {
-    return this.#runtime.store(group, index, frame);
+  public store(
+    group: string,
+    index: number,
+    frame: VideoFrame,
+    newDecoderRun: boolean
+  ): Promise<void> {
+    return this.#runtime.store(group, index, frame, newDecoderRun);
   }
 
   public drawStored(group: string, index: number): Promise<void> {

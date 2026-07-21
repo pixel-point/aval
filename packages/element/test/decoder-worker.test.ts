@@ -263,7 +263,7 @@ describe("decoder worker protocol", () => {
         exception: { name: "Error", message: "[2001:db8::1]?token=SECRET" }
       },
       { ...valid, firstFrame: new Uint8Array([1, 2, 3]) },
-      { ...valid, firstFrame: { config: { codec: "avc1.640020" } } },
+      { ...valid, firstFrame: { config: { codec: "avc1.42E020" } } },
       { ...valid, firstFrame: new Frame() },
       { ...valid, firstFrame: { ...valid.firstFrame, timestamp: Number.NaN } },
       {
@@ -281,7 +281,7 @@ describe("decoder worker protocol", () => {
         }
       },
       { ...valid, lastGoodFrame: new Uint8Array([1, 2, 3]) },
-      { ...valid, lastGoodFrame: { config: { codec: "avc1.640020" } } },
+      { ...valid, lastGoodFrame: { config: { codec: "avc1.42E020" } } },
       { ...valid, lastGoodFrame: new Frame() },
       {
         ...valid,
@@ -489,7 +489,7 @@ describe("decoder worker protocol", () => {
         stack: "private stack",
         cause: new Error("private cause"),
         data: new Uint8Array([1, 2, 3]),
-        config: { codec: "av01.0.08M.08" },
+        config: { codec: "av01.0.08M.08.0.110.01.01.01.0" },
         frame
       },
       firstFrame
@@ -649,7 +649,7 @@ describe("decoder worker run isolation", () => {
   it("closes a late retired-run frame instead of relabeling it as the next run", async () => {
     const worker = await fakeDecoderWorker();
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
     const retired = worker.decoders[0]!;
@@ -672,7 +672,7 @@ describe("decoder worker run isolation", () => {
   it("ignores a close command after that run's flush already resolved", async () => {
     const worker = await fakeDecoderWorker();
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
     const retired = worker.decoders[0]!;
@@ -691,7 +691,7 @@ describe("decoder worker run isolation", () => {
   it("reuses an in-flight flush when close wins the terminal race", async () => {
     const worker = await fakeDecoderWorker();
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
     const closing = worker.decoders[0]!;
@@ -712,7 +712,7 @@ describe("decoder worker run isolation", () => {
   it("reports a close-initiated flush rejection instead of closing", async () => {
     const worker = await fakeDecoderWorker();
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
     const closing = worker.decoders[0]!;
@@ -736,7 +736,7 @@ describe("decoder worker run isolation", () => {
   it("reports rejection when close takes ownership of an in-flight flush", async () => {
     const worker = await fakeDecoderWorker();
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
     const closing = worker.decoders[0]!;
@@ -763,7 +763,7 @@ describe("decoder worker run isolation", () => {
   it("keeps every older close idempotent and rejects future generations", async () => {
     const worker = await fakeDecoderWorker();
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     for (const run of [1, 2]) {
       worker.command({ t: "start", run });
@@ -906,7 +906,10 @@ describe("decoder worker run isolation", () => {
   it("preserves an isConfigSupported rejection as probe evidence", async () => {
     const worker = await fakeDecoderWorker({ supportRejects: true });
 
-    worker.command({ t: "configure", config: { codec: "av01.0.08M.08" } });
+    worker.command({
+      t: "configure",
+      config: { codec: "av01.0.08M.08.0.110.01.01.01.0" }
+    });
     await Promise.resolve();
 
     expect(worker.posted).toEqual([{
@@ -930,7 +933,7 @@ describe("decoder worker run isolation", () => {
   it("preserves a decoder configuration failure with its run", async () => {
     const worker = await fakeDecoderWorker({ configureThrows: true });
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
 
@@ -953,7 +956,7 @@ describe("decoder worker run isolation", () => {
   it("retains first-frame metadata when the decoder callback fails", async () => {
     const worker = await fakeDecoderWorker();
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
     worker.command({
@@ -987,7 +990,7 @@ describe("decoder worker run isolation", () => {
   it("maps invalid output metadata to its timestamp ordinal", async () => {
     const worker = await fakeDecoderWorker();
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
     worker.command({
@@ -1088,7 +1091,7 @@ describe("decoder worker run isolation", () => {
   it("preserves flush rejection evidence", async () => {
     const worker = await fakeDecoderWorker();
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
     worker.command({ t: "flush", run: 1 });
@@ -1111,7 +1114,7 @@ describe("decoder worker run isolation", () => {
   it("maps a multi-chunk transfer failure to the output timestamp ordinal", async () => {
     const worker = await fakeDecoderWorker({ frameTransferThrows: true });
 
-    worker.command({ t: "configure", config: { codec: "avc1.640020" } });
+    worker.command({ t: "configure", config: { codec: "avc1.42E020" } });
     await Promise.resolve();
     worker.command({ t: "start", run: 1 });
     worker.command({
@@ -1423,7 +1426,7 @@ function supportEchoFailures(): readonly SupportEchoFailure[] {
   return [
     ["missing config", () => ({ supported: true })],
     omit("codec"),
-    change("codec", { codec: "vp09.00.10.08" }),
+    change("codec", { codec: "vp09.00.10.08.01.01.01.01.00" }),
     omit("codedWidth"),
     change("codedWidth", { codedWidth: 641 }),
     omit("codedHeight"),

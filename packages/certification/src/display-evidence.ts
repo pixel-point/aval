@@ -1,5 +1,5 @@
 import { assessDisplayCapture, type DisplayRefreshObservation } from "./display-capture-assessment.js";
-import { validateDisplayCaptureLedger, type DisplayCaptureLedger, type DisplayCaptureSample } from "./display-evidence-model.js";
+import { validateDisplayCaptureLedger, type DisplayCaptureLedger } from "./display-evidence-model.js";
 import { displayMarkerFields, type DisplayPatternDefinition } from "./display-pattern.js";
 import { quantileNearestRank } from "./runtime-criteria.js";
 import type { RuntimeDisplayScheduleEntry } from "./runtime-scenario-grader.js";

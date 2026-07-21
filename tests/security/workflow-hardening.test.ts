@@ -1,7 +1,53 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
-describe("protected two-stage release workflows", () => {
+describe("workflow hardening", () => {
+  it("builds the canonical format codec authority before Brave evidence imports it", async () => {
+    const [workflow, matrix, assembler, validator] = await Promise.all([
+      readFile(".github/workflows/brave-windows-compatibility.yml", "utf8"),
+      readFile("scripts/browser-compatibility/brave/run-matrix.mjs", "utf8"),
+      readFile("scripts/browser-compatibility/assemble-live-evidence.mjs", "utf8"),
+      readFile("scripts/browser-compatibility/validate-evidence.mjs", "utf8")
+    ]);
+    const installIndex = workflow.indexOf("npm ci --ignore-scripts");
+    const graphBuildIndex = workflow.indexOf(
+      "npm run build -w @pixel-point/aval-graph"
+    );
+    const formatBuildIndex = workflow.indexOf(
+      "npm run build -w @pixel-point/aval-format"
+    );
+    const matrixRunIndex = workflow.indexOf(
+      "node scripts/browser-compatibility/brave/run-matrix.mjs"
+    );
+    expect(installIndex).toBeGreaterThanOrEqual(0);
+    expect(installIndex).toBeLessThan(graphBuildIndex);
+    expect(graphBuildIndex).toBeLessThan(formatBuildIndex);
+    expect(formatBuildIndex).toBeLessThan(matrixRunIndex);
+    for (const source of [matrix, assembler, validator]) {
+      expect(source).toContain('from "@pixel-point/aval-format"');
+      expect(source).not.toContain("canonical-codec.mjs");
+    }
+    expect(matrix).toContain("H264_CONSTRAINED_BASELINE_CODECS");
+  });
+
+  it("pins scheduled native-tool tests to the root Vitest configuration", async () => {
+    const [workflow, regenerationScript, certificationPackage] = await Promise.all([
+      readFile(".github/workflows/scheduled-hardening.yml", "utf8"),
+      readFile("scripts/fixtures/regenerate-semantic-check.mjs", "utf8"),
+      readFile("packages/certification/package.json", "utf8")
+    ]);
+    expect(workflow).toContain(
+      "npm run fixtures:regeneration-check -- --tool-backed"
+    );
+    expect(regenerationScript).toMatch(
+      /"vitest",\s*"run",\s*"--config",\s*resolve\(root, "vitest\.m9\.config\.ts"\)/u
+    );
+    expect(JSON.parse(certificationPackage).scripts.test).toBe(
+      "cd ../.. && vitest run --config vitest.m9.config.ts " +
+      "packages/certification/test"
+    );
+  });
+
   it("binds candidate, named reports, final release, next publication, and latest promotion as separate authorities", async () => {
     const [candidate, reports, final, publish, rollback] = await Promise.all([
       readFile(".github/workflows/release-candidate.yml", "utf8"),

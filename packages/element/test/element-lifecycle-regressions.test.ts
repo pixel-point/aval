@@ -128,7 +128,7 @@ vi.mock("../src/player.js", () => ({
       visualState: state,
       transitioning: false,
       selectedRendition: granted ? "main" : null,
-      selectedCodec: granted ? "avc1.64001E" : null,
+      selectedCodec: granted ? "avc1.42E01E" : null,
       rendererBackend: granted ? "webgl2" : null,
       selectedBitDepth: granted ? 8 : null,
       transportMode: granted ? "range" : null,
@@ -352,7 +352,7 @@ vi.mock("../src/player.js", () => ({
         const diagnostic: Readonly<PlayerDecoderDiagnostic> = Object.freeze({
           sourceIndex: 0,
           rendition: "main",
-          codec: "avc1.64001E",
+          codec: "avc1.42E01E",
           unit: "idle-body",
           lane: 0,
           logicalRunId: 1,
@@ -385,7 +385,7 @@ vi.mock("../src/player.js", () => ({
         const diagnostic: Readonly<PlayerRendererDiagnostic> = Object.freeze({
           sourceIndex: 0,
           rendition: "main",
-          codec: "avc1.64001E",
+          codec: "avc1.42E01E",
           backend: "webgl2",
           phase: "rgba-copy",
           operation: "runtime",
@@ -747,7 +747,7 @@ describe("element lifecycle regressions", () => {
     const rejectedProbe: Readonly<PlayerDecoderDiagnostic> = Object.freeze({
       sourceIndex: 0,
       rendition: "av1",
-      codec: "av01.0.08M.10",
+      codec: "av01.0.08M.10.0.110.01.01.01.0",
       unit: null,
       lane: 1,
       logicalRunId: null,
@@ -821,7 +821,7 @@ describe("element lifecycle regressions", () => {
             sourceGeneration: 1,
             sourceIndex: 0,
             rendition: "main",
-            codec: "avc1.64001E",
+            codec: "avc1.42E01E",
             unit: "idle-body",
             lane: 0,
             logicalRunId: 1,
@@ -852,7 +852,7 @@ describe("element lifecycle regressions", () => {
             sourceGeneration: 1,
             sourceIndex: 0,
             rendition: "av1",
-            codec: "av01.0.08M.10",
+            codec: "av01.0.08M.10.0.110.01.01.01.0",
             unit: null,
             lane: 1,
             phase: "probe",
@@ -895,7 +895,7 @@ describe("element lifecycle regressions", () => {
       sourceGeneration: 1,
       sourceIndex: 0,
       rendition: "main",
-      codec: "avc1.64001E",
+      codec: "avc1.42E01E",
       unit: "idle-body",
       lane: 0,
       logicalRunId: 1,
@@ -1021,7 +1021,7 @@ describe("element lifecycle regressions", () => {
       sourceGeneration: 1,
       sourceIndex: 0,
       rendition: "main",
-      codec: "avc1.64001E",
+      codec: "avc1.42E01E",
       backend: "webgl2",
       phase: "rgba-copy",
       operation: "runtime",
@@ -1407,7 +1407,7 @@ function createConnectedElement(src: string): {
   const source = new FakeElement("source", currentDocument);
   source.parentElement = element as unknown as FakeHTMLElement;
   source.setAttribute("src", src);
-  source.setAttribute("type", 'application/vnd.aval; codecs="avc1.64001E"');
+  source.setAttribute("type", 'application/vnd.aval; codecs="avc1.42E01E"');
   element.childElements.push(source);
   element.isConnected = true;
   element.connectedCallback();

@@ -16,7 +16,7 @@ import {
 } from "./source-support-probe.js";
 
 const PROBE_CONFIGS = Object.freeze([
-  probeConfig("avc1.640020"),
+  probeConfig("avc1.42E020"),
   probeConfig("hvc1.1.6.L30.90"),
   probeConfig("vp09.00.10.08.01.01.01.01.00"),
   probeConfig("av01.0.00M.10.0.110.01.01.01.0")
@@ -266,7 +266,7 @@ describe("module-worker source support probe", () => {
     await expect(fixture.client.probeConfig(PROBE_CONFIGS[1]!)).resolves.toBe(true);
 
     const config: DecoderWorkerVideoConfig = {
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       codedWidth: 64,
       codedHeight: 64,
       hardwareAcceleration: "no-preference",
@@ -288,7 +288,12 @@ describe("module-worker source support probe", () => {
         displayWidth: 64,
         displayHeight: 64,
         visibleRect: { x: 0, y: 0, width: 64, height: 64 },
-        colorSpace: null
+        colorSpace: {
+          fullRange: false,
+          matrix: "bt709",
+          primaries: "bt709",
+          transfer: "bt709"
+        }
       },
       limits: {
         maxDecodeQueueSize: 4,

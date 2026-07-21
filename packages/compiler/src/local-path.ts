@@ -34,22 +34,6 @@ export async function resolveExistingLocalFile(
   return resolvedPath;
 }
 
-export function resolveOutputPath(root: string, candidate: string): string {
-  rejectNonPath(candidate);
-  return isAbsolute(candidate) ? resolve(candidate) : resolve(root, candidate);
-}
-
-export function assertSafeRelativePath(candidate: string): void {
-  rejectNonPath(candidate);
-  if (isAbsolute(candidate) || escapes("/project", resolve("/project", candidate))) {
-    throw new CompilerError(
-      "PATH_OUTSIDE_ROOT",
-      "Path must remain relative to the project directory",
-      { path: candidate }
-    );
-  }
-}
-
 function rejectNonPath(candidate: string): void {
   if (
     typeof candidate !== "string" ||

@@ -1,7 +1,6 @@
 import type {
   CompiledManifest,
-  CompiledManifestV1_0,
-  ProductionRenditionV1_0,
+  OpaqueProductionRenditionV1_1,
   VideoCodec
 } from "@pixel-point/aval-format";
 import { describe, expect, it } from "vitest";
@@ -16,7 +15,7 @@ import {
 } from "./video-source-selection.js";
 
 const SPECS = Object.freeze({
-  h264: Object.freeze({ codec: "avc1.640020", bitstream: "annex-b" as const }),
+  h264: Object.freeze({ codec: "avc1.42E020", bitstream: "annex-b" as const }),
   h265: Object.freeze({ codec: "hvc1.1.6.L30.90", bitstream: "annex-b" as const }),
   vp9: Object.freeze({
     codec: "vp09.00.10.08.01.01.01.01.00",
@@ -225,7 +224,10 @@ function codecFamily(codec: string): VideoCodec {
   return match[0] as VideoCodec;
 }
 
-function rendition(id: string, family: VideoCodec): ProductionRenditionV1_0 {
+function rendition(
+  id: string,
+  family: VideoCodec
+): OpaqueProductionRenditionV1_1 {
   return {
     id,
     codec: SPECS[family].codec,
@@ -239,10 +241,12 @@ function rendition(id: string, family: VideoCodec): ProductionRenditionV1_0 {
 
 function manifest(
   family: VideoCodec,
-  renditions: readonly ProductionRenditionV1_0[] = [rendition("main", family)]
-): CompiledManifestV1_0 {
+  renditions: readonly OpaqueProductionRenditionV1_1[] = [
+    rendition("main", family)
+  ]
+): CompiledManifest {
   return {
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "test",
     codec: family,
     bitstream: SPECS[family].bitstream,

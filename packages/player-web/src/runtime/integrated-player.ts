@@ -102,7 +102,6 @@ export class IntegratedPlayer {
   #terminalError: RuntimePlaybackError | null = null;
   #terminalOwnerCallbackDepth = 0;
   #lastPresentationOrdinal = 0n;
-  #manuallyPaused = true;
   #disposed = false;
   public constructor(options: IntegratedPlayerOptions) {
     const assetSource = validateOptions(options);
@@ -725,7 +724,6 @@ export class IntegratedPlayer {
   /** Public M8 clock seam; logical presentation time is retained. */
   public pauseRealtime(): void {
     if (this.#disposed) throw disposedError();
-    this.#manuallyPaused = true;
     if (this.#realtime?.snapshot().running === true) {
       this.#realtime.pauseForVisibility();
     }
@@ -736,7 +734,6 @@ export class IntegratedPlayer {
     if (this.#disposed) throw disposedError();
     const terminal = this.#retainedTerminalError();
     if (terminal !== null) throw terminal;
-    this.#manuallyPaused = false;
     await this.settled();
     if (
       this.#realtime === null ||

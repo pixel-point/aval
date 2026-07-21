@@ -1,5 +1,5 @@
 {
-  "$schema": "./certification-policy.schema.json",
+  "$schema": "./browser-certification-policy.schema.json",
   "policyVersion": "1.0",
   "inventoryResolvedAt": "2026-07-19T00:00:00.000Z",
   "inventoryState": "resolved",
@@ -8,44 +8,18 @@
   "rollingWindowMonths": 24,
   "requirements": {
     "demos": [
-      { "id": "end-user-playground", "route": "/playground/", "playerSelector": "#favorite-motion", "interactionSelector": "#favorite-control", "sourceContract": "multi-source", "renditionId": "motion.1x", "states": ["idle", "engaged"] },
-      { "id": "grass-rabbit", "route": "/rabbit/", "playerSelector": "#grass-rabbit", "interactionSelector": "#grass-rabbit", "sourceContract": "multi-source", "renditionId": "video.1x", "states": ["idle", "entering", "hover", "exiting"] },
-      { "id": "grass-rabbit-codecs", "route": "/codecs/", "playerSelector": "aval-player", "interactionSelector": "aval-player", "sourceContract": "multi-source", "renditionId": "video.1x", "states": ["idle", "entering", "hover", "exiting"] },
-      { "id": "kinetic-orb", "route": "/orb/", "playerSelector": "#kinetic-orb", "interactionSelector": "#kinetic-orb", "sourceContract": "multi-source", "renditionId": "video.1x", "states": ["idle", "entering", "hover", "exiting"] }
+      { "id": "end-user-playground", "route": "/playground/", "playerSelector": "#favorite-motion", "interactionSelector": "#favorite-control", "renditionId": "motion.1x", "states": ["idle", "engaged"] },
+      { "id": "grass-rabbit", "route": "/rabbit/", "playerSelector": "#grass-rabbit", "interactionSelector": "#grass-rabbit", "renditionId": "video.1x", "states": ["idle", "entering", "hover", "exiting"] },
+      { "id": "grass-rabbit-codecs", "route": "/codecs/", "playerSelector": "aval-player", "interactionSelector": "aval-player", "renditionId": "video.1x", "states": ["idle", "entering", "hover", "exiting"] },
+      { "id": "kinetic-orb", "route": "/orb/", "playerSelector": "#kinetic-orb", "interactionSelector": "#kinetic-orb", "renditionId": "video.1x", "states": ["idle", "entering", "hover", "exiting"] }
     ],
     "playbackModes": ["forced-h264", "full-ladder"],
-    "playbackModePurpose": {
-      "forced-h264": "fallback-path-validation-only",
-      "full-ladder": "normal-selection-and-support-claim"
-    },
     "authoredCodecsByMode": {
       "forced-h264": ["h264"],
       "full-ladder": ["av1", "vp9", "h265", "h264"]
     },
     "minimumSelectedCodecsByPlatform": {
       "ios": ["av1", "vp9", "h265"]
-    },
-    "interactionProfiles": {
-      "desktop": ["pointer", "focus", "overlap-reentry", "all-state-directions"],
-      "touch": ["tap", "outside-tap", "overlap-reentry", "all-state-directions"],
-      "unsupported": ["deterministic-error", "no-blank-nonterminal", "resource-retirement"]
-    },
-    "evidence": {
-      "manifestSchemaVersion": 1,
-      "sessionSchemaVersion": 1,
-      "interactionLedgerSchemaVersion": 1,
-      "diagnosticReportSchemaVersion": 1,
-      "immutableRunRootPattern": "artifacts/browser-compatibility/runs/{commit}/{session}",
-      "requiredArtifacts": [
-        "canvas-png",
-        "context-png",
-        "frame-before-png",
-        "diagnostic-json",
-        "interaction-ledger",
-        "session-json"
-      ],
-      "minimumSoakMilliseconds": 60000,
-      "requireNonBlankPixels": true
     },
     "soakSeconds": 60
   },

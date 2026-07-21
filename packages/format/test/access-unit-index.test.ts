@@ -62,7 +62,7 @@ function expectFormatError(operation: () => unknown, code: FormatError["code"]):
   throw new Error("expected operation to throw");
 }
 
-describe("version-1.0 encoded-chunk index", () => {
+describe("version-1.1 encoded-chunk index", () => {
   it("encodes the exact 16 + 48N canonical bytes", () => {
     const bytes = encodeEncodedChunkIndex(RECORDS, MANIFEST);
     expect(bytes).toHaveLength(112);

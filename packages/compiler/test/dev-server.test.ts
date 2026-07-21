@@ -626,10 +626,10 @@ function devAsset(
   bytes: Uint8Array
 ): Readonly<DevServerAsset> {
   const codecString = {
-    h264: "avc1.64001E",
+    h264: "avc1.42E01E",
     h265: "hvc1.1.6.L93.90",
-    vp9: "vp09.00.10.08",
-    av1: "av01.0.04M.08"
+    vp9: "vp09.00.10.08.01.01.01.01.00",
+    av1: "av01.0.04M.08.0.110.01.01.01.0"
   }[codec];
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   return Object.freeze({

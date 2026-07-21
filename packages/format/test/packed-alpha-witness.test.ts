@@ -64,14 +64,7 @@ describe("packed-alpha output qualification wire 1.1", () => {
     expectDeepFrozen(manifest);
   });
 
-  it("keeps legacy 1.0 exact and requires qualification only for 1.1 packed alpha", () => {
-    const legacy = qualifiedPackedManifest();
-    legacy.formatVersion = "1.0";
-    expectManifestInvalid(legacy, "renditions[0]");
-
-    delete legacy.renditions[0].outputQualification;
-    expect(validateCompiledManifest(legacy).formatVersion).toBe("1.0");
-
+  it("requires qualification for packed alpha and forbids it for opaque", () => {
     const missing = qualifiedPackedManifest();
     delete missing.renditions[0].outputQualification;
     expectManifestInvalid(missing, "renditions[0].outputQualification");
@@ -220,33 +213,17 @@ describe("packed-alpha output qualification wire 1.1", () => {
     expect(front.manifest.formatVersion).toBe("1.1");
   });
 
-  it("keeps legacy writer headers at 1.0 and rejects either version mismatch", () => {
-    const legacy = writeCanonicalAsset(validWriterInput());
+  it("writes only 1.1 headers and rejects a retired header version", () => {
+    const current = writeCanonicalAsset(validWriterInput());
     expect([
-      parseFrontIndex(legacy).header.major,
-      parseFrontIndex(legacy).header.minor
-    ]).toEqual([1, 0]);
+      parseFrontIndex(current).header.major,
+      parseFrontIndex(current).header.minor
+    ]).toEqual([1, 1]);
 
-    const qualifiedInput = validWriterInput() as any;
-    const qualified = qualifiedPackedManifest();
-    const { units: _compiledUnits, ...fields } = qualified;
-    qualifiedInput.manifest = {
-      ...qualifiedInput.manifest,
-      ...fields,
-      units: qualifiedInput.manifest.units
-    };
-    const qualifiedBytes = writeCanonicalAsset(qualifiedInput);
-
-    const legacyHeaderQualifiedManifest = qualifiedBytes.slice();
-    legacyHeaderQualifiedManifest[10] = 0;
-    expect(() => parseFrontIndex(legacyHeaderQualifiedManifest)).toThrowError(
-      expect.objectContaining({ code: "MANIFEST_INVALID", path: "formatVersion" })
-    );
-
-    const qualifiedHeaderLegacyManifest = legacy.slice();
-    qualifiedHeaderLegacyManifest[10] = 1;
-    expect(() => parseFrontIndex(qualifiedHeaderLegacyManifest)).toThrowError(
-      expect.objectContaining({ code: "MANIFEST_INVALID", path: "formatVersion" })
+    const retired = current.slice();
+    retired[10] = 0;
+    expect(() => parseFrontIndex(retired)).toThrowError(
+      expect.objectContaining({ code: "VERSION_UNSUPPORTED" })
     );
   });
 });

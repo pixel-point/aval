@@ -46,6 +46,7 @@ describe("WebGl2RendererBackend", () => {
 
     await backend.upload(target, Object.freeze({
       frame: frame(),
+      newDecoderRun: false,
       rgba: async () => Object.freeze({
         width: 48,
         height: 104,
@@ -78,6 +79,7 @@ describe("WebGl2RendererBackend", () => {
 
     await backend.upload(target, Object.freeze({
       frame: compactOpaqueFrame(),
+      newDecoderRun: false,
       rgba: async () => Object.freeze({
         width: 48,
         height: 48,
@@ -94,6 +96,74 @@ describe("WebGl2RendererBackend", () => {
       nativeProbeAttempts: 1,
       probeReadbackBytes: 8 * 8 * 4 * 2,
       nativeProbeInFlight: false
+    });
+    backend.dispose();
+  });
+
+  it("requalifies native upload when the decoder run changes", async () => {
+    const fixture = webglCanvas(48, 48);
+    const backend = new WebGl2RendererBackend(
+      fixture.canvas,
+      compactOpaqueLayout(),
+      () => undefined
+    );
+    const target = backend.allocateTarget("stream", 0);
+    const pixels = new Uint8Array(48 * 48 * 4);
+    const source = (newDecoderRun: boolean) => Object.freeze({
+      frame: compactOpaqueFrame(),
+      newDecoderRun,
+      rgba: async () => Object.freeze({
+        width: 48,
+        height: 48,
+        stride: 48 * 4,
+        pixels
+      })
+    });
+
+    await backend.upload(target, source(false));
+    fixture.gl.nativeReadback = new Uint8Array(8 * 8 * 4);
+    await backend.upload(target, source(true));
+    await backend.upload(target, source(true));
+
+    expect(fixture.gl.nativeUploadCount).toBe(2);
+    expect(fixture.gl.rgbaUploadCount).toBe(3);
+    expect(fixture.gl.readPixelsCount).toBe(4);
+    expect(backend.snapshot(0, 48, 48).details).toMatchObject({
+      uploadMode: "rgba-copy",
+      nativeProbeAttempts: 2
+    });
+    backend.dispose();
+  });
+
+  it("keeps healthy native upload across repeated decoder-run canaries", async () => {
+    const fixture = webglCanvas(48, 48);
+    const backend = new WebGl2RendererBackend(
+      fixture.canvas,
+      compactOpaqueLayout(),
+      () => undefined
+    );
+    const target = backend.allocateTarget("stream", 0);
+    const pixels = new Uint8Array(48 * 48 * 4);
+
+    for (let run = 0; run < 6; run += 1) {
+      await backend.upload(target, Object.freeze({
+        frame: compactOpaqueFrame(),
+        newDecoderRun: run > 0,
+        rgba: async () => Object.freeze({
+          width: 48,
+          height: 48,
+          stride: 48 * 4,
+          pixels
+        })
+      }));
+    }
+
+    expect(fixture.gl.nativeUploadCount).toBe(6);
+    expect(fixture.gl.rgbaUploadCount).toBe(6);
+    expect(fixture.gl.readPixelsCount).toBe(12);
+    expect(backend.snapshot(0, 48, 48).details).toMatchObject({
+      uploadMode: "native",
+      nativeProbeAttempts: 6
     });
     backend.dispose();
   });

@@ -22,8 +22,8 @@ vi.mock("../src/asset.js", () => {
     alphaLayout: { type: "opaque", colorRect: [0, 0, 16, 16] }
   });
   const renditions = [
-    rendition("high", "avc1.640028", 32),
-    rendition("low", "avc1.640020", 16)
+    rendition("high", "avc1.42E028", 32),
+    rendition("low", "avc1.42E020", 16)
   ];
   class Asset {
     public readonly manifest = {
@@ -81,8 +81,8 @@ vi.mock("../src/asset.js", () => {
       chunkCount: 1
     }));
     public readonly records = renditions.map((_rendition, index) => ({
-      offset: 1_000 + index,
-      length: 1,
+      byteOffset: 1_000 + index,
+      byteLength: 1,
       presentationTimestamp: 0,
       duration: 1,
       randomAccess: true,
@@ -313,7 +313,7 @@ describe("player rendition selection", () => {
       baseUrl: "https://example.test/",
       sources: [{
         src: "motion.avl",
-        codec: "avc1.640028",
+        codec: "avc1.42E028",
         integrity: ""
       }],
       credentials: "same-origin",
@@ -366,7 +366,7 @@ describe("player rendition selection", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640028", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E028", integrity: "" }],
       credentials: "same-origin",
       signal: controller.signal,
       preparationTimeoutMs: 5_000,
@@ -406,7 +406,7 @@ describe("player rendition selection", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640028", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E028", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -467,7 +467,7 @@ describe("player rendition selection", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640028", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E028", integrity: "" }],
       credentials: "same-origin",
       signal: controller.signal,
       preparationTimeoutMs: 5_000,
@@ -511,7 +511,7 @@ describe("player rendition selection", () => {
     await expect(createPlayer({
       ...selectionInput([
         { src: "invalid.avl", codec: "definitely-not-h264", integrity: "" },
-        { src: "second.avl", codec: "avc1.640028", integrity: "" }
+        { src: "second.avl", codec: "avc1.42E028", integrity: "" }
       ]),
       onPlaybackFailure: (code, operation) => {
         failures.push(`${code}:${operation}`);
@@ -531,8 +531,8 @@ describe("player rendition selection", () => {
     const terminal = playbackError("unsupported-profile", "prepare", 3);
     const failures: string[] = [];
     const input = selectionInput([
-      { src: "first.avl", codec: "avc1.640028", integrity: "" },
-      { src: "second.avl", codec: "avc1.640028", integrity: "" }
+      { src: "first.avl", codec: "avc1.42E028", integrity: "" },
+      { src: "second.avl", codec: "avc1.42E028", integrity: "" }
     ]);
     const creation = createPlayer({
       ...input,
@@ -569,7 +569,7 @@ describe("player rendition selection", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640028", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E028", integrity: "" }],
       credentials: "same-origin",
       signal: controller.signal,
       preparationTimeoutMs: 5_000,
@@ -615,11 +615,11 @@ describe("player rendition selection", () => {
       sources: [
         {
           src: "first.avl",
-          codec: "avc1.640028",
+          codec: "avc1.42E028",
           integrity: "",
           sourceIndex: 1
         },
-        { src: "second.avl", codec: "avc1.640028", integrity: "" }
+        { src: "second.avl", codec: "avc1.42E028", integrity: "" }
       ],
       credentials: "same-origin",
       signal: controller.signal,
@@ -654,7 +654,7 @@ describe("player rendition selection", () => {
     expect(decoderDiagnostics.at(-1)).toMatchObject([{
       sourceIndex: 1,
       rendition: "high",
-      codec: "avc1.640028",
+      codec: "avc1.42E028",
       unit: null,
       lane: 0,
       phase: "frame-transfer",
@@ -671,8 +671,8 @@ describe("player rendition selection", () => {
     vi.stubGlobal("VideoDecoder", class {});
     const terminal = playbackError("resource-rejection", "prepare", 5);
     await expect(createPlayer({ ...selectionInput([
-      { src: "first.avl", codec: "avc1.640028", integrity: "" },
-      { src: "second.avl", codec: "avc1.640028", integrity: "" }
+      { src: "first.avl", codec: "avc1.42E028", integrity: "" },
+      { src: "second.avl", codec: "avc1.42E028", integrity: "" }
     ]), onPlaybackFailure: () => terminal })).rejects.toBe(terminal);
     expect(selection.opens).toBe(1);
     expect(Worker.instances()).toHaveLength(0);
@@ -685,8 +685,8 @@ describe("player rendition selection", () => {
     vi.stubGlobal("VideoDecoder", class {});
     const terminal = playbackError("renderer-failure", "prepare", 6);
     await expect(createPlayer({ ...selectionInput([
-      { src: "first.avl", codec: "avc1.640028", integrity: "" },
-      { src: "second.avl", codec: "avc1.640028", integrity: "" }
+      { src: "first.avl", codec: "avc1.42E028", integrity: "" },
+      { src: "second.avl", codec: "avc1.42E028", integrity: "" }
     ]), onPlaybackFailure: () => terminal })).rejects.toBe(terminal);
     expect(selection.opens).toBe(1);
     expect(Worker.instances()).toHaveLength(2);
@@ -701,8 +701,8 @@ describe("player rendition selection", () => {
     vi.stubGlobal("Worker", Worker);
     vi.stubGlobal("VideoDecoder", class {});
     const player = await createPlayer(selectionInput([
-      { src: "first.avl", codec: "avc1.640028", integrity: "" },
-      { src: "second.avl", codec: "avc1.640028", integrity: "" }
+      { src: "first.avl", codec: "avc1.42E028", integrity: "" },
+      { src: "second.avl", codec: "avc1.42E028", integrity: "" }
     ]));
     expect(selection.opens).toBe(2);
     expect(player.snapshot(false).selectedRendition).toBe("high");
@@ -722,8 +722,8 @@ describe("player rendition selection", () => {
     const terminal = playbackError("resource-rejection", "prepare", 9);
     await expect(createPlayer({
       ...selectionInput([
-        { src: "first.avl", codec: "avc1.640028", integrity: "" },
-        { src: "second.avl", codec: "avc1.640028", integrity: "" }
+        { src: "first.avl", codec: "avc1.42E028", integrity: "" },
+        { src: "second.avl", codec: "avc1.42E028", integrity: "" }
       ]),
       onPlaybackFailure: () => terminal
     })).rejects.toBe(terminal);

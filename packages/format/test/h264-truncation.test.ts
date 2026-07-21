@@ -23,101 +23,92 @@ interface ErrorOutcome {
   readonly offset?: number;
 }
 
-const PARAMETER_SET_CASES = Object.freeze([
-  Object.freeze({
-    profile: "High",
-    sps: makeSps(),
-    pps: makePps()
-  }),
-  Object.freeze({
-    profile: "Constrained Baseline",
-    sps: makeSps({
-      profileIdc: 66,
-      maxNumRefFrames: 1,
-      maxNumReorderFrames: 0,
-      maxDecFrameBuffering: 1
-    }),
-    pps: makePps({ profileIdc: 66 })
-  })
-]);
+const CONSTRAINED_BASELINE_SPS = makeSps();
+const CONSTRAINED_BASELINE_PPS = makePps();
 
 describe("H264 hostile syntax boundaries", () => {
-  it.each(PARAMETER_SET_CASES)(
-    "rejects every physical byte truncation in the $profile grammar",
-    ({ profile, sps, pps }) => {
-      const components = Object.freeze({
-        aud: makeAud(0),
-        sps,
-        pps,
-        idr: makeSlice({
-          idr: true,
-          frameNum: 0,
-          sliceType: "I",
-          picOrderCountType: 0,
-          picOrderCntLsb: 0
-        })
-      });
+  it("retains only variable PPS facts after validating fixed profile syntax", () => {
+    const pps = parsePps(onlyNal(makePps(), "pps.original"), "pps.original");
 
-      for (const [target, bytes] of Object.entries(components)) {
-        for (let byteLength = 0; byteLength < bytes.byteLength; byteLength += 1) {
-          const truncated = bytes.slice(0, byteLength);
-          expectStableProfileInvalid(
-            () => inspectH264AnnexBRendition(oneFrameInput({
-              aud: target === "aud" ? truncated : components.aud,
-              sps: target === "sps" ? truncated : components.sps,
-              pps: target === "pps" ? truncated : components.pps,
-              idr: target === "idr" ? truncated : components.idr
-            })),
-            `${profile} ${target} byte ${String(byteLength)}`
-          );
-        }
-      }
-    }
-  );
+    expect(Object.keys(pps)).toEqual([
+      "id",
+      "spsId",
+      "payloadSignature",
+      "picInitQpMinus26"
+    ]);
+  });
 
-  it.each(PARAMETER_SET_CASES)(
-    "rejects $profile SPS syntax truncated before its trailing stop bit",
-    ({ profile, sps }) => {
-      const original = onlyNal(sps, `${profile}.original.sps`);
-      const stopBit = trailingStopBitOffset(original.rbsp);
+  it("rejects every physical byte truncation in the Constrained Baseline grammar", () => {
+    const components = Object.freeze({
+      aud: makeAud(0),
+      sps: CONSTRAINED_BASELINE_SPS,
+      pps: CONSTRAINED_BASELINE_PPS,
+      idr: makeSlice({
+        idr: true,
+        frameNum: 0,
+        sliceType: "I",
+        picOrderCountType: 0,
+        picOrderCntLsb: 0
+      })
+    });
 
-      for (let bitOffset = 0; bitOffset < stopBit; bitOffset += 1) {
-        const candidate = withRbsp(
-          original,
-          truncateRbspAt(original.rbsp, bitOffset)
-        );
+    for (const [target, bytes] of Object.entries(components)) {
+      for (let byteLength = 0; byteLength < bytes.byteLength; byteLength += 1) {
+        const truncated = bytes.slice(0, byteLength);
         expectStableProfileInvalid(
-          () => parseSps(candidate, `sps[${String(bitOffset)}]`),
-          `${profile} SPS bit ${String(bitOffset)}`
+          () => inspectH264AnnexBRendition(oneFrameInput({
+            aud: target === "aud" ? truncated : components.aud,
+            sps: target === "sps" ? truncated : components.sps,
+            pps: target === "pps" ? truncated : components.pps,
+            idr: target === "idr" ? truncated : components.idr
+          })),
+          `Constrained Baseline ${target} byte ${String(byteLength)}`
         );
       }
-      expect(() => parseSps(original, `${profile}.original.sps`)).not.toThrow();
     }
-  );
+  });
 
-  it.each(PARAMETER_SET_CASES)(
-    "rejects $profile PPS syntax truncated before its trailing stop bit",
-    ({ profile, sps: spsBytes, pps }) => {
-      const original = onlyNal(pps, `${profile}.original.pps`);
-      const sps = parseSps(
-        onlyNal(spsBytes, `${profile}.original.sps`),
-        `${profile}.original.sps`
+  it("rejects Constrained Baseline SPS syntax truncated before its trailing stop bit", () => {
+    const original = onlyNal(
+      CONSTRAINED_BASELINE_SPS,
+      "Constrained Baseline.original.sps"
+    );
+    const stopBit = trailingStopBitOffset(original.rbsp);
+
+    for (let bitOffset = 0; bitOffset < stopBit; bitOffset += 1) {
+      const candidate = withRbsp(
+        original,
+        truncateRbspAt(original.rbsp, bitOffset)
       );
-      const stopBit = trailingStopBitOffset(original.rbsp);
-
-      for (let bitOffset = 0; bitOffset < stopBit; bitOffset += 1) {
-        const candidate = withRbsp(
-          original,
-          truncateRbspAt(original.rbsp, bitOffset)
-        );
-        expectStableProfileInvalid(
-          () => parsePps(candidate, `pps[${String(bitOffset)}]`, sps),
-          `${profile} PPS bit ${String(bitOffset)}`
-        );
-      }
-      expect(() => parsePps(original, `${profile}.original.pps`, sps)).not.toThrow();
+      expectStableProfileInvalid(
+        () => parseSps(candidate, `sps[${String(bitOffset)}]`),
+        `Constrained Baseline SPS bit ${String(bitOffset)}`
+      );
     }
-  );
+    expect(() => parseSps(original, "Constrained Baseline.original.sps"))
+      .not.toThrow();
+  });
+
+  it("rejects Constrained Baseline PPS syntax truncated before its trailing stop bit", () => {
+    const original = onlyNal(
+      CONSTRAINED_BASELINE_PPS,
+      "Constrained Baseline.original.pps"
+    );
+    const stopBit = trailingStopBitOffset(original.rbsp);
+
+    for (let bitOffset = 0; bitOffset < stopBit; bitOffset += 1) {
+      const candidate = withRbsp(
+        original,
+        truncateRbspAt(original.rbsp, bitOffset)
+      );
+      expectStableProfileInvalid(
+        () => parsePps(candidate, `pps[${String(bitOffset)}]`),
+        `Constrained Baseline PPS bit ${String(bitOffset)}`
+      );
+    }
+    expect(() => parsePps(original, "Constrained Baseline.original.pps"))
+      .not.toThrow();
+  });
 
   it("keeps Annex B prefix, NAL-header, and escaped-RBSP failures deterministic", () => {
     const vectors = [

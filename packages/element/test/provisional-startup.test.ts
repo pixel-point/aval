@@ -11,12 +11,10 @@ import { DecodedOutputIncompatibleError } from
 import {
   orchestrateProvisionalCandidates,
   qualifyProvisionalOutput,
-  UnsupportedPlaybackProfileError,
   withProvisionalCandidateFrame
 } from
   "../src/provisional-startup.js";
 import {
-  legacyPackedManifest,
   opaqueQualifiedManifest,
   packedQualifiedManifest,
   rgbaReference,
@@ -182,25 +180,6 @@ describe("provisional decoded-output qualification", () => {
       inspectAndPrime: prime
     });
 
-    expect(decode).not.toHaveBeenCalled();
-    expect(prime).not.toHaveBeenCalled();
-  });
-
-  it("rejects legacy packed-alpha as a typed terminal profile failure", async () => {
-    const decode = vi.fn();
-    const prime = vi.fn();
-
-    const attempt = qualifyProvisionalOutput({
-      manifest: legacyPackedManifest(),
-      renditionId: "main",
-      layout: witnessLayout,
-      withDecodedFrame: decode,
-      inspectAndPrime: prime
-    });
-    await expect(attempt).rejects.toMatchObject({
-      name: "NotSupportedError"
-    });
-    await expect(attempt).rejects.toBeInstanceOf(UnsupportedPlaybackProfileError);
     expect(decode).not.toHaveBeenCalled();
     expect(prime).not.toHaveBeenCalled();
   });

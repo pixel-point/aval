@@ -23,8 +23,6 @@ describe("canonical WebCodecs codec strings", () => {
   it("recognizes every production codec family", () => {
     expect(parseVideoCodecString("avc1.42E01E"))
       .toEqual({ family: "h264", bitDepth: 8 });
-    expect(parseVideoCodecString("avc1.640020"))
-      .toEqual({ family: "h264", bitDepth: 8 });
     expect(parseVideoCodecString("hvc1.1.6.L93.B0"))
       .toEqual({ family: "h265", bitDepth: 8 });
     expect(parseVideoCodecString("vp09.00.10.08.01.01.01.01.00"))
@@ -44,9 +42,12 @@ describe("canonical WebCodecs codec strings", () => {
   it("rejects aliases, truncated forms, lowercase hex, and junk", () => {
     for (const value of [
       "avc1.42e020",
+      "avc1.640020",
       "hev1.1.6.L93.B0",
       "vp9",
+      "vp09.00.10.08",
       "av01.0.08M",
+      "av01.0.08M.10",
       "av01.0.08M.10.0.110.01.01.01.0.extra",
       ""
     ]) {

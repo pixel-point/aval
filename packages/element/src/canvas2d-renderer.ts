@@ -281,13 +281,13 @@ export class Canvas2dRenderer implements RendererRuntime {
     }
   }
 
-  public draw(frame: VideoFrame): Promise<void> {
+  public draw(frame: VideoFrame, newDecoderRun: boolean): Promise<void> {
     return this.#operations.enqueue("runtime", async (operationOrdinal) => {
       if (this.#state !== "active") throw unavailable();
       const slot = this.#nextStream;
       const buffer = this.#streams[slot];
       if (buffer === undefined) throw unavailable();
-      await this.#upload(frame, buffer, operationOrdinal);
+      await this.#upload(frame, buffer, operationOrdinal, newDecoderRun);
       if (this.#state !== "active") throw unavailable();
       this.#render(buffer, "runtime", operationOrdinal);
       this.#last = Object.freeze({ kind: "stream", index: slot });
@@ -305,7 +305,8 @@ export class Canvas2dRenderer implements RendererRuntime {
       if (this.#state !== "active") throw unavailable();
       const materialization = this.#createMaterialization(
         frame,
-        operationOrdinal
+        operationOrdinal,
+        true
       );
       try {
         const source = await this.#materialize(
@@ -328,7 +329,12 @@ export class Canvas2dRenderer implements RendererRuntime {
     rethrowInspectionRejection(outcome);
   }
 
-  public store(group: string, index: number, frame: VideoFrame): Promise<void> {
+  public store(
+    group: string,
+    index: number,
+    frame: VideoFrame,
+    newDecoderRun: boolean
+  ): Promise<void> {
     const key = rendererResidentKey(group, index);
     if (this.#resident.has(key) || this.#reserved.has(key)) {
       throw new Error("resident frame already exists");
@@ -340,7 +346,7 @@ export class Canvas2dRenderer implements RendererRuntime {
     this.#reserved.add(key);
     return this.#operations.enqueue("runtime", async (operationOrdinal) => {
       const buffer = createCanvas2dCpuFrame(this.#layout);
-      await this.#upload(frame, buffer, operationOrdinal);
+      await this.#upload(frame, buffer, operationOrdinal, newDecoderRun);
       if (this.#state !== "active") throw unavailable();
       this.#resident.set(key, buffer);
     }).finally(() => {
@@ -523,9 +529,14 @@ export class Canvas2dRenderer implements RendererRuntime {
   async #upload(
     frame: VideoFrame,
     target: CpuFrame,
-    operationOrdinal: number
+    operationOrdinal: number,
+    newDecoderRun: boolean
   ): Promise<void> {
-    const materialization = this.#createMaterialization(frame, operationOrdinal);
+    const materialization = this.#createMaterialization(
+      frame,
+      operationOrdinal,
+      newDecoderRun
+    );
     try {
       const source = await this.#materialize(materialization, operationOrdinal);
       if (this.#state !== "active") throw unavailable();
@@ -537,7 +548,8 @@ export class Canvas2dRenderer implements RendererRuntime {
 
   #createMaterialization(
     frame: VideoFrame,
-    operationOrdinal: number
+    operationOrdinal: number,
+    newDecoderRun: boolean
   ): Readonly<RgbaMaterialization> {
     let rect: DOMRectReadOnly;
     try {
@@ -550,7 +562,7 @@ export class Canvas2dRenderer implements RendererRuntime {
         reason
       );
     }
-    return this.#materializer.create(frame, rect);
+    return this.#materializer.create(frame, rect, newDecoderRun);
   }
 
   async #materialize(

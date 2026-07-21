@@ -108,7 +108,7 @@ vi.mock("../src/decoder.js", async () => {
 
     public constructor(
       config: Readonly<VideoDecoderConfig>,
-      expectation?: ConstructorParameters<typeof actual.Decoder>[1],
+      expectation: ConstructorParameters<typeof actual.Decoder>[1],
       limits?: ConstructorParameters<typeof actual.Decoder>[2]
     ) {
       this.#codec = codecFamily(config.codec);

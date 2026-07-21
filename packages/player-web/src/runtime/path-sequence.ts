@@ -296,13 +296,6 @@ export function promoteTargetSequenceToSource(
   state.edgeSubmissionStarted = false;
 }
 
-export function sameSourceCursor(
-  left: Pick<SourceBodyCursor, "occurrence" | "frame">,
-  right: Pick<SourceBodyCursor, "occurrence" | "frame">
-): boolean {
-  return left.occurrence === right.occurrence && left.frame === right.frame;
-}
-
 function switchToEdge(
   state: PathSequenceState,
   route: ScheduledPathRoute | null
