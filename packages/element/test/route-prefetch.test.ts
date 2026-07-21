@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { Manifest, Unit } from "../src/asset.js";
+import type {
+  CompiledManifest as Manifest,
+  Unit
+} from "@pixel-point/aval-format";
 import type { MotionGraphSnapshot } from "@pixel-point/aval-graph";
 import {
   planRoutePrefetch,
@@ -616,7 +619,7 @@ function snapshot(
 
 function fixture(): Manifest {
   return {
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "route-prefetch-test",
     codec: "h264",
     bitstream: "annex-b",
@@ -631,7 +634,7 @@ function fixture(): Manifest {
     frameRate: { numerator: 30, denominator: 1 },
     renditions: [{
       id: "main",
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       bitDepth: 8,
       codedWidth: 16,
       codedHeight: 16,

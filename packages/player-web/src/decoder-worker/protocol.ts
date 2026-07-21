@@ -31,7 +31,8 @@ export type DecoderWorkerAckOperation = Exclude<
 /**
  * Decoder configuration is intentionally the platform dictionary. Runtime
  * validation closes it to the supported WebCodecs members and rejects codec
- * descriptions because every AVAL 1.0 video asset carries elementary chunks.
+ * descriptions because every current wire-1.1 AVAL video asset carries
+ * elementary chunks.
  */
 export type DecoderWorkerVideoConfig = Readonly<VideoDecoderConfig>;
 export type DecoderWorkerProbeConfig = DecoderWorkerVideoConfig;
@@ -53,10 +54,10 @@ export interface DecoderWorkerVisibleRect {
 }
 
 export interface DecoderWorkerColorSpaceExpectation {
-  readonly fullRange: boolean | null;
-  readonly matrix: VideoMatrixCoefficients | null;
-  readonly primaries: VideoColorPrimaries | null;
-  readonly transfer: VideoTransferCharacteristics | null;
+  readonly fullRange: false;
+  readonly matrix: "bt709";
+  readonly primaries: "bt709";
+  readonly transfer: "bt709";
 }
 
 export interface DecoderWorkerOutputExpectation {
@@ -65,8 +66,7 @@ export interface DecoderWorkerOutputExpectation {
   readonly displayWidth: number;
   readonly displayHeight: number;
   readonly visibleRect: DecoderWorkerVisibleRect;
-  /** Null skips color-space comparison; geometry and timing remain mandatory. */
-  readonly colorSpace: DecoderWorkerColorSpaceExpectation | null;
+  readonly colorSpace: DecoderWorkerColorSpaceExpectation;
 }
 
 export interface DecoderWorkerLimits {
@@ -81,7 +81,7 @@ export interface DecoderWorkerLimits {
 }
 
 /**
- * One owned wire-1.0 encoded chunk in decoder submission order.
+ * One owned wire-1.1 encoded chunk in decoder submission order.
  *
  * `presentationIndices` maps every displayed output carried by this chunk to
  * its authored frame inside the unit. Hidden VP9/AV1 chunks use an empty array

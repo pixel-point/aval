@@ -7,10 +7,10 @@ import {
 } from "@pixel-point/aval-graph";
 
 import type {
+  CompiledManifest as Manifest,
   Edge,
-  Manifest,
   Unit
-} from "./asset.js";
+} from "@pixel-point/aval-format";
 
 type GraphManifest = Pick<
   Manifest,

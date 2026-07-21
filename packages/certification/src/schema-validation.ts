@@ -527,14 +527,6 @@ function rejectDuplicateStrings(values: readonly string[], path: string): void {
   });
 }
 
-function rejectDuplicateNumbers(values: readonly number[], path: string): void {
-  const seen = new Set<number>();
-  values.forEach((value, index) => {
-    if (seen.has(value)) fail(`${path}[${index}]`, "duplicate value");
-    seen.add(value);
-  });
-}
-
 function fail(path: string, message: string): never {
   throw new CertificationValidationError(path, message);
 }

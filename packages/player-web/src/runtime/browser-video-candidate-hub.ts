@@ -307,11 +307,3 @@ function emptyPlaybackSnapshot(): Readonly<BrowserVideoPlaybackSnapshot> {
     readbackTags: Object.freeze([])
   });
 }
-
-function checkedProduct(left: number, right: number): number {
-  const value = left * right;
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new RangeError("browser candidate area exceeds the safe range");
-  }
-  return value;
-}

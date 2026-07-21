@@ -1,3 +1,4 @@
+import { IDENTIFIER_PATTERN } from "../constants.js";
 import { FormatError, isFormatError } from "../errors.js";
 import {
   H265_MAX_ACCESS_UNIT_BYTES,
@@ -38,7 +39,6 @@ import type {
   H265UnitInspection
 } from "./types.js";
 
-const IDENTIFIER_PATTERN = /^[a-z][a-z0-9._-]{0,63}$/;
 const MAX_UNITS = 96;
 const MAX_TOTAL_ACCESS_UNITS = 1_000_000;
 
@@ -59,10 +59,26 @@ interface DraftSummary {
   readonly nalUnitTypes: readonly number[];
 }
 
+interface H265RenditionInspectionWithParameterSetIdentity {
+  readonly inspection: H265RenditionInspection;
+  readonly parameterSetIdentity: readonly [
+    vps: string,
+    sps: string,
+    pps: string
+  ];
+}
+
 /** Inspects canonical HEVC access units and proves each graph unit is closed. */
 export function inspectH265AnnexBRendition(
   input: H265RenditionInspectionInput
 ): H265RenditionInspection {
+  return inspectH265AnnexBRenditionWithParameterSetIdentity(input).inspection;
+}
+
+/** Internal continuity view over the exact signatures already parsed by inspection. */
+export function inspectH265AnnexBRenditionWithParameterSetIdentity(
+  input: H265RenditionInspectionInput
+): Readonly<H265RenditionInspectionWithParameterSetIdentity> {
   try {
     const profile = cloneH265Profile(input?.profile);
     requireH265(Array.isArray(input?.units), "units", "units must be an array");
@@ -183,10 +199,18 @@ export function inspectH265AnnexBRendition(
 
     if (stableParameterSets === undefined) h265Invalid("units", "no HEVC parameter sets found");
     const parameterSet = createParameterSetSummary(stableParameterSets.sps);
-    return Object.freeze({
+    const inspection = Object.freeze({
       parameterSet,
       decoderConfig: createH265VideoDecoderConfig(stableParameterSets.sps),
       units: Object.freeze(units)
+    });
+    return Object.freeze({
+      inspection,
+      parameterSetIdentity: Object.freeze([
+        stableParameterSets.vps.payloadSignature,
+        stableParameterSets.sps.payloadSignature,
+        stableParameterSets.pps.payloadSignature
+      ] as const)
     });
   } catch (error) {
     if (isFormatError(error)) throw error;

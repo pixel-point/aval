@@ -1,9 +1,6 @@
 import {
   FORMAT_DEFAULT_BUDGETS,
   FormatError,
-  parseFrontIndex,
-  parseHeader,
-  validateCompleteAsset,
   type ParsedFrontIndex,
   type ValidatedAssetLayout
 } from "@pixel-point/aval-format";
@@ -65,14 +62,17 @@ import {
 } from "./runtime-complete-source.js";
 import {
   openRangeAssetSession,
-  type RuntimeRangeAssetFormatAdapter,
   type RuntimeRangeAssetSession
 } from "./range-asset-session.js";
 import {
+  captureRuntimeRangeAssetFormatAdapter,
+  DEFAULT_RUNTIME_RANGE_ASSET_FORMAT_ADAPTER,
+  type RuntimeRangeAssetFormatAdapter
+} from "./range-asset-format-adapter.js";
+import {
   createWebCryptoSha256Adapter,
   verifySha256AndPromote,
-  type Sha256DigestAdapter,
-  type VerifiedSha256Input
+  type Sha256DigestAdapter
 } from "./sha256-verifier.js";
 import {
   promoteBorrowedVerifiedBlob,
@@ -117,11 +117,6 @@ export interface RuntimeAssetSession {
     rendition: string,
     options?: Readonly<RuntimeAssetEnsureOptions>
   ): Promise<readonly Readonly<VerifiedBlobHandle>[]>;
-  /** Alias matching the loader design's “all units of one rendition”. */
-  ensureAllUnits(
-    rendition: string,
-    options?: Readonly<RuntimeAssetEnsureOptions>
-  ): Promise<readonly Readonly<VerifiedBlobHandle>[]>;
   /**
    * Release verified unit residency after every candidate/sample owner for the
    * rendition has retired. Metadata remains live.
@@ -150,25 +145,6 @@ interface BlobEnsureEntry {
   readonly key: string;
   readonly selection: RuntimeBlobSelection;
 }
-
-const DEFAULT_FORMAT: Readonly<RuntimeRangeAssetFormatAdapter> = Object.freeze({
-  parseHeader(bytes: Uint8Array, maximumFileBytes: number) {
-    return parseHeader(bytes, {
-      budgets: { maxFileBytes: maximumFileBytes }
-    });
-  },
-  parseFrontIndex(bytes: Uint8Array, maximumFileBytes: number) {
-    return parseFrontIndex(bytes, {
-      budgets: { maxFileBytes: maximumFileBytes }
-    });
-  },
-  validateCompleteAsset(bytes: Uint8Array, maximumFileBytes: number) {
-    return validateCompleteAsset({
-      bytes,
-      options: { budgets: { maxFileBytes: maximumFileBytes } }
-    });
-  }
-});
 
 /** Open an HTTP asset after bounded metadata validation, without payload reads. */
 export async function openRuntimeAsset(
@@ -408,13 +384,6 @@ class RuntimeAssetSessionImpl implements RuntimeAssetSession {
     })), options);
   }
 
-  public ensureAllUnits(
-    rendition: string,
-    options: Readonly<RuntimeAssetEnsureOptions> = {}
-  ): Promise<readonly Readonly<VerifiedBlobHandle>[]> {
-    return this.ensureRenditionUnits(rendition, options);
-  }
-
   public evictRenditionUnits(rendition: string): number {
     if (this.#disposed) throw runtimeError("disposed");
     const blobs = this.#frontIndex.unitBlobs.filter(
@@ -487,7 +456,7 @@ class RuntimeAssetSessionImpl implements RuntimeAssetSession {
     }
     const operation = this.#store.ensure(key, {
       signal: deadline.signal,
-      load: (request) => this.#loadBlob(selection, request)
+      load: (request) => this.#batch.load(selection, request)
     });
     return deadline.watch(operation).finally(() => { deadline.complete(); });
   }
@@ -526,13 +495,6 @@ class RuntimeAssetSessionImpl implements RuntimeAssetSession {
       deadline.cancel();
       return Promise.reject(normalizeSessionFailure(cause));
     }
-  }
-
-  async #loadBlob(
-    selection: RuntimeBlobSelection,
-    request: Readonly<VerifiedBlobLoadRequest>
-  ): Promise<void> {
-    await this.#batch.load(selection, request);
   }
 
   async #fetchBatchRange(
@@ -580,22 +542,11 @@ class RuntimeAssetSessionImpl implements RuntimeAssetSession {
         generation === this.#options.generation && !this.#disposed,
       signal: request.signal,
       inputLease: quarantined,
-      promote: (verified) => this.#promoteVerified(
-        blob, request, verified, source
-      )
+      promote: (verified) => {
+        if (source === null) request.promote(verified);
+        else promoteBorrowedVerifiedBlob(request, verified, source);
+      }
     });
-  }
-
-  #promoteVerified(
-    blob: PlannedRuntimeBlob,
-    request: Readonly<VerifiedBlobLoadRequest>,
-    verified: Readonly<VerifiedSha256Input>,
-    source: Readonly<RuntimeCompleteSourceRange> | null
-  ): void {
-    const promote = (): void => source === null
-      ? request.promote(verified)
-      : promoteBorrowedVerifiedBlob(request, verified, source);
-    promote();
   }
 
   #adoptCompleteReplacement(result: Readonly<RuntimeFullAssetResult>): void {
@@ -686,7 +637,9 @@ function captureOptions(
     generation = value.generation ?? 0;
     maximumFileBytes = value.maximumFileBytes ??
       FORMAT_DEFAULT_BUDGETS.maxFileBytes;
-    format = captureFormatAdapter(value.format ?? DEFAULT_FORMAT);
+    format = captureRuntimeRangeAssetFormatAdapter(
+      value.format ?? DEFAULT_RUNTIME_RANGE_ASSET_FORMAT_ADAPTER
+    );
     allocate = value.allocate ?? allocateBytes;
   } catch {
     throw runtimeError("load-failure");
@@ -712,45 +665,6 @@ function captureOptions(
       undefined,
       [byteLength]
     ) as Uint8Array<ArrayBuffer>
-  });
-}
-
-function captureFormatAdapter(
-  value: RuntimeRangeAssetFormatAdapter
-): RuntimeRangeAssetFormatAdapter {
-  if (typeof value !== "object" || value === null) {
-    throw runtimeError("load-failure");
-  }
-  let header: unknown;
-  let front: unknown;
-  let complete: unknown;
-  try {
-    header = Reflect.get(value, "parseHeader");
-    front = Reflect.get(value, "parseFrontIndex");
-    complete = Reflect.get(value, "validateCompleteAsset");
-  } catch {
-    throw runtimeError("load-failure");
-  }
-  if (
-    typeof header !== "function" ||
-    typeof front !== "function" ||
-    typeof complete !== "function"
-  ) {
-    throw runtimeError("load-failure");
-  }
-  return Object.freeze({
-    parseHeader: (bytes: Uint8Array, cap: number) =>
-      Reflect.apply(header, value, [bytes, cap]) as ReturnType<
-        RuntimeRangeAssetFormatAdapter["parseHeader"]
-      >,
-    parseFrontIndex: (bytes: Uint8Array, cap: number) =>
-      Reflect.apply(front, value, [bytes, cap]) as ReturnType<
-        RuntimeRangeAssetFormatAdapter["parseFrontIndex"]
-      >,
-    validateCompleteAsset: (bytes: Uint8Array, cap: number) =>
-      Reflect.apply(complete, value, [bytes, cap]) as ReturnType<
-        RuntimeRangeAssetFormatAdapter["validateCompleteAsset"]
-      >
   });
 }
 

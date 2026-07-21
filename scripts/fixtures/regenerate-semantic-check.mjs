@@ -8,6 +8,8 @@ const toolBacked = process.argv.includes("--tool-backed");
 const args = [
   "vitest",
   "run",
+  "--config",
+  resolve(root, "vitest.m9.config.ts"),
   "packages/compiler/test/project-bundle-compiler.test.ts",
   "packages/compiler/test/video-rendition-pipeline.test.ts",
   "packages/compiler/test/ivf-codec-integration.test.ts"

@@ -388,12 +388,6 @@ class FakeAssetSession implements RuntimeAssetSession {
     rendition: string,
     options: Readonly<RuntimeAssetEnsureOptions> = {}
   ): Promise<readonly Readonly<VerifiedBlobHandle>[]> {
-    return this.ensureAllUnits(rendition, options);
-  }
-  public async ensureAllUnits(
-    rendition: string,
-    options: Readonly<RuntimeAssetEnsureOptions> = {}
-  ): Promise<readonly Readonly<VerifiedBlobHandle>[]> {
     this.#record(`units:${rendition}`);
     if (this.#behavior.unitGate !== undefined) {
       await this.#behavior.unitGate.promise;

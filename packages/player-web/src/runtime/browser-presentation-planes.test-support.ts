@@ -51,43 +51,6 @@ export class FakePresentableBackend implements PresentableFrameBackend {
   }
 }
 
-export class CanvasOwningFakeBackend extends FakePresentableBackend {
-  public lastRedrawBackingSetCount = 0;
-
-  public constructor(
-    private readonly canvas: HTMLCanvasElement,
-    private readonly backingSets: readonly string[]
-  ) {
-    super();
-  }
-
-  public override setPresentationGeometry(
-    geometry: Readonly<PresentationGeometry>
-  ): boolean {
-    const changed = super.setPresentationGeometry(geometry);
-    if (!changed) return false;
-    this.canvas.width = geometry.backing.width;
-    this.canvas.height = geometry.backing.height;
-    // This point stands for the backend's synchronous redraw barrier.
-    this.lastRedrawBackingSetCount = this.backingSets.length;
-    return true;
-  }
-}
-
-export class MutatingInitialFailureBackend extends FakePresentableBackend {
-  public constructor(private readonly canvas: HTMLCanvasElement) {
-    super();
-  }
-
-  public override setPresentationGeometry(
-    _geometry: Readonly<PresentationGeometry>
-  ): boolean {
-    this.canvas.width = 1_999;
-    this.canvas.height = 1_777;
-    throw new Error("injected initial geometry failure");
-  }
-}
-
 export function fakeCanvas() {
   const drawCalls: unknown[][] = [];
   const backingSets: string[] = [];

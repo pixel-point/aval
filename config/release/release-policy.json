@@ -1,8 +1,9 @@
 {
   "schemaVersion": "1.0",
   "releaseVersion": "1.0.0",
-  "wireFormatVersion": "0.1",
-  "projectSchemaVersion": "0.2",
+  "releaseStage": "technical-preview",
+  "wireFormatVersion": "1.1",
+  "projectSchemaVersion": "1.0",
   "publicPackages": [
     "@pixel-point/aval-graph",
     "@pixel-point/aval-format",
@@ -41,39 +42,53 @@
     "artifactRetentionDays": 30
   },
   "namedProfiles": {
-    "requiredPlatformClasses": [
-      "macos-26-apple-silicon",
-      "windows-11-uhd620-or-better",
-      "ios-26-iphone-real-device",
-      "ios-18-iphone-real-device",
-      "android-15-samsung-midrange-real-device"
-    ],
-    "requiredBrowsersByPlatform": {
-      "macos-26-apple-silicon": [
-        { "browserProduct": "Safari", "browserVersion": "26.5", "browserChannel": "shipping", "osProduct": "macOS", "osVersion": "26.5", "deviceClass": "Apple-Silicon-M1-or-later", "virtualization": "none" },
-        { "browserProduct": "Chrome", "browserVersion": "149", "browserChannel": "stable", "osProduct": "macOS", "osVersion": "26.5", "deviceClass": "Apple-Silicon-M1-or-later", "virtualization": "none" },
-        { "browserProduct": "Firefox", "browserVersion": "151", "browserChannel": "release", "osProduct": "macOS", "osVersion": "26.5", "deviceClass": "Apple-Silicon-M1-or-later", "virtualization": "none" },
-        { "browserProduct": "Microsoft Edge", "browserVersion": "149", "browserChannel": "stable", "osProduct": "macOS", "osVersion": "26.5", "deviceClass": "Apple-Silicon-M1-or-later", "virtualization": "none" }
-      ],
-      "windows-11-uhd620-or-better": [
-        { "browserProduct": "Chrome", "browserVersion": "150", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
-        { "browserProduct": "Chrome", "browserVersion": "149", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
-        { "browserProduct": "Chrome", "browserVersion": "148", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
-        { "browserProduct": "Chrome", "browserVersion": "127", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
-        { "browserProduct": "Microsoft Edge", "browserVersion": "149", "browserChannel": "stable", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" },
-        { "browserProduct": "Firefox", "browserVersion": "151", "browserChannel": "release", "osProduct": "Windows", "osVersion": "11", "deviceClass": "UHD620-or-better", "virtualization": "none" }
-      ],
-      "ios-26-iphone-real-device": [
-        { "browserProduct": "Mobile Safari", "browserVersion": "26.5", "browserChannel": "shipping", "osProduct": "iOS", "osVersion": "26.5", "deviceClass": "iPhone-real-device", "virtualization": "none" },
-        { "browserProduct": "Mobile Safari", "browserVersion": "26.4", "browserChannel": "shipping", "osProduct": "iOS", "osVersion": "26.4", "deviceClass": "iPhone-real-device", "virtualization": "none" },
-        { "browserProduct": "Mobile Safari", "browserVersion": "26.0", "browserChannel": "shipping", "osProduct": "iOS", "osVersion": "26.0", "deviceClass": "iPhone-real-device", "virtualization": "none" }
-      ],
-      "ios-18-iphone-real-device": [
-        { "browserProduct": "Mobile Safari", "browserVersion": "18.0", "browserChannel": "shipping", "osProduct": "iOS", "osVersion": "18.0", "deviceClass": "iPhone-real-device", "virtualization": "none" }
-      ],
-      "android-15-samsung-midrange-real-device": [
-        { "browserProduct": "Chrome", "browserVersion": "145", "browserChannel": "stable", "osProduct": "Android", "osVersion": "15", "deviceClass": "Samsung-midrange-real-device", "virtualization": "none" }
-      ]
+    "browserCertificationPolicy": "config/release/browser-certification-policy.json",
+    "platformGroups": {
+      "macos-26-apple-silicon": {
+        "slotIds": ["macos-26-4-safari-26-4", "macos-26-4-chrome-150", "macos-26-4-chrome-149", "macos-26-4-chrome-148", "macos-26-4-chrome-127", "macos-26-4-firefox-152", "macos-26-4-firefox-151", "macos-26-4-firefox-150", "macos-26-4-firefox-130", "macos-26-4-brave-1-92-141", "macos-26-4-brave-1-67-134"],
+        "deviceClass": "Apple-Silicon-M1-or-later",
+        "virtualization": "none"
+      },
+      "macos-15-apple-silicon": {
+        "slotIds": ["macos-15-4-safari-18-4", "macos-15-4-chrome-150", "macos-15-4-chrome-149", "macos-15-4-chrome-148", "macos-15-4-chrome-127", "macos-15-4-firefox-152", "macos-15-4-firefox-151", "macos-15-4-firefox-150", "macos-15-4-firefox-130", "macos-15-4-brave-1-92-141", "macos-15-4-brave-1-67-134"],
+        "deviceClass": "Apple-Silicon-M1-or-later",
+        "virtualization": "none"
+      },
+      "windows-11-uhd620-or-better": {
+        "slotIds": ["windows-11-chrome-150", "windows-11-chrome-149", "windows-11-chrome-148", "windows-11-chrome-127", "windows-11-firefox-152", "windows-11-firefox-151", "windows-11-firefox-150", "windows-11-firefox-130"],
+        "deviceClass": "UHD620-or-better",
+        "virtualization": "none"
+      },
+      "windows-server-2025-brave": {
+        "slotIds": ["windows-server-2025-brave-1-92-141", "windows-server-2025-brave-1-67-134"],
+        "deviceClass": "managed-windows-x64",
+        "virtualization": "none"
+      },
+      "ios-26-iphone-real-device": {
+        "slotIds": ["ios-26-5-iphone-17-safari", "ios-26-4-iphone-17-safari", "ios-26-0-iphone-17-safari"],
+        "deviceClass": "iPhone-real-device",
+        "virtualization": "none"
+      },
+      "ios-18-iphone-real-device": {
+        "slotIds": ["ios-18-6-iphone-16-safari"],
+        "deviceClass": "iPhone-real-device",
+        "virtualization": "none"
+      },
+      "android-17-pixel-real-device": {
+        "slotIds": ["android-17-pixel-9-chrome"],
+        "deviceClass": "Google-Pixel-9-real-device",
+        "virtualization": "none"
+      },
+      "android-16-pixel-real-device": {
+        "slotIds": ["android-16-pixel-9-chrome"],
+        "deviceClass": "Google-Pixel-9-real-device",
+        "virtualization": "none"
+      },
+      "android-15-samsung-midrange-real-device": {
+        "slotIds": ["android-15-galaxy-s25-chrome"],
+        "deviceClass": "Samsung-Galaxy-S25-real-device",
+        "virtualization": "none"
+      }
     },
     "requiredRefreshMilliHz": [60000],
     "conditionalRefreshMilliHz": 120000,

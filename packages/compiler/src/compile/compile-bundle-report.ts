@@ -3,6 +3,7 @@ import {
   createCompileBundleSourceMarkup,
   FormatError,
   isVideoCodecString,
+  SHA256_HEX_PATTERN,
   serializeCanonicalJsonWithLimits,
   type CompileBundleReportAsset as PublishedCompileBundleReportAsset,
   type CompileBundleReportTool as PublishedCompileBundleReportTool,
@@ -22,7 +23,6 @@ import {
 import { sha256Hex } from "./hash.js";
 import { cloneNormalizedVideoEncodings } from "./video-encoding-policy.js";
 
-const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const PATH_OR_URL = /(?:^|[\s"'(=])(?:https?:\/\/|file:|[A-Za-z]:[\\/]|\\\\|\/(?!\/)|\.\.?[\\/]|~[\\/])/u;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 
@@ -324,7 +324,7 @@ function integer(
 }
 
 function sha256(value: unknown, path: string): string {
-  if (typeof value !== "string" || !SHA256_HEX.test(value)) {
+  if (typeof value !== "string" || !SHA256_HEX_PATTERN.test(value)) {
     invalid("must be a lowercase SHA-256 digest", path);
   }
   return value;

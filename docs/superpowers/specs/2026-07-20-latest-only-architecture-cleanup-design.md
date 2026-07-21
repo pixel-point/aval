@@ -19,7 +19,7 @@ runtime fallback ladder.
 - AVAL wire format: `1.1` only.
 - Compiler build-report schema: `1.0`.
 - Browser support: the rolling 24-month certification policy in
-  `scripts/browser-compatibility/certification-policy.json`.
+  `config/release/browser-certification-policy.json`.
 - Codec declarations in manifests and source MIME types: the exact canonical
   strings emitted by the current compiler.
 

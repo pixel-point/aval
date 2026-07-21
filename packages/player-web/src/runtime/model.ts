@@ -539,7 +539,6 @@ export interface RuntimeTraceCounters {
   readonly underflows: number;
   readonly staticTransitions: number;
   readonly settledRequests: number;
-  readonly cleanedFrames: number;
 }
 
 /**

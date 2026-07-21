@@ -12,7 +12,6 @@ import {
 import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 import { sameAspectRatio } from "./media-geometry.js";
 import {
-  captureDecoderFrameMetadata,
   createDecoderOutputFailure,
   createDecoderFailureDiagnostic,
   inspectDecoderFrameMetadata,
@@ -52,11 +51,11 @@ export interface DecoderOutputExpectation {
     readonly height: number;
   }>;
   readonly colorSpace: Readonly<{
-    readonly fullRange: boolean | null;
-    readonly matrix: VideoMatrixCoefficients | null;
-    readonly primaries: VideoColorPrimaries | null;
-    readonly transfer: VideoTransferCharacteristics | null;
-  }> | null;
+    readonly fullRange: boolean;
+    readonly matrix: VideoMatrixCoefficients;
+    readonly primaries: VideoColorPrimaries;
+    readonly transfer: VideoTransferCharacteristics;
+  }>;
 }
 
 export interface DecoderLimits {
@@ -105,13 +104,6 @@ export class DecoderLocalFailureError extends Error {
 
 const PROGRESS_MS = 2_000;
 const MAX_BYTES = Number.MAX_SAFE_INTEGER;
-const DEFAULT_DECODER_COLOR: Readonly<DecoderColorTuple> = Object.freeze([
-  "bt709",
-  "bt709",
-  "bt709",
-  false
-]);
-
 type DecoderLane =
   | Readonly<{ phase: "idle"; generationFloor: number }>
   | Readonly<{ phase: "running"; run: DecodeRun }>
@@ -149,8 +141,7 @@ export class Decoder {
 
   public constructor(
     config: Readonly<VideoDecoderConfig>,
-    expectation: Readonly<DecoderOutputExpectation> =
-      defaultExpectation(config),
+    expectation: Readonly<DecoderOutputExpectation>,
     limits: Readonly<DecoderLimits> = {}
   ) {
     this.#expectation = validateExpectation(expectation);
@@ -1479,7 +1470,7 @@ function validateFrame(
     rect.y > metadata.codedHeight - rect.height) {
     throw new DecoderFrameValidationError("visible-rect", "visible-rect");
   }
-  const expectedColor = decoderExpectedColorTuple(expected.colorSpace);
+  const expectedColor = decoderColorTuple(expected.colorSpace);
   const actualColor = decoderColorTuple(frame.colorSpace);
   if (classifyDecoderColor(expectedColor, actualColor).kind === "incompatible") {
     throw new DecoderFrameValidationError("color-space", "color-space");
@@ -1538,7 +1529,6 @@ function observedOutputMetadata(
 function expectationColorSpaceMetadata(
   colorSpace: DecoderOutputExpectation["colorSpace"]
 ): DecoderExpectedOutputMetadata["colorSpace"] {
-  if (colorSpace === null) return null;
   return Object.freeze([
     colorSpace.primaries,
     colorSpace.transfer,
@@ -1558,12 +1548,6 @@ function decodedFrameBytes(width: number, height: number): number {
   return pixels * 4;
 }
 
-function decoderExpectedColorTuple(
-  colorSpace: DecoderOutputExpectation["colorSpace"]
-): Readonly<DecoderColorTuple> {
-  return colorSpace === null ? DEFAULT_DECODER_COLOR : decoderColorTuple(colorSpace);
-}
-
 function decoderColorTuple(colorSpace: Readonly<{
   readonly fullRange: boolean | null;
   readonly matrix: VideoMatrixCoefficients | null;
@@ -1576,37 +1560,6 @@ function decoderColorTuple(colorSpace: Readonly<{
     colorSpace.matrix,
     colorSpace.fullRange
   ];
-}
-
-function defaultExpectation(
-  config: Readonly<VideoDecoderConfig>
-): DecoderOutputExpectation {
-  const codedWidth = config.codedWidth;
-  const codedHeight = config.codedHeight;
-  if (
-    codedWidth === undefined ||
-    codedHeight === undefined ||
-    !positive(codedWidth) ||
-    !positive(codedHeight)
-  ) {
-    throw new RangeError("decoder configuration requires coded dimensions");
-  }
-  const displayWidth = config.displayAspectWidth ?? codedWidth;
-  const displayHeight = config.displayAspectHeight ?? codedHeight;
-  const color = config.colorSpace;
-  return {
-    codedWidth,
-    codedHeight,
-    displayWidth,
-    displayHeight,
-    visibleRect: { x: 0, y: 0, width: displayWidth, height: displayHeight },
-    colorSpace: color === undefined ? null : {
-      fullRange: color.fullRange ?? null,
-      matrix: color.matrix ?? null,
-      primaries: color.primaries ?? null,
-      transfer: color.transfer ?? null
-    }
-  };
 }
 
 function validateExpectation(
@@ -1633,7 +1586,7 @@ function validateExpectation(
     displayWidth: value.displayWidth,
     displayHeight: value.displayHeight,
     visibleRect: Object.freeze({ ...rect }),
-    colorSpace: value.colorSpace === null ? null : Object.freeze({ ...value.colorSpace })
+    colorSpace: Object.freeze({ ...value.colorSpace })
   });
 }
 
@@ -1651,13 +1604,6 @@ function closeTransferredFrame(
     "frame" in value &&
     value.frame instanceof VideoFrameConstructor
   ) value.frame.close();
-}
-
-function captureFrameMetadata(
-  frame: VideoFrame
-): Readonly<DecoderFrameMetadata> | null {
-  try { return captureDecoderFrameMetadata(frame); }
-  catch { return null; }
 }
 
 function workerErrorReason(event: Event): Error {

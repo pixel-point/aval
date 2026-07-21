@@ -182,7 +182,7 @@ describe("codec-neutral borrowed video inspection", () => {
   });
 
   it("rejects an H264 manifest profile that disagrees with the inspected SPS", () => {
-    const mismatch = createFixture("h264", "avc1.640020");
+    const mismatch = createFixture("h264", "avc1.42E01F");
     expect(() => inspectBorrowedVideoRendition(
       mismatch.plan,
       createBorrow(mismatch)
@@ -292,7 +292,7 @@ function createFixture(family: VideoCodec, codecOverride?: string): CodecFixture
     bitrate: Object.freeze(spec.bitrate)
   });
   const manifest: CompiledManifest = Object.freeze({
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "adapter-test",
     codec: family,
     bitstream: spec.bitstream,

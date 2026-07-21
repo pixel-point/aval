@@ -1,10 +1,10 @@
-import type {
-  Blob,
-  Edge,
-  Manifest,
-  Unit
-} from "./asset.js";
-import { maximumDecodedRgbaBytes } from "@pixel-point/aval-format";
+import {
+  maximumDecodedRgbaBytes,
+  type CompiledManifest as Manifest,
+  type Edge,
+  type UnitBlobRange as Blob,
+  type Unit
+} from "@pixel-point/aval-format";
 import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 
 type Body = Extract<Unit, { readonly kind: "body" }>;
@@ -43,7 +43,7 @@ export interface ReadinessPlan {
   readonly declaredWorkingSetBytes: number;
 }
 
-/** Expand the complete format-1.0 all-routes set for one selected rendition. */
+/** Expand the complete current all-routes set for one selected rendition. */
 export function createReadinessPlan(
   manifest: Readonly<Manifest>,
   renditionId: string,

@@ -85,7 +85,7 @@ export class DecoderPool {
 
   public constructor(
     config: Readonly<VideoDecoderConfig>,
-    expectation?: Readonly<DecoderOutputExpectation>,
+    expectation: Readonly<DecoderOutputExpectation>,
     limits: Readonly<DecoderLimits> = {}
   ) {
     this.#maxDecodedBytes = limits.maxDecodedBytes ?? MAX_BYTES;
@@ -305,7 +305,7 @@ export class DecoderPool {
   #createDecoder(
     lane: DecoderPoolLaneId,
     config: Readonly<VideoDecoderConfig>,
-    expectation: Readonly<DecoderOutputExpectation> | undefined,
+    expectation: Readonly<DecoderOutputExpectation>,
     limits: Readonly<DecoderLimits>
   ): Decoder {
     return new Decoder(config, expectation, {

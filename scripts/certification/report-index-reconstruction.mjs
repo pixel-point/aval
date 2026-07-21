@@ -2,11 +2,29 @@ import { createHash } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { loadCandidateFixtureAuthority } from "./candidate-fixtures.mjs";
 import { displayQualificationPolicy } from "./display-qualification.mjs";
+import {
+  deriveNamedProfileMatrixPolicy,
+  resolveBrowserCertificationPolicyPath
+} from "./named-profile-policy.mjs";
 
 /** Reloads every byte referenced by an index and reconstructs its semantic profiles. */
 export async function reconstructReportIndex({ indexPath, candidatePath, referenceRoot = process.cwd(), certification, policy }) {
+  const browserPolicyPath = resolveBrowserCertificationPolicyPath(
+    policy.namedProfiles,
+    { candidateManifestPath: candidatePath, repositoryRoot: process.cwd() }
+  );
+  const browserPolicyBytes = await boundedRead(
+    browserPolicyPath,
+    policy.limits.maximumReportBytes,
+    "browser certification policy",
+    certification
+  );
+  const namedProfilePolicy = deriveNamedProfileMatrixPolicy(
+    policy.namedProfiles,
+    parseJson(browserPolicyBytes, "browser certification policy")
+  );
   const indexBytes = await boundedRead(indexPath, policy.limits.maximumReportBytes, "report index", certification);
-  const index = certification.validateReportIndex(parseJson(indexBytes, "report index"), policy.namedProfiles);
+  const index = certification.validateReportIndex(parseJson(indexBytes, "report index"), namedProfilePolicy);
   requireCanonical(indexBytes, index, certification, "report index");
   let candidate = null; let candidateDigest = null; let fixtureAuthority = Object.freeze({ digests: new Set(), models: new Map(), displayPatterns: new Map(), fatalBoundaryFixtureDigests: new Set(), harnessDigests: new Set() });
   if (candidatePath !== undefined) {

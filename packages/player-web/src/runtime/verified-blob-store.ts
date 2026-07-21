@@ -750,28 +750,6 @@ export class VerifiedBlobStore {
     return entry.storage;
   }
 
-  #borrowRange(
-    key: string,
-    relativeOffset: number,
-    byteLength: number
-  ): Uint8Array {
-    const storage = this.#requireVerifiedStorage(key);
-    if (
-      !Number.isSafeInteger(relativeOffset) ||
-      !Number.isSafeInteger(byteLength) ||
-      relativeOffset < 0 ||
-      byteLength < 1 ||
-      relativeOffset > storage.bytes.byteLength ||
-      byteLength > storage.bytes.byteLength - relativeOffset
-    ) {
-      throw new RuntimePlaybackError(normalizeRuntimeFailure("invalid-asset"));
-    }
-    return storage.bytes.subarray(
-      relativeOffset,
-      relativeOffset + byteLength
-    );
-  }
-
   #residencySnapshot(
     kind: VerifiedBlobKind
   ): Readonly<RuntimeBlobResidencySnapshot> {

@@ -213,7 +213,7 @@ function parseRecord(
   });
 }
 
-/** Parse the exact fixed-width 1.0 decode-order chunk index. */
+/** Parse the exact fixed-width 1.1 decode-order chunk index. */
 export function parseEncodedChunkIndex(
   bytes: Uint8Array,
   manifest: CompiledManifest,
@@ -280,7 +280,7 @@ export function parseEncodedChunkIndex(
   }
 }
 
-/** Encode the exact fixed-width 1.0 decode-order chunk index. */
+/** Encode the exact fixed-width 1.1 decode-order chunk index. */
 export function encodeEncodedChunkIndex(
   records: readonly EncodedChunkRecord[],
   manifest: CompiledManifest,

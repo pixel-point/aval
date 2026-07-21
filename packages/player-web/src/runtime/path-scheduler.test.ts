@@ -242,17 +242,23 @@ describe("PathScheduler generation replacement and recovery", () => {
       resident(index % 2)
     );
 
-    await fixture.scheduler.startResidentRunway({
+    const transaction = fixture.scheduler.stageResidentRunway({
       edgeId: "cut-to-target",
       targetState: "target",
       targetBody: body("body", "loop", 2, [1]),
       frames: runway,
       path: "cut-target"
     });
+    await fixture.scheduler.commitResidentRunway(
+      transaction,
+      { alreadyPresented: 1 }
+    )();
     await fixture.scheduler.pump({ targetRingFrames: 2 });
 
-    const ordinals: bigint[] = [];
-    for (let index = 0; index < runway.length; index += 1) {
+    const ordinals: bigint[] = [
+      transaction.media[0]!.intendedPresentationOrdinal
+    ];
+    for (let index = 1; index < runway.length; index += 1) {
       const current = fixture.scheduler.takeNext();
       expect(current.kind).toBe("resident");
       if (current.kind !== "resident") throw new Error("expected resident");
@@ -412,7 +418,10 @@ describe("PathScheduler generation replacement and recovery", () => {
     expect(transaction.generation).toBe(3);
     gate.release();
     await replacement;
-    await fixture.scheduler.commitResidentRunway(transaction)();
+    await fixture.scheduler.commitResidentRunway(
+      transaction,
+      { alreadyPresented: 1 }
+    )();
     expect(fixture.scheduler.snapshot()).toMatchObject({
       generation: 3,
       activePath: "cut:after-in-flight"
@@ -480,11 +489,14 @@ describe("PathScheduler generation replacement and recovery", () => {
     });
 
     expect(fixture.scheduler.rollbackResidentRunway(stale)).toBe(false);
-    await fixture.scheduler.commitResidentRunway(current)();
+    await fixture.scheduler.commitResidentRunway(
+      current,
+      { alreadyPresented: 1 }
+    )();
     expect(fixture.scheduler.snapshot()).toMatchObject({
       generation: 2,
       activePath: "cut:current",
-      residentFrames: 6
+      residentFrames: 5
     });
     expect(fixture.scheduler.rollbackResidentRunway(current)).toBe(false);
   });
@@ -504,15 +516,19 @@ describe("PathScheduler generation replacement and recovery", () => {
       residentFor("opaque-path", "idle-body", frame)
     );
 
-    await fixture.scheduler.startResidentRunway({
+    const transaction = fixture.scheduler.stageResidentRunway({
       edgeId: "cut-to-finite",
       targetState: "finite",
       targetBody: finite,
       frames: runway,
       path: "cut-finite"
     });
+    await fixture.scheduler.commitResidentRunway(
+      transaction,
+      { alreadyPresented: 1 }
+    )();
     await fixture.scheduler.pump({ targetRingFrames: 2 });
-    for (const expected of [0, 1, 2, 3, 3, 3]) {
+    for (const expected of [1, 2, 3, 3, 3]) {
       const current = fixture.scheduler.takeNext();
       expect(current.kind).toBe("resident");
       if (current.kind === "resident") {

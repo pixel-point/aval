@@ -135,7 +135,7 @@ describe("player-web public boundary", () => {
     if (rendition === undefined) {
       throw new Error("public video fixture has no rendition");
     }
-    await session.ensureAllUnits(rendition);
+    await session.ensureRenditionUnits(rendition);
     const renditionRecord = session.catalog.chunks.values().find((record) =>
       record.rendition === rendition
     );
@@ -161,7 +161,7 @@ describe("player-web public boundary", () => {
       verified: 0,
       verifiedBytes: 0
     });
-    await session.ensureAllUnits(rendition);
+    await session.ensureRenditionUnits(rendition);
     expect(session.snapshot().unitBlobs.verifiedBytes).toBe(evictedBytes);
     expect(new Uint8Array(session.catalog.copyChunk(
       renditionRecord.rendition,

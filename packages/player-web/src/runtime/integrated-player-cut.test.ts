@@ -58,7 +58,7 @@ describe("integrated resident cut presentation", () => {
     async (sourceFrame) => {
       const fixture = await createFixture({ sourceFrame: sourceFrame as 0 | 1 });
       const request = requestCut(fixture);
-      const activationPromise = fixture.coordinator.activateCut(fixture.cut);
+      fixture.coordinator.stageCut(fixture.cut);
       const prepared = requirePrepared(fixture.coordinator.prepareContentTick(
         tickContext(fixture)
       ));
@@ -86,7 +86,7 @@ describe("integrated resident cut presentation", () => {
         fixture.coordinator.drawContentTick(prepared, presentation);
       });
       fixture.coordinator.synchronizeGraph(result);
-      const activation = await activationPromise;
+      const activation = await fixture.coordinator.startStagedContinuation();
 
       expect(result.presentation).toEqual({
         kind: "body",
@@ -115,7 +115,7 @@ describe("integrated resident cut presentation", () => {
       retainOneStaleOutput: true
     });
     requestCut(fixture);
-    const activation = await fixture.coordinator.activateCut(fixture.cut);
+    fixture.coordinator.stageCut(fixture.cut);
     const handles = fixture.renderer.residentHandles.slice();
     const presentations: Array<{
       readonly ordinal: bigint;
@@ -135,6 +135,9 @@ describe("integrated resident cut presentation", () => {
         routeReady: true
       });
       drawAndSynchronize(fixture, prepared, result);
+      if (index === 0) {
+        await fixture.coordinator.startStagedContinuation();
+      }
       if (prepared.media.kind !== "frame") throw new Error("expected frame");
       presentations.push({
         ordinal,
@@ -162,6 +165,7 @@ describe("integrated resident cut presentation", () => {
       localFrame: index % 2,
       source: "resident"
     })));
+    const activation = fixture.coordinator.snapshot();
     expect(continuation.media).toMatchObject({
       drawSource: "streaming",
       frame: { unit: "hover-body", localFrame: 0 },
@@ -187,20 +191,19 @@ describe("integrated resident cut presentation", () => {
     });
   });
 
-  it("increments generations monotonically and rejects a superseded prepared frame without fallback", async () => {
+  it("rejects a superseded prepared frame without fallback", async () => {
     const failures: RuntimeFailure[] = [];
     const fixture = await createFixture({ failures });
     requestCut(fixture);
-    const first = await fixture.coordinator.activateCut(fixture.cut);
+    fixture.coordinator.stageCut(fixture.cut);
     const old = requirePrepared(fixture.coordinator.prepareContentTick(
       tickContext(fixture)
     ));
-    const second = await fixture.coordinator.activateCut({
+    fixture.coordinator.stageCut({
       ...fixture.cut,
       path: "cut:hover:replacement"
     });
 
-    expect(second.generation).toBeGreaterThan(first.generation);
     expect(() => fixture.coordinator.drawContentTick(
       old,
       bodyPresentation("hover", "hover-body", 0)
@@ -212,7 +215,7 @@ describe("integrated resident cut presentation", () => {
     ));
     expect(replacement.media).toMatchObject({
       frame: { unit: "hover-body", localFrame: 0 },
-      generation: second.generation,
+      generation: fixture.coordinator.snapshot().generation,
       intendedPresentationOrdinal: fixture.nextPresentationOrdinal
     });
     const result = fixture.graph.tick({
@@ -220,42 +223,10 @@ describe("integrated resident cut presentation", () => {
       routeReady: true
     });
     drawAndSynchronize(fixture, replacement, result);
+    await fixture.coordinator.startStagedContinuation();
     expect(fixture.renderer.drawn).toEqual([
       fixture.renderer.residentHandles[0]
     ]);
-  });
-
-  it("serializes competing activations and treats obsolete work as supersession", async () => {
-    const failures: RuntimeFailure[] = [];
-    const fixture = await createFixture({ failures });
-    requestCut(fixture);
-    const activationGate = fixture.worker.gateNextActivation();
-    const obsolete = fixture.coordinator.activateCut({
-      ...fixture.cut,
-      path: "cut:hover:obsolete"
-    });
-    await activationGate.entered;
-    const latest = fixture.coordinator.activateCut({
-      ...fixture.cut,
-      path: "cut:hover:latest"
-    });
-    activationGate.release();
-
-    await expect(obsolete).rejects.toBeInstanceOf(
-      CutPresentationSupersededError
-    );
-    const activated = await latest;
-    expect(activated.generation).toBe(3);
-    expect(fixture.scheduler.snapshot()).toMatchObject({
-      generation: 3,
-      activePath: "cut:hover:latest"
-    });
-    expect(fixture.coordinator.snapshot()).toMatchObject({
-      status: "ready",
-      activation: 2,
-      generation: 3
-    });
-    expect(failures).toEqual([]);
   });
 
   it("signals static recovery for a missing resident resource", async () => {
@@ -264,8 +235,8 @@ describe("integrated resident cut presentation", () => {
     fixture.renderer.missingLayer = 3;
     requestCut(fixture);
 
-    await expect(fixture.coordinator.activateCut(fixture.cut)).rejects
-      .toMatchObject({ code: "resource-rejection" });
+    expect(() => fixture.coordinator.stageCut(fixture.cut))
+      .toThrowError(expect.objectContaining({ code: "resource-rejection" }));
     expect(failures).toHaveLength(1);
     expect(failures[0]).toMatchObject({
       code: "resource-rejection",
@@ -278,7 +249,7 @@ describe("integrated resident cut presentation", () => {
     const failures: RuntimeFailure[] = [];
     const fixture = await createFixture({ failures });
     requestCut(fixture);
-    await fixture.coordinator.activateCut(fixture.cut);
+    fixture.coordinator.stageCut(fixture.cut);
     const prepared = requirePrepared(fixture.coordinator.prepareContentTick(
       tickContext(fixture)
     ));
@@ -391,6 +362,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<CutFixture> 
   const coordinator = new CutPresentationCoordinator({
     scheduler,
     renderer,
+    enqueueMediaOperation: (operation) => operation(),
     onStaticRecovery: (failure) => failures.push(failure),
     readbackTag: (media) =>
       `${media.frame.unit}:${String(media.frame.localFrame)}`
@@ -568,10 +540,6 @@ class FakeWorker implements PathSchedulerWorkerAdapter {
   #releasedFrames = 0;
   #staleRetained = false;
   #lastSubmitted: PendingSample | null = null;
-  #activationGate: {
-    readonly entered: () => void;
-    readonly released: Promise<void>;
-  } | null = null;
 
   public constructor(options: { readonly retainOneStaleOutput: boolean }) {
     this.#retainOneStaleOutput = options.retainOneStaleOutput;
@@ -585,28 +553,7 @@ class FakeWorker implements PathSchedulerWorkerAdapter {
     return this.#open.size;
   }
 
-  public gateNextActivation(): {
-    readonly entered: Promise<void>;
-    readonly release: () => void;
-  } {
-    if (this.#activationGate !== null) {
-      throw new Error("fake activation is already gated");
-    }
-    let enter!: () => void;
-    let release!: () => void;
-    const entered = new Promise<void>((resolve) => { enter = resolve; });
-    const released = new Promise<void>((resolve) => { release = resolve; });
-    this.#activationGate = { entered: enter, released };
-    return Object.freeze({ entered, release });
-  }
-
   public async activateGeneration(generation: number): Promise<void> {
-    const gate = this.#activationGate;
-    if (gate !== null) {
-      this.#activationGate = null;
-      gate.entered();
-      await gate.released;
-    }
     const previous = this.activeGeneration;
     this.activeGeneration = generation;
     for (const frame of this.#ready) {

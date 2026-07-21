@@ -69,9 +69,6 @@ export interface BrowserPresentationPlanesOptions {
   readonly maxBackingBytes: number;
   /** Exact host box/DPR used for the first backing allocation, when known. */
   readonly initialPresentation?: Readonly<BrowserPresentationResizeInput>;
-  readonly onClamp?: (
-    geometry: Readonly<PresentationGeometry>
-  ) => void;
   readonly backingResources?: BrowserCanvasBackingResourceHost;
   readonly createBackend?: (
     canvas: HTMLCanvasElement,
@@ -106,7 +103,6 @@ export class BrowserPresentationPlanes implements RuntimeCanvasResourceHost {
   readonly #maxBackingWidth: number;
   readonly #maxBackingHeight: number;
   readonly #maxBackingBytes: number;
-  readonly #onClamp: BrowserPresentationPlanesOptions["onClamp"];
   readonly #backingResources: Readonly<BrowserCanvasBackingResourceHost> | null;
   readonly #asynchronousBackingGrowth: boolean;
   readonly #createBackend: NonNullable<
@@ -145,7 +141,6 @@ export class BrowserPresentationPlanes implements RuntimeCanvasResourceHost {
     this.#maxBackingWidth = captured.maxBackingWidth;
     this.#maxBackingHeight = captured.maxBackingHeight;
     this.#maxBackingBytes = captured.maxBackingBytes;
-    this.#onClamp = captured.onClamp;
     this.#backingResources = captured.backingResources;
     this.#asynchronousBackingGrowth =
       captured.backingResources?.asynchronousAfterInitial === true;
@@ -183,18 +178,6 @@ export class BrowserPresentationPlanes implements RuntimeCanvasResourceHost {
         "animated presentation"
       );
       this.#geometry = initial;
-      if (initial.clampReasons.length > 0) {
-        try {
-          this.#onClamp?.(initial);
-        } catch {
-          // Diagnostics cannot own initial presentation geometry.
-        }
-        // The observational host may still mutate either captured canvas
-        // without throwing. Reassert the committed initial backing after it
-        // returns.
-        captured.animatedCanvas.width = initial.backing.width;
-        captured.animatedCanvas.height = initial.backing.height;
-      }
       initialTransition?.commit();
     } catch (error) {
       resetCanvasBacking(captured.animatedCanvas);
@@ -385,7 +368,6 @@ export class BrowserPresentationPlanes implements RuntimeCanvasResourceHost {
         return this.#geometry!;
       }
       this.#geometry = geometry;
-      this.#emitClamp(geometry);
       this.#assertActiveWithTerminalReset();
       return geometry;
     }
@@ -460,7 +442,6 @@ export class BrowserPresentationPlanes implements RuntimeCanvasResourceHost {
         "equivalent presentation resize count"
       );
       this.#geometry = geometry;
-      this.#emitClamp(geometry);
       this.#assertActiveWithTerminalReset();
       return geometry;
     }
@@ -473,7 +454,6 @@ export class BrowserPresentationPlanes implements RuntimeCanvasResourceHost {
       this.#resizeCount,
       "presentation resize count"
     );
-    this.#emitClamp(geometry);
     this.#assertActiveWithTerminalReset();
       return geometry;
     } finally {
@@ -518,15 +498,6 @@ export class BrowserPresentationPlanes implements RuntimeCanvasResourceHost {
       const unconsumed = this.#admittedBackingTransition;
       this.#admittedBackingTransition = null;
       safelyRollbackBackingTransition(unconsumed?.transition ?? transition);
-    }
-  }
-
-  #emitClamp(geometry: Readonly<PresentationGeometry>): void {
-    if (geometry.clampReasons.length === 0) return;
-    try {
-      this.#onClamp?.(geometry);
-    } catch {
-      // Diagnostics cannot own presentation geometry.
     }
   }
 
@@ -1006,19 +977,12 @@ function sameGeometryMetadata(
   right: Readonly<PresentationGeometry>
 ): boolean {
   return left.fit === right.fit &&
-    left.desiredBacking.width === right.desiredBacking.width &&
-    left.desiredBacking.height === right.desiredBacking.height &&
     left.destinationCssRect.x === right.destinationCssRect.x &&
     left.destinationCssRect.y === right.destinationCssRect.y &&
     left.destinationCssRect.width === right.destinationCssRect.width &&
     left.destinationCssRect.height === right.destinationCssRect.height &&
     left.effectiveDevicePixelRatio.x === right.effectiveDevicePixelRatio.x &&
-    left.effectiveDevicePixelRatio.y === right.effectiveDevicePixelRatio.y &&
-    left.resolutionScale === right.resolutionScale &&
-    left.clampReasons.length === right.clampReasons.length &&
-    left.clampReasons.every((reason, index) =>
-      reason === right.clampReasons[index]
-    );
+    left.effectiveDevicePixelRatio.y === right.effectiveDevicePixelRatio.y;
 }
 
 function increment(value: number, label: string): number {

@@ -6,7 +6,6 @@ export {
   FORMAT_DEFAULT_BUDGETS,
   FORMAT_HEADER_LENGTH,
   FORMAT_MAGIC,
-  FORMAT_SUPPORTED_VERSIONS,
   FORMAT_VERSION_MAJOR,
   FORMAT_VERSION_MINOR,
   IDENTIFIER_PATTERN,
@@ -30,8 +29,8 @@ export type {
 } from "./canonical-json.js";
 export {
   H264_DECODER_SURFACE_PADDING,
+  H264_CONSTRAINED_BASELINE_CODECS,
   h264CodecForLevel,
-  h264CodecForProfileLevel,
   h264LevelName,
   h264LevelLimits,
   inspectH264AnnexBRendition,
@@ -44,7 +43,6 @@ export {
 } from "./h264/index.js";
 export type {
   H264Codec,
-  H264CodecProfile,
   H264CompatibilityLevelInput,
   H264ConstrainedBaselineCodec,
   H264AccessUnitInput,
@@ -56,7 +54,6 @@ export type {
   H264EncoderRenditionPreparationInput,
   H264EncoderUnitStreamInput,
   H264FrameRate,
-  H264HighCodec,
   H264LevelIdc,
   H264LevelLimits,
   H264ParameterSetSummary,
@@ -89,6 +86,12 @@ export { deriveVideoRenditionGeometry, PACKED_ALPHA_GUTTER } from "./video/geome
 export type {
   ParsedVideoCodecString
 } from "./video/codec-string.js";
+export { createVideoPayloadValidator } from "./video/payload-validator.js";
+export type {
+  VideoPayloadValidationChunk,
+  VideoPayloadValidationProfile,
+  VideoPayloadValidator
+} from "./video/payload-validator.js";
 export type {
   DecoderColorClassification,
   DecoderColorTuple
@@ -146,8 +149,6 @@ export type {
   CompiledManifest,
   CompiledManifestBase,
   CompiledManifestInput,
-  CompiledManifestInputV1_0,
-  CompiledManifestV1_0,
   DeclaredLimits,
   Edge,
   EncodedChunkInput,
@@ -167,10 +168,10 @@ export type {
   PackedAlphaWitnessSampleV1,
   PackedAlphaWitnessV1,
   ParsedFrontIndex,
+  ParsedManifestPrefix,
   Port,
   ProductionRendition,
   ProductionRenditionBase,
-  ProductionRenditionV1_0,
   Rational,
   Readiness,
   Rect,
@@ -190,5 +191,9 @@ export type {
   VideoCodec,
   VideoLayout
 } from "./model.js";
-export { parseFrontIndex, validateCompleteAsset } from "./parser.js";
+export {
+  parseFrontIndex,
+  parseManifestPrefix,
+  validateCompleteAsset
+} from "./parser.js";
 export { writeCanonicalAsset } from "./writer.js";

@@ -1,12 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  h264CodecForProfileLevel,
+  H264_CONSTRAINED_BASELINE_CODECS,
+  h264CodecForLevel,
   minimumH264CompatibilityLevel,
   parseH264Codec
 } from "../src/h264/index.js";
 
 describe("H264 compatibility codec policy", () => {
+  it("exports one frozen exact codec list derived from every supported level", () => {
+    const levels = [
+      10, 11, 12, 13, 20, 21, 22, 30, 31, 32,
+      40, 41, 42, 50, 51, 52, 60, 61, 62
+    ] as const;
+    expect(H264_CONSTRAINED_BASELINE_CODECS).toEqual(
+      levels.map((level) => h264CodecForLevel(level))
+    );
+    expect(Object.isFrozen(H264_CONSTRAINED_BASELINE_CODECS)).toBe(true);
+  });
+
   it.each([
     [48, 112, 30, 1, 11, "avc1.42E00B"],
     [512, 512, 24, 1, 30, "avc1.42E01E"],
@@ -24,12 +36,11 @@ describe("H264 compatibility codec policy", () => {
       });
 
       expect(selected).toBe(levelIdc);
-      expect(h264CodecForProfileLevel("constrained-baseline", selected))
-        .toBe(codec);
+      expect(h264CodecForLevel(selected)).toBe(codec);
     }
   );
 
-  it("keeps legacy High codecs readable while identifying their profile", () => {
+  it("parses only canonical Constrained Baseline codecs", () => {
     expect(parseH264Codec("avc1.42E01F")).toMatchObject({
       codec: "avc1.42E01F",
       profile: "constrained-baseline",
@@ -39,25 +50,13 @@ describe("H264 compatibility codec policy", () => {
       maximumBitrate: 14_000_000,
       maximumCpbBits: 14_000_000
     });
-    expect(parseH264Codec("avc1.64001F")).toMatchObject({
-      codec: "avc1.64001F",
-      profile: "high",
-      profileIdc: 100,
-      profileCompatibility: 0,
-      levelIdc: 31,
-      maximumBitrate: 17_500_000,
-      maximumCpbBits: 17_500_000
-    });
+    expect(() => parseH264Codec("avc1.64001F")).toThrow();
   });
 
-  it("applies High-profile MaxBR and CPB scaling without changing Baseline limits", () => {
+  it("uses the Constrained Baseline MaxBR and CPB limits", () => {
     expect(parseH264Codec("avc1.42E028")).toMatchObject({
       maximumBitrate: 20_000_000,
       maximumCpbBits: 25_000_000
-    });
-    expect(parseH264Codec("avc1.640028")).toMatchObject({
-      maximumBitrate: 25_000_000,
-      maximumCpbBits: 31_250_000
     });
   });
 

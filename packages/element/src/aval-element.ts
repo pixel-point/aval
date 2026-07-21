@@ -1,3 +1,8 @@
+import {
+  IDENTIFIER_PATTERN,
+  parseVideoCodecString
+} from "@pixel-point/aval-format";
+
 import { ElementAttributeReflection } from "./element-attribute-reflection.js";
 import { AVAL_ATTRIBUTES, AVAL_UPGRADE_PROPERTIES } from "./element-attributes.js";
 import { normalizeIntegrity, normalizeSource } from "./element-configuration.js";
@@ -305,7 +310,7 @@ export function createAvalElementClass(
         this.#motionGeneration += 1;
         this.#applyMotion();
       } else if (name === "state") {
-        if (next !== null && !/^[a-z][a-z0-9._-]{0,63}$/u.test(next)) {
+        if (next !== null && !IDENTIFIER_PATTERN.test(next)) {
           this.#publishFailure(
             "invalid-configuration",
             "state",
@@ -438,7 +443,7 @@ export function createAvalElementClass(
     }
 
     public async setState(name: string): Promise<void> {
-      if (!/^[a-z][a-z0-9._-]{0,63}$/u.test(name)) {
+      if (!IDENTIFIER_PATTERN.test(name)) {
         throw new TypeError("state must be an authored identifier");
       }
       if (this.#finalDisposed) throw abortError();
@@ -2178,12 +2183,7 @@ export function createAvalElementClass(
         }),
         presentation: Object.freeze({
           fit: this.fit ?? this.#metadata?.canvas.fit ?? null,
-          ...runtime.presentation,
-          resolutionScale: resolutionScale(
-            runtime.presentation.backingWidth,
-            runtime.presentation.backingHeight
-          ),
-          clampReasons: Object.freeze([])
+          ...runtime.presentation
         }),
         ...(trace
           ? {
@@ -2424,13 +2424,6 @@ export function contextRecoveryCount(
   return retiredCount + liveCount;
 }
 
-export function resolutionScale(
-  backingWidth: number,
-  backingHeight: number
-): 0 | 1 {
-  return backingWidth > 0 && backingHeight > 0 ? 1 : 0;
-}
-
 export function runtimeVisibility(
   hasRuntime: boolean,
   effectivelyVisible: boolean
@@ -2508,16 +2501,7 @@ export function readSources(host: HTMLElement): Readonly<SourceRead> {
 }
 
 function sourceCodec(value: string): boolean {
-  if (/^avc1\.(?:42E0|6400)(?:0A|0B|0C|0D|14|15|16|1E|1F|20|28|29|2A|32|33|34|3C|3D|3E)$/u.test(value) ||
-    /^vp09\.00\.(?:10|11|20|21|30|31|40|41|50|51|52|60|61|62)\.08(?:\.01\.01\.01\.01\.00)?$/u.test(value) ||
-    /^av01\.0\.(?:0[0-9]|[12][0-9]|3[01])[MH]\.(?:08|10)(?:\.0\.11[0-3]\.01\.01\.01\.0)?$/u.test(value)) return true;
-  const h265 = /^hvc1\.1\.(0|[1-9A-F][0-9A-F]*)\.[LH](0|[1-9][0-9]*)\.((?:[0-9A-F]{2}\.){0,5}(?!00)[0-9A-F]{2})$/u.exec(value);
-  if (h265 === null) return false;
-  const flags = Number.parseInt(h265[1]!, 16);
-  const level = Number(h265[2]);
-  const first = Number.parseInt(h265[3]!.slice(0, 2), 16);
-  return flags <= 0xffff_ffff && (flags & 2) !== 0 && level >= 1 && level <= 255 &&
-    (first & 0x80) !== 0 && (first & 0x40) === 0 && (first & 0x10) !== 0;
+  return parseVideoCodecString(value) !== undefined;
 }
 
 export function sourceMutation(

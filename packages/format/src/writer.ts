@@ -44,7 +44,7 @@ export function writeCanonicalAsset(
 
     const header = Object.freeze({
       major: 1,
-      minor: manifest.formatVersion === "1.0" ? 0 : 1,
+      minor: 1,
       headerLength: FORMAT_HEADER_LENGTH,
       requiredFeatureFlags: 0,
       declaredFileLength: finalLayout.fileLength,

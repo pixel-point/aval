@@ -20,10 +20,6 @@ const DEFAULT_EXPECTATION = Object.freeze({
   displayWidth: 2,
   displayHeight: 2,
   visibleRect: Object.freeze({ x: 0, y: 0, width: 2, height: 2 }),
-  colorSpace: null
-});
-const BT709_EXPECTATION = Object.freeze({
-  ...DEFAULT_EXPECTATION,
   colorSpace: BT709_LIMITED
 });
 
@@ -46,20 +42,14 @@ describe("decoded color validation", () => {
     )).toBe(16);
   });
 
-  it.each([
-    ["explicit", BT709_EXPECTATION],
-    ["default", DEFAULT_EXPECTATION]
-  ] as const)(
-    "accepts captured WebKit metadata with %s expectations",
-    (_expectation, expected) => {
-      expect(validateDecodedFrame(
-        decodedFrame(WEBKIT_BT709),
-        expected,
-        0,
-        1_000
-      )).toBe(16);
-    }
-  );
+  it("accepts captured WebKit metadata", () => {
+    expect(validateDecodedFrame(
+      decodedFrame(WEBKIT_BT709),
+      DEFAULT_EXPECTATION,
+      0,
+      1_000
+    )).toBe(16);
+  });
 
   it.each([
     ["primaries", { primaries: "smpte170m" }],
@@ -69,7 +59,7 @@ describe("decoded color validation", () => {
   ] as const)("rejects a WebKit near miss in %s", (_field, patch) => {
     const frame = decodedFrame({ ...WEBKIT_BT709, ...patch });
 
-    expect(() => validateDecodedFrame(frame, BT709_EXPECTATION, 0, 1_000))
+    expect(() => validateDecodedFrame(frame, DEFAULT_EXPECTATION, 0, 1_000))
       .toThrow(/color space/iu);
   });
 

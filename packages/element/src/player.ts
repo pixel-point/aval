@@ -1,11 +1,4 @@
-import {
-  Asset,
-  type Edge,
-  type Manifest,
-  type Rendition,
-  type Source,
-  type Unit
-} from "./asset.js";
+import { Asset } from "./asset.js";
 import {
   sameGraphPresentation,
   type GraphPresentation,
@@ -16,7 +9,11 @@ import {
 } from "@pixel-point/aval-graph";
 import {
   maximumDecodedRgbaBytes,
-  parseVideoCodecString
+  parseVideoCodecString,
+  type CompiledManifest as Manifest,
+  type Edge,
+  type ProductionRendition as Rendition,
+  type Unit
 } from "@pixel-point/aval-format";
 import {
   type DecodeRun,
@@ -25,8 +22,7 @@ import {
 import {
   DecoderPool,
   type DecoderPoolCandidate,
-  type DecoderPoolDiagnostic,
-  type DecoderPoolLaneId
+  type DecoderPoolDiagnostic
 } from "./decoder-pool.js";
 import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 import {
@@ -101,6 +97,7 @@ interface ResidentMedia extends ActiveMediaBase {
 interface StreamMedia extends ActiveMediaBase {
   readonly kind: "stream";
   readonly run: DecodeRun;
+  needsDecoderRunQualification: boolean;
   drainedIndex: number;
   drain: Promise<void>;
 }
@@ -292,7 +289,7 @@ async function selectPlayer(
     const sourceCodec = parseVideoCodecString(source.codec);
     if (sourceCodec === undefined) throw unsupportedProfileError();
     const asset = await Asset.open(
-      source as Readonly<Source>,
+      source,
       input.baseUrl,
       input.credentials,
       deadline.signal,
@@ -1300,6 +1297,7 @@ class PlayerImpl implements Player {
     const generation = this.#animationGeneration;
     const run = await this.#newRun(unit, this.#preparationDeadline.signal);
     this.#assertAnimation(generation, renderer, decoders);
+    let needsDecoderRunQualification = true;
     try {
       for (let index = 0; index < run.frameCount; index += 1) {
         this.#preparationDeadline.signal.throwIfAborted();
@@ -1308,8 +1306,14 @@ class PlayerImpl implements Player {
         try {
           if (keep.has(index)) {
             if (!this.#hasResident(unit.id, index)) {
-              await renderer.store(unit.id, index, frame);
+              await renderer.store(
+                unit.id,
+                index,
+                frame,
+                needsDecoderRunQualification
+              );
               this.#assertAnimation(generation, renderer, decoders);
+              needsDecoderRunQualification = false;
               this.#reportResourceBytes();
               const resident = this.#residentFrames.get(unit.id) ?? new Set<number>();
               resident.add(index);
@@ -1792,8 +1796,9 @@ class PlayerImpl implements Player {
         const frame = await run.take(presentation.frameIndex);
         try {
           this.#assertAnimation(generation, renderer, decoders);
-          await renderer.draw(frame);
+          await renderer.draw(frame, active.needsDecoderRunQualification);
           this.#assertAnimation(generation, renderer, decoders);
+          active.needsDecoderRunQualification = false;
         }
         finally { this.#release(run, frame); }
         active.drainedIndex = presentation.frameIndex;
@@ -1866,6 +1871,7 @@ class PlayerImpl implements Player {
       kind: "stream",
       unit,
       run,
+      needsDecoderRunQualification: true,
       lastIndex: -1,
       drainedIndex: -1,
       drain: Promise.resolve()
@@ -2156,6 +2162,7 @@ class PlayerImpl implements Player {
       const generation = this.#animationGeneration;
       const run = await this.#newRun(unit);
       this.#assertAnimation(generation, renderer, decoders);
+      let needsDecoderRunQualification = true;
       try {
         for (let index = 0; index < unit.frameCount; index += 1) {
           this.#preparationDeadline.signal.throwIfAborted();
@@ -2163,8 +2170,14 @@ class PlayerImpl implements Player {
           this.#assertAnimation(generation, renderer, decoders);
           try {
             if (!this.#hasResident(unit.id, index)) {
-              await renderer.store(unit.id, index, frame);
+              await renderer.store(
+                unit.id,
+                index,
+                frame,
+                needsDecoderRunQualification
+              );
               this.#assertAnimation(generation, renderer, decoders);
+              needsDecoderRunQualification = false;
               this.#reportResourceBytes();
               const resident = this.#residentFrames.get(unit.id) ?? new Set<number>();
               resident.add(index);
@@ -2482,7 +2495,7 @@ function encodedUnitCopyBytes(
   for (let index = 0; index < span.chunkCount; index += 1) {
     const record = asset.records[span.chunkStart + index];
     if (record === undefined) throw new Error("Invalid AVAL asset");
-    bytes = checkedTotal([bytes, record.length]);
+    bytes = checkedTotal([bytes, record.byteLength]);
   }
   return bytes;
 }

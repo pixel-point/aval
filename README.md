@@ -10,6 +10,23 @@ first ordered `<source>` that decodes and passes pre-readiness output
 qualification. The state graph and authored timing are identical in every
 file.
 
+## Required application error handling
+
+Every AVAL integration must own its unsupported-browser and fatal-error path.
+A browser may lack the required WebCodecs interfaces, every authored codec may
+be unsupported, or another terminal playback failure may stop the source
+generation. In those cases `prepare()` rejects with `AvalPlaybackError` and the
+element raises one fatal `error` event with `failure.code` set to a value such
+as `unsupported-profile` or `unsupported-browser`.
+
+AVAL deliberately does not create, select, reveal, or hide fallback content.
+The application must decide whether to show an ordinary video, image, text,
+another renderer, or nothing. Install the element's direct `error` listener
+before explicit registration so an upgrade-time failure cannot outrun the
+application boundary, and handle the rejected `prepare()` promise when calling
+it directly. Branch on `failure.code`; do not parse the error message. The
+browser-integration example below demonstrates this required boundary.
+
 ## Five-minute start
 
 ```sh
@@ -139,7 +156,7 @@ obligations remain the publisher's responsibility.
 ## Packages
 
 - `@pixel-point/aval-graph`: deterministic state and route engine.
-- `@pixel-point/aval-format`: strict AVAL wire 1.0/1.1 parser, validator, and writer.
+- `@pixel-point/aval-format`: strict AVAL wire 1.1 parser, validator, and writer.
 - `@pixel-point/aval-compiler`: project 1.0 authoring API and bundle compiler.
 - `@pixel-point/aval-player-web`: bounded loader, codec probing, decoder
   scheduling, renderer, and page resource management.
@@ -179,9 +196,10 @@ reveals alternate application content.
 - [Quick start](docs/quick-start.md)
 - [States and triggers](docs/states-and-triggers.md)
 - [Element API](docs/element-api.md)
+- [Failure handling and reduced motion](docs/element/fallback-and-reduced-motion.md)
 - [Compiler](docs/compiler.md)
 - [Project schema 1.0](docs/project/1.0.md)
-- [Wire format 1.0](docs/format/1.0.md)
+- [Wire format 1.1](docs/format/1.1.md)
 - [Preparing video and authoring states](docs/compiler/authoring-video-and-states.md)
 - [Network and integrity](docs/network-and-integrity.md)
 - [Accessibility and reduced motion](docs/accessibility-and-motion.md)

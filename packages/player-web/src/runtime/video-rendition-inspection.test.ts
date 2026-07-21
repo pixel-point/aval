@@ -1,7 +1,7 @@
 import type {
-  CompiledManifestV1_0,
+  CompiledManifest,
   EncodedChunkRecord,
-  ProductionRenditionV1_0,
+  OpaqueProductionRenditionV1_1,
   Unit
 } from "@pixel-point/aval-format";
 import { describe, expect, it, vi } from "vitest";
@@ -56,7 +56,7 @@ describe("selected catalog video rendition inspection", () => {
         ...fixture.manifest.renditions[0]!,
         bitrate: { average: 90_000, peak: 140_000 }
       }]
-    } satisfies CompiledManifestV1_0;
+    } as CompiledManifest;
     const foreign = certifyVideoRenditions(foreignManifest)[0]!;
 
     expect(() => inspectSelectedVideoRendition(fixture.catalog, foreign))
@@ -65,7 +65,7 @@ describe("selected catalog video rendition inspection", () => {
   });
 
   it("rejects an H264 manifest profile that disagrees with the inspected SPS", () => {
-    const fixture = createCatalogFixture("avc1.640020");
+    const fixture = createCatalogFixture("avc1.42E01F");
     const selected = fixture.catalog.videoRenditions[0]!;
 
     expect(() => inspectSelectedVideoRendition(fixture.catalog, selected))
@@ -74,11 +74,11 @@ describe("selected catalog video rendition inspection", () => {
 });
 
 function createCatalogFixture(codec = "avc1.42E020"): Readonly<{
-  manifest: Readonly<CompiledManifestV1_0>;
+  manifest: Readonly<CompiledManifest>;
   catalog: RuntimeAssetCatalog;
   copyChunk: ReturnType<typeof vi.fn>;
 }> {
-  const rendition: ProductionRenditionV1_0 = Object.freeze({
+  const rendition: OpaqueProductionRenditionV1_1 = Object.freeze({
     id: "main",
     codec,
     bitDepth: 8,
@@ -104,8 +104,8 @@ function createCatalogFixture(codec = "avc1.42E020"): Readonly<{
       sha256: "0".repeat(64)
     })])
   });
-  const manifest: Readonly<CompiledManifestV1_0> = Object.freeze({
-    formatVersion: "1.0",
+  const manifest: Readonly<CompiledManifest> = Object.freeze({
+    formatVersion: "1.1",
     generator: "inspection-test",
     codec: "h264",
     bitstream: "annex-b",

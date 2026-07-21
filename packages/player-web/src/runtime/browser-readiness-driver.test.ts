@@ -47,7 +47,7 @@ describe("browser production readiness boundary", () => {
         catalog: { manifest: { codec: "h264" } },
         inspection: { family: "h264", bitDepth: 8 },
         candidate: {
-          rendition: { codec: "avc1.640020", bitDepth: 8 },
+          rendition: { codec: "avc1.42E020", bitDepth: 8 },
           geometry: {
             layout,
             visibleColorRect: [0, 0, 64, 64],
@@ -77,7 +77,7 @@ describe("browser production readiness boundary", () => {
     expect(evidence).toMatchObject({
       layout,
       codecFamily: "h264",
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       bitDepth: 8,
       alphaPaneAvailable,
       uploadReady: true,

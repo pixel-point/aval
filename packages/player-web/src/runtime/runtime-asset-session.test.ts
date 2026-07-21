@@ -18,7 +18,7 @@ describe("runtime asset session", () => {
       resources: resources()
     });
 
-    const handles = await session.ensureAllUnits("opaque");
+    const handles = await session.ensureRenditionUnits("opaque");
     expect(handles).toHaveLength(layout.frontIndex.unitBlobs.length);
     expect(handles.every(({ kind }) => kind === "unit")).toBe(true);
     expect(session.snapshot().unitBlobs.verified).toBe(handles.length);

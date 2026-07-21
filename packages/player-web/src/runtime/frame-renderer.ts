@@ -13,7 +13,7 @@ import {
 
 export const FRAME_STREAMING_SLOT_COUNT = STREAMING_TEXTURE_LAYER_COUNT;
 
-export type FrameRendererState = "active" | "lost" | "error" | "disposed";
+export type FrameRendererState = "active" | "error" | "disposed";
 
 export interface FrameTextureLayout {
   readonly geometry: Readonly<VideoRenditionGeometry>;
@@ -107,8 +107,6 @@ export interface FrameRendererSnapshot {
 
 export interface FrameRendererOptions {
   readonly streamingSlots?: number;
-  /** M2 compatibility only; M5.5 production contexts terminalize on loss. */
-  readonly contextLossPolicy?: "terminal" | "restorable";
   /** Bounds a browser copy that never resolves, including live uploads. */
   readonly copyTimeoutMs?: number;
   readonly timers?: Readonly<FrameRendererTimerHost>;
@@ -135,7 +133,6 @@ const DEFAULT_RENDERER_TIMERS: Readonly<FrameRendererTimerHost> =
 export class FrameRenderer {
   readonly #layout: Readonly<FrameTextureLayout>;
   readonly #streamingSlots: number;
-  readonly #contextLossPolicy: "terminal" | "restorable";
   readonly #copyTimeoutMs: number;
   readonly #timers: Readonly<FrameRendererTimerHost>;
   readonly #codedTextureBytesPerLayer: number;
@@ -171,15 +168,8 @@ export class FrameRenderer {
     this.#streamingSlots = validateFrameStreamingSlots(
       options.streamingSlots ?? FRAME_STREAMING_SLOT_COUNT
     );
-    this.#contextLossPolicy = options.contextLossPolicy ?? "terminal";
     this.#copyTimeoutMs = options.copyTimeoutMs ?? DEFAULT_COPY_TIMEOUT_MS;
     this.#timers = options.timers ?? DEFAULT_RENDERER_TIMERS;
-    if (
-      this.#contextLossPolicy !== "terminal" &&
-      this.#contextLossPolicy !== "restorable"
-    ) {
-      throw new RangeError("context loss policy must be terminal or restorable");
-    }
     if (
       !Number.isSafeInteger(this.#copyTimeoutMs) ||
       this.#copyTimeoutMs <= 0 ||
@@ -374,70 +364,6 @@ export class FrameRenderer {
     }
   }
 
-  /** Invalidates all GL handles and closes the current backend. */
-  public markContextLost(): void {
-    if (this.#state === "disposed" || this.#state === "lost") {
-      return;
-    }
-    this.#state = "lost";
-    this.#abortUploads(new RendererUploadAbortedError("context was lost"));
-    this.#resourceGeneration += 1;
-    this.#uploadedResidentLayers.clear();
-    this.#streamingSlotVersions.clear();
-    const backend = this.#backend;
-    this.#backend = null;
-    if (backend !== null) {
-      safeDisposeBackend(backend);
-    }
-  }
-
-  /** Installs a fresh context after loss. Every resident layer must re-upload. */
-  public restore(backend: FrameRendererBackend): void {
-    if (this.#contextLossPolicy !== "restorable") {
-      safeDisposeBackend(backend);
-      throw new RendererUnavailableError("context loss is terminal");
-    }
-    if (this.#state === "disposed") {
-      safeDisposeBackend(backend);
-      throw new RendererDisposedError();
-    }
-    if (this.#state !== "lost" && this.#state !== "error") {
-      safeDisposeBackend(backend);
-      throw new Error(`cannot restore a renderer in state ${this.#state}`);
-    }
-    if (this.#sourceCopiesInFlight !== 0) {
-      safeDisposeBackend(backend);
-      throw new RendererUnavailableError(
-        "a decoded frame copy is still settling"
-      );
-    }
-    const expectedState = this.#state;
-    const expectedGeneration = this.#resourceGeneration;
-    try {
-      validateFrameBackendLimits(backend, this.#layout);
-      this.#assertRestoreUnchanged(expectedState, expectedGeneration);
-      backend.allocate(this.#layout, this.#streamingSlots);
-      this.#assertRestoreUnchanged(expectedState, expectedGeneration);
-    } catch (error) {
-      safeDisposeBackend(backend);
-      if (
-        this.#state !== expectedState ||
-        this.#resourceGeneration !== expectedGeneration
-      ) {
-        throw this.#restoreStateChangedError();
-      }
-      this.#state = "error";
-      this.#errors += 1;
-      throw normalizeError(error, "failed to restore WebGL frame textures");
-    }
-    this.#staging.fill(0);
-    this.#backend = backend;
-    this.#uploadAbort = new AbortController();
-    this.#state = "active";
-    this.#uploadedResidentLayers.clear();
-    this.#streamingSlotVersions.clear();
-  }
-
   public snapshot(): FrameRendererSnapshot {
     const allocatedLayerCount =
       this.#layout.residentLayerCount + this.#streamingSlots;
@@ -576,7 +502,6 @@ export class FrameRenderer {
       } catch (error) {
         if (
           this.#state === "disposed" ||
-          this.#state === "lost" ||
           resourceGeneration !== this.#resourceGeneration
         ) {
           this.#staleUploads += 1;
@@ -629,7 +554,7 @@ export class FrameRenderer {
   }
 
   #terminalizeError(error: unknown, context: string): Error {
-    if (this.#state !== "disposed" && this.#state !== "lost") {
+    if (this.#state !== "disposed") {
       this.#state = "error";
       this.#abortUploads(new RendererUploadAbortedError("renderer failed"));
       this.#resourceGeneration += 1;
@@ -675,27 +600,6 @@ export class FrameRenderer {
     }
   }
 
-  #assertRestoreUnchanged(
-    expectedState: "lost" | "error",
-    expectedGeneration: number
-  ): void {
-    if (
-      this.#state !== expectedState ||
-      this.#resourceGeneration !== expectedGeneration
-    ) {
-      throw new RendererUnavailableError(
-        "renderer state changed during context restoration"
-      );
-    }
-  }
-
-  #restoreStateChangedError(): Error {
-    return this.#state === "disposed"
-      ? new RendererDisposedError()
-      : new RendererUnavailableError(
-          "renderer state changed during context restoration"
-        );
-  }
 }
 
 export class RendererDisposedError extends Error {

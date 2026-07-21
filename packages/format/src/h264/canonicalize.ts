@@ -12,9 +12,8 @@ const CONSTRAINED_BASELINE_E0 = 0xe0;
 
 /**
  * Canonicalizes libx264's valid `42 C0 xx` Baseline declaration to the
- * format's `42 E0 xx` Constrained Baseline declaration. High-profile SPS
- * declarations remain byte-identical for legacy preparation compatibility.
- * Every SPS is fully parsed before and after the bounded rewrite.
+ * format's `42 E0 xx` Constrained Baseline declaration. Every SPS is fully
+ * parsed before and after the bounded rewrite.
  */
 export function canonicalizeH264ConstraintSet2(
   accessUnitBytes: Uint8Array
@@ -47,8 +46,7 @@ export function canonicalizeH264ConstraintSet2(
     if (nal?.type !== H264_NAL_TYPE_SPS) continue;
 
     const nalPath = `${path}.nals[${String(index)}]`;
-    const parsed = parseSps(nal, nalPath, "encoder-candidate");
-    if (parsed.profile === "high") continue;
+    parseSps(nal, nalPath, "encoder-candidate");
 
     const compatibilityOffset = nal.offset + 2;
     const compatibility = output[compatibilityOffset];
@@ -71,7 +69,7 @@ export function canonicalizeH264ConstraintSet2(
 
     const parsed = parseSps(nal, `${path}.nals[${String(index)}]`);
     requireH264(
-      parsed.profile === "high" || parsed.constraintSet2,
+      parsed.constraintSet2,
       `${path}.nals[${String(index)}]`,
       "rewritten Baseline SPS does not assert constraint_set2"
     );

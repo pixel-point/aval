@@ -50,6 +50,11 @@ credentials or that page session are unavailable, the formal matrix remains
 pending; manual Live screenshots are never assigned invented session ids or
 reported as machine-verifiable captures.
 
+Repository-local evidence commands import the built canonical codec authority.
+After a clean `npm ci --ignore-scripts`, build `@pixel-point/aval-graph` and then
+`@pixel-point/aval-format` before running the Brave matrix, evidence assembler,
+or evidence validator directly.
+
 The player evaluates direct-child sources in author order. It validates each
 required codec hint and probes every otherwise-eligible authored rendition
 with `VideoDecoder.isConfigSupported()` inside the same module-worker
@@ -67,8 +72,8 @@ evidence but are never parsed to reconstruct this policy.
 
 Renderer and RGBA-materializer failures are terminal, including an unsupported
 `VideoFrame.copyTo({ format: "RGBA" })` followed by an unavailable or failed
-Canvas2D readback. Network, CORS/CSP, integrity, malformed assets, legacy `1.0`
-packed-alpha assets, worker transport, resources, contexts, cleanup, abort, and
+Canvas2D readback. Network, CORS/CSP, integrity, malformed assets, unsupported
+wire versions, worker transport, resources, contexts, cleanup, abort, and
 watchdog failures are also terminal. They reject `prepare()` with
 `AvalPlaybackError` and raise one fatal `error` event; the application decides
 how to respond. Within a file, renditions remain in authored quality order.

@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { writeUint64LE } from "../src/checked-integer.js";
 import { FormatError } from "../src/errors.js";
 import { parseHeader } from "../src/header.js";
-import { parseFrontIndex } from "../src/parser.js";
-import type { ParsedFrontIndex } from "../src/model.js";
+import { parseFrontIndex, parseManifestPrefix } from "../src/parser.js";
+import type { ParsedFrontIndex, ParsedManifestPrefix } from "../src/model.js";
 import { canonicalAssetFixture } from "./asset-fixture.js";
 
 function expectFormatError(
@@ -53,6 +53,113 @@ function fixtureWithManifestPadding() {
   }
   throw new Error("could not create a padded manifest fixture");
 }
+
+function replaceAscii(
+  bytes: Uint8Array,
+  from: string,
+  to: string
+): Uint8Array {
+  const needle = new TextEncoder().encode(from);
+  const replacement = new TextEncoder().encode(to);
+  if (needle.byteLength !== replacement.byteLength) {
+    throw new Error("ASCII replacements must preserve byte length");
+  }
+  const result = bytes.slice();
+  for (let offset = 0; offset <= result.byteLength - needle.byteLength; offset += 1) {
+    if (needle.every((byte, index) => result[offset + index] === byte)) {
+      result.set(replacement, offset);
+      return result;
+    }
+  }
+  throw new Error(`could not find ${JSON.stringify(from)}`);
+}
+
+describe("parseManifestPrefix", () => {
+  it("admits exactly the bytes through the manifest padding", () => {
+    const fixture = canonicalAssetFixture();
+    const header = parseHeader(fixture.bytes);
+    const parsed: ParsedManifestPrefix = parseManifestPrefix(
+      fixture.bytes.subarray(0, header.indexOffset)
+    );
+
+    expect(parsed.header).toEqual(header);
+    expect(parsed.manifest).toEqual(fixture.manifest);
+    expect(parsed.frontIndexRange).toEqual({
+      offset: 0,
+      length: header.indexOffset + header.indexLength
+    });
+    expectRecursivelyFrozenAndRangeOnly(parsed);
+  });
+
+  it("rejects a truncated manifest-stage prefix", () => {
+    const fixture = canonicalAssetFixture();
+    const header = parseHeader(fixture.bytes);
+
+    const error = expectFormatError(
+      () => parseManifestPrefix(fixture.bytes.subarray(0, header.indexOffset - 1)),
+      "JSON_INVALID"
+    );
+
+    expect(error.offset).toBe(header.indexOffset - 1);
+  });
+
+  it("rejects manifest/header version drift", () => {
+    const fixture = canonicalAssetFixture();
+    const bytes = replaceAscii(fixture.bytes, '"formatVersion":"1.1"', '"formatVersion":"1.0"');
+    const header = parseHeader(bytes);
+
+    const error = expectFormatError(
+      () => parseManifestPrefix(bytes.subarray(0, header.indexOffset)),
+      "MANIFEST_INVALID"
+    );
+
+    expect(error.path).toBe("formatVersion");
+  });
+
+  it("rejects a declared file length above the manifest limit", () => {
+    const fixture = canonicalAssetFixture();
+    const bytes = fixture.bytes.slice();
+    writeUint64LE(
+      bytes,
+      24,
+      fixture.manifest.limits.maxCompiledBytes + 1,
+      "HEADER_INVALID"
+    );
+    const header = parseHeader(bytes);
+
+    const error = expectFormatError(
+      () => parseManifestPrefix(bytes.subarray(0, header.indexOffset)),
+      "BUDGET_EXCEEDED"
+    );
+
+    expect(error.path).toBe("limits.maxCompiledBytes");
+  });
+
+  it("rejects index length inconsistent with manifest chunk counts", () => {
+    const fixture = canonicalAssetFixture();
+    const bytes = fixture.bytes.slice();
+    const original = parseHeader(bytes);
+    writeUint64LE(
+      bytes,
+      56,
+      original.indexLength + 48,
+      "HEADER_INVALID"
+    );
+    const header = parseHeader(bytes);
+
+    const prefixError = expectFormatError(
+      () => parseManifestPrefix(bytes.subarray(0, header.indexOffset)),
+      "INDEX_INVALID"
+    );
+    const frontError = expectFormatError(
+      () => parseFrontIndex(bytes),
+      "INDEX_INVALID"
+    );
+
+    expect(prefixError.offset).toBe(56);
+    expect(frontError.offset).toBe(56);
+  });
+});
 
 describe("parseFrontIndex", () => {
   it("parses the minimum prefix and ignores payload bytes in a full-file view", () => {

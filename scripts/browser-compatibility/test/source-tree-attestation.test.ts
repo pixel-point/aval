@@ -21,7 +21,7 @@ import {
 
 const execFile = promisify(execFileCallback);
 const temporaryRoots: string[] = [];
-const POLICY_PATH = "scripts/browser-compatibility/certification-policy.json";
+const POLICY_PATH = "config/release/browser-certification-policy.json";
 const TRACKED_SOURCE_PATH = "packages/demo/src/tracked.ts";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 

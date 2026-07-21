@@ -17,8 +17,7 @@ export type FormatErrorCode =
   | "PNG_ENVELOPE_INVALID"
   | "PNG_DEFLATE_INVALID"
   | "PNG_SCANLINE_INVALID"
-  | "WRITER_INVALID"
-  | "WRITER_NONCONVERGENT";
+  | "WRITER_INVALID";
 
 export interface FormatErrorDetails {
   readonly path?: string;

@@ -23,6 +23,10 @@ import {
 } from "./renderer-backend.js";
 import { WebGlUnavailableError } from "./renderer-selection.js";
 import type { RendererUploadMode } from "./renderer-contract.js";
+import {
+  equivalentRgbaPixels,
+  informativeRgbaPixels
+} from "./rgba-qualification.js";
 
 const PROBE_EDGE = 8;
 const PROBE_BYTES = PROBE_EDGE * PROBE_EDGE * 4;
@@ -61,6 +65,7 @@ export class WebGl2RendererBackend implements RendererBackend {
   // 0 = RGBA copy, 1 = native requires qualification, 2 = native proven.
   #native = 1;
   #nativeProbeAttempts = 0;
+  #nativeProbeWindowAttempts = 0;
   #nativeProbeInFlight = false;
   #nativeProbe = new Uint8Array(0);
   #referenceProbe = new Uint8Array(0);
@@ -158,6 +163,10 @@ export class WebGl2RendererBackend implements RendererBackend {
   ): Promise<void> {
     const owned = this.#ownedTarget(target);
     const gl = this.#activeGl();
+    if (source.newDecoderRun && this.#native === 2) {
+      this.#native = 1;
+      this.#nativeProbeWindowAttempts = 0;
+    }
     if (this.#native !== 0) {
       drainErrors(gl);
       let nativeError: number | null = null;
@@ -325,7 +334,7 @@ export class WebGl2RendererBackend implements RendererBackend {
     source: RendererUploadSource
   ): Promise<void> {
     if (
-      this.#nativeProbeAttempts >= MAX_PROBE_ATTEMPTS ||
+      this.#nativeProbeWindowAttempts >= MAX_PROBE_ATTEMPTS ||
       this.#canvas.width < PROBE_EDGE || this.#canvas.height < PROBE_EDGE ||
       this.#probeReadbackBytes() !== PROBE_ACCOUNTED_BYTES
     ) {
@@ -335,7 +344,11 @@ export class WebGl2RendererBackend implements RendererBackend {
       this.#uploadRgba(gl, target.texture, rgba.pixels);
       return;
     }
-    this.#nativeProbeAttempts += 1;
+    this.#nativeProbeAttempts = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      this.#nativeProbeAttempts + 1
+    );
+    this.#nativeProbeWindowAttempts += 1;
     this.#nativeProbeInFlight = true;
     try {
       const rgba = await source.rgba();
@@ -355,11 +368,11 @@ export class WebGl2RendererBackend implements RendererBackend {
         { glError: reference.glError, contextLost: true, uploadPath: "rgba-copy" }
       );
       if (!native.ok || !reference.ok ||
-        !equivalentProbe(this.#nativeProbe, this.#referenceProbe)) {
+        !equivalentRgbaPixels(this.#nativeProbe, this.#referenceProbe)) {
         this.#native = 0;
-      } else if (informativeProbe(this.#referenceProbe)) {
+      } else if (informativeRgbaPixels(this.#referenceProbe)) {
         this.#native = 2;
-      } else if (this.#nativeProbeAttempts >= MAX_PROBE_ATTEMPTS) {
+      } else if (this.#nativeProbeWindowAttempts >= MAX_PROBE_ATTEMPTS) {
         this.#native = 0;
       }
     } finally {
@@ -488,6 +501,7 @@ export class WebGl2RendererBackend implements RendererBackend {
     this.#state = "active";
     this.#native = native;
     this.#nativeProbeAttempts = 0;
+    this.#nativeProbeWindowAttempts = 0;
     this.#nativeProbeInFlight = false;
     this.#nativeProbe = nativeProbe;
     this.#referenceProbe = referenceProbe;
@@ -643,46 +657,6 @@ function failedProbe(
   lost = false
 ): NativeProbeResult {
   return Object.freeze({ ok: false, reason, glError, contextLost: lost });
-}
-
-function informativeProbe(pixels: Uint8Array): boolean {
-  if (pixels.byteLength !== PROBE_BYTES) return false;
-  const minimum = [255, 255, 255, 255];
-  const maximum = [0, 0, 0, 0];
-  let visibleSignal = false;
-  for (let offset = 0; offset < pixels.byteLength; offset += 4) {
-    const red = pixels[offset] ?? 0;
-    const green = pixels[offset + 1] ?? 0;
-    const blue = pixels[offset + 2] ?? 0;
-    const alpha = pixels[offset + 3] ?? 0;
-    const channels = [red, green, blue, alpha];
-    for (let channel = 0; channel < channels.length; channel += 1) {
-      minimum[channel] = Math.min(minimum[channel] ?? 255, channels[channel] ?? 0);
-      maximum[channel] = Math.max(maximum[channel] ?? 0, channels[channel] ?? 0);
-    }
-    const luma = (54 * red + 183 * green + 19 * blue) >> 8;
-    if (alpha > 16 || luma > 16) visibleSignal = true;
-  }
-  return visibleSignal && maximum.some((value, channel) =>
-    value - (minimum[channel] ?? value) >= 16);
-}
-
-function equivalentProbe(native: Uint8Array, reference: Uint8Array): boolean {
-  if (native.byteLength !== PROBE_BYTES || reference.byteLength !== PROBE_BYTES) {
-    return false;
-  }
-  for (let offset = 0; offset < reference.byteLength; offset += 4) {
-    const referenceAlpha = reference[offset + 3] ?? 0;
-    const nativeAlpha = native[offset + 3] ?? 0;
-    if (Math.abs(nativeAlpha - referenceAlpha) > 1) return false;
-    if (referenceAlpha === 0) continue;
-    for (let channel = 0; channel < 3; channel += 1) {
-      if (Math.abs(
-        (native[offset + channel] ?? 0) - (reference[offset + channel] ?? 0)
-      ) > 3) return false;
-    }
-  }
-  return true;
 }
 
 class GlOperationError extends Error {

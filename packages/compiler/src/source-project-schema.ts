@@ -33,7 +33,6 @@ import {
 } from "./source-graph-schema.js";
 import { preflightSourceGraph } from "./source-graph-preflight.js";
 import { cloneVideoEncodings } from "./compile/video-encoding-policy.js";
-import { normalizeSourceProject } from "./source-project-normalize.js";
 
 const PROJECT_KEYS = [
   "projectVersion",
@@ -92,7 +91,7 @@ export function validateSourceProject(
     edges,
     bindings
   });
-  const project = normalizeSourceProject(Object.freeze({
+  const project = Object.freeze({
     projectVersion: "1.0" as const,
     alpha: oneOf(
       input.alpha,
@@ -108,7 +107,7 @@ export function validateSourceProject(
     states,
     edges,
     bindings
-  }) satisfies Readonly<NormalizedSourceProject>);
+  }) satisfies Readonly<NormalizedSourceProject>;
   preflightSourceGraph(project);
   return project;
 }

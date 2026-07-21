@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+
+import { parseFrontIndex } from "@pixel-point/aval-format";
 
 import {
   CandidateAssetNotFoundError,
@@ -68,7 +70,11 @@ describe("candidate server byte authority", () => {
     let server: ReturnType<typeof startCandidateServer> | null = null;
     try {
       const harness = Buffer.from("<!doctype html><title>certification</title>\n");
-      const fixture = Buffer.alloc(160, 0x61);
+      const fixture = await readFile(new URL(
+        "../../fixtures/certification/v1/h264.avl",
+        import.meta.url
+      ));
+      const front = parseFrontIndex(fixture);
       const fixturePath = FATAL_BOUNDARY_FIXTURE_PATH;
       await mkdir(join(root, dirname(fixturePath)), {
         recursive: true
@@ -124,15 +130,35 @@ describe("candidate server byte authority", () => {
         headers: { Range: "bytes=0-63" }
       });
       expect(initial.status).toBe(206);
-      expect(initial.headers.get("content-range")).toBe("bytes 0-63/160");
+      expect(initial.headers.get("content-range")).toBe(
+        `bytes 0-63/${String(fixture.byteLength)}`
+      );
       expect(Buffer.from(await initial.arrayBuffer())).toEqual(fixture.subarray(0, 64));
+      const manifestEnd = front.header.indexOffset - 1;
       const metadata = await fetch(`${origin}${FATAL_BOUNDARY_PATH}`, {
-        headers: { Range: "bytes=64-95" }
+        headers: { Range: `bytes=64-${String(manifestEnd)}` }
       });
       expect(metadata.status).toBe(206);
-      expect(Buffer.from(await metadata.arrayBuffer())).toEqual(fixture.subarray(64, 96));
+      expect(Buffer.from(await metadata.arrayBuffer())).toEqual(
+        fixture.subarray(64, front.header.indexOffset)
+      );
+      const indexEnd = front.frontIndexRange.length - 1;
+      const index = await fetch(`${origin}${FATAL_BOUNDARY_PATH}`, {
+        headers: {
+          Range: `bytes=${String(front.header.indexOffset)}-${String(indexEnd)}`
+        }
+      });
+      expect(index.status).toBe(206);
+      expect(Buffer.from(await index.arrayBuffer())).toEqual(
+        fixture.subarray(front.header.indexOffset, front.frontIndexRange.length)
+      );
+      const payload = front.records[0]!;
       expect((await fetch(`${origin}${FATAL_BOUNDARY_PATH}`, {
-        headers: { Range: "bytes=96-127" }
+        headers: {
+          Range: `bytes=${String(payload.byteOffset)}-${String(
+            payload.byteOffset + payload.byteLength - 1
+          )}`
+        }
       })).status).toBe(503);
 
       expect((await fetch(`${origin}${FATAL_BOUNDARY_PATH}?session=forbidden`)).status).toBe(404);

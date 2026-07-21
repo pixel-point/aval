@@ -1,8 +1,9 @@
+import { IDENTIFIER_PATTERN } from "@pixel-point/aval-format";
+
 const HARD_BYTES = Number.MAX_SAFE_INTEGER;
-const RESIDENT_ID = /^[a-z][a-z0-9._-]{0,63}$/;
 
 export function rendererResidentKey(group: string, index: number): string {
-  if (!RESIDENT_ID.test(group) || !Number.isSafeInteger(index) || index < 0) {
+  if (!IDENTIFIER_PATTERN.test(group) || !Number.isSafeInteger(index) || index < 0) {
     throw new RangeError("resident frame key is invalid");
   }
   return `${group}\0${String(index)}`;

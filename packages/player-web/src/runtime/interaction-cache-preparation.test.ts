@@ -1,5 +1,6 @@
 import {
   deriveVideoRenditionGeometry,
+  type CompiledManifest,
   type ProductionRendition,
   type Unit
 } from "@pixel-point/aval-format";
@@ -23,7 +24,7 @@ import {
   type InteractionCachePreparationWorker
 } from "./interaction-cache-preparation.js";
 import {
-  createInteractionCachePlanFromSemanticSequences,
+  createInteractionCachePlan,
   type InteractionCachePlan
 } from "./interaction-cache-plan.js";
 import {
@@ -58,12 +59,12 @@ describe("worker-backed interaction cache preparation", () => {
       unitOccurrences: 2,
       submittedFrames: 7,
       decodedFrames: 7,
-      uploadedFrames: 3,
-      dependencyFramesClosed: 4,
+      uploadedFrames: 5,
+      dependencyFramesClosed: 2,
       staleFrames: 1,
       releasedFrames: 8
     });
-    expect(fixture.plan.layerCount).toBe(3);
+    expect(fixture.plan.layerCount).toBe(5);
     expect(fixture.worker.submittedIdentities()).toEqual([
       ["alpha", 0, 0],
       ["alpha", 0, 1],
@@ -76,8 +77,10 @@ describe("worker-backed interaction cache preparation", () => {
     expect(fixture.worker.maximumOutstanding).toBeLessThanOrEqual(3);
     expect(fixture.backend.uploads).toEqual([
       [0, 0],
-      [1, 2],
-      [2, 18]
+      [1, 1],
+      [2, 16],
+      [3, 17],
+      [4, 18]
     ]);
     expect(fixture.worker.frames.every(({ closed }) => closed)).toBe(true);
     expect(fixture.worker.openFrames).toBe(0);
@@ -94,7 +97,7 @@ describe("worker-backed interaction cache preparation", () => {
   });
 
   it("streams a long dependency prefix through lower worker credit", async () => {
-    const plan = singleFramePlan("long", 23);
+    const plan = longUnitPlan("long", 24);
     const fixture = createFixture({
       plan,
       units: { long: 24 },
@@ -109,8 +112,8 @@ describe("worker-backed interaction cache preparation", () => {
       unitOccurrences: 1,
       submittedFrames: 24,
       decodedFrames: 24,
-      uploadedFrames: 1,
-      dependencyFramesClosed: 23,
+      uploadedFrames: 6,
+      dependencyFramesClosed: 18,
       staleFrames: 0,
       releasedFrames: 24
     });
@@ -233,12 +236,14 @@ describe("worker-backed interaction cache preparation", () => {
   });
 
   it("accepts a zero-layer plan without submitting or touching the renderer", async () => {
-    const plan = createInteractionCachePlanFromSemanticSequences({
+    const plan = createInteractionCachePlan({
+      manifest: interactionManifest({
+        units: [manifestBody("empty", "loop", 1, 0)],
+        states: [{ id: "empty-state", bodyUnit: "empty" }],
+        edges: [],
+        initialState: "empty-state"
+      }),
       rendition: "opaque",
-      width: 2,
-      height: 2,
-      reversibleClips: [],
-      cutRunways: [],
       deviceLimits: { maxTextureSize: 4_096, maxArrayTextureLayers: 128 }
     });
     const fixture = createFixture({ plan });
@@ -317,44 +322,133 @@ function createFixture(options: FixtureOptions = {}) {
 }
 
 function defaultPlan(): Readonly<InteractionCachePlan> {
-  return createInteractionCachePlanFromSemanticSequences({
+  return createInteractionCachePlan({
+    manifest: interactionManifest({
+      units: [
+        manifestBody("alpha", "loop", 2, 0),
+        manifestBody("beta", "finite", 3, 2)
+      ],
+      states: [
+        { id: "alpha-a", bodyUnit: "alpha" },
+        { id: "alpha-b", bodyUnit: "alpha" },
+        { id: "beta", bodyUnit: "beta" }
+      ],
+      edges: [
+        manifestCut("a-alpha", "beta", "alpha-a"),
+        manifestCut("b-alpha-shared", "beta", "alpha-b"),
+        manifestCut("c-beta", "alpha-a", "beta")
+      ],
+      initialState: "alpha-a"
+    }),
     rendition: "opaque",
-    width: 2,
-    height: 2,
-    reversibleClips: [],
-    cutRunways: [
-      cut("a-alpha", "alpha", [0, 2, 0, 2, 0, 2]),
-      cut("b-alpha-shared", "alpha", [2, 0, 2, 0, 2, 0]),
-      cut("c-beta", "beta", [2, 2, 2, 2, 2, 2])
-    ],
     deviceLimits: { maxTextureSize: 4_096, maxArrayTextureLayers: 128 }
   });
 }
 
-function singleFramePlan(
+function longUnitPlan(
   unit: string,
-  localFrame: number
+  frameCount: number
 ): Readonly<InteractionCachePlan> {
-  return createInteractionCachePlanFromSemanticSequences({
+  return createInteractionCachePlan({
+    manifest: interactionManifest({
+      units: [manifestBody(
+        unit,
+        "finite",
+        frameCount,
+        0
+      )],
+      states: [{ id: `${unit}-state`, bodyUnit: unit }],
+      edges: [manifestCut("only", `${unit}-state`, `${unit}-state`)],
+      initialState: `${unit}-state`
+    }),
     rendition: "opaque",
-    width: 2,
-    height: 2,
-    reversibleClips: [],
-    cutRunways: [cut("only", unit, Array(6).fill(localFrame) as number[])],
     deviceLimits: { maxTextureSize: 4_096, maxArrayTextureLayers: 128 }
   });
 }
 
-function cut(edge: string, unit: string, frames: readonly number[]) {
+function manifestBody(
+  id: string,
+  playback: "loop" | "finite",
+  frameCount: number,
+  chunkStart: number
+): Extract<Unit, { readonly kind: "body" }> {
   return {
-    edge,
-    state: `${unit}-state`,
-    port: "default",
-    frames: frames.map((localFrame) => ({
+    id,
+    kind: "body",
+    playback,
+    frameCount,
+    ports: [{ id: "default", entryFrame: 0, portalFrames: [frameCount - 1] }],
+    chunks: [{
       rendition: "opaque",
-      unit,
-      localFrame
-    }))
+      chunkStart,
+      chunkCount: frameCount,
+      frameCount,
+      sha256: "0".repeat(64)
+    }]
+  };
+}
+
+function manifestCut(id: string, from: string, to: string) {
+  return {
+    id,
+    from,
+    to,
+    start: {
+      type: "cut" as const,
+      targetPort: "default",
+      maxWaitFrames: 1 as const
+    },
+    continuity: "cut" as const,
+    targetRunwayFrames: 6
+  };
+}
+
+function interactionManifest(input: Readonly<{
+  units: readonly Unit[];
+  states: CompiledManifest["states"];
+  edges: CompiledManifest["edges"];
+  initialState: string;
+}>): CompiledManifest {
+  return {
+    formatVersion: "1.1",
+    generator: "interaction-cache-preparation-tests",
+    codec: "h264",
+    bitstream: "annex-b",
+    layout: "opaque",
+    canvas: {
+      width: 2,
+      height: 2,
+      fit: "contain",
+      pixelAspect: [1, 1],
+      colorSpace: "srgb"
+    },
+    frameRate: { numerator: 30, denominator: 1 },
+    renditions: [{
+      id: "opaque",
+      codec: "avc1.42E020",
+      bitDepth: 8,
+      codedWidth: 2,
+      codedHeight: 2,
+      alphaLayout: { type: "opaque", colorRect: [0, 0, 2, 2] },
+      bitrate: { average: 1, peak: 1 }
+    }],
+    units: input.units,
+    initialState: input.initialState,
+    states: input.states,
+    edges: input.edges,
+    bindings: [],
+    readiness: {
+      policy: "all-routes",
+      bootstrapUnits: [input.units[0]?.id ?? ""],
+      immediateEdges: input.edges.map(({ id }) => id)
+    },
+    limits: {
+      maxCompiledBytes: 64 * 1024,
+      maxRuntimeBytes: 1024 * 1024,
+      decodedPixelBytes: 16,
+      persistentCacheBytes: 0,
+      runtimeWorkingSetBytes: 16
+    }
   };
 }
 
@@ -368,7 +462,7 @@ implements WorkerSampleCatalog, InteractionCachePreparationUnitCatalog {
       if (id !== "opaque") throw new RangeError("unknown rendition");
       return {
         id,
-        codec: "avc1.640020",
+        codec: "avc1.42E020",
         bitDepth: 8,
         codedWidth: 2,
         codedHeight: 2,
@@ -463,7 +557,7 @@ function inspectionFor(
     bitstream: "annex-b",
     bitDepth: 8,
     decoderConfig: Object.freeze({
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       codedWidth: 2,
       codedHeight: 2
     }),

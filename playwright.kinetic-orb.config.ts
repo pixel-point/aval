@@ -45,6 +45,12 @@ export default defineConfig({
       testMatch: "**/soak.spec.ts",
       timeout: 95_000,
       use: { ...devices["Desktop Chrome"] }
+    },
+    {
+      name: "firefox-soak",
+      testMatch: "**/soak.spec.ts",
+      timeout: 95_000,
+      use: { ...devices["Desktop Firefox"] }
     }
   ]
 });

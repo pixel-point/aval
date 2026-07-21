@@ -22,7 +22,6 @@ describe("computePresentationGeometry", () => {
       width: 100,
       height: 50
     });
-    expect(geometry.desiredBacking).toEqual({ width: 200, height: 200 });
     expect(geometry.backing).toEqual({ width: 200, height: 200 });
     expect(geometry.destinationBackingRect).toEqual({
       x: 0,
@@ -35,7 +34,6 @@ describe("computePresentationGeometry", () => {
       destinationCssRect: geometry.destinationCssRect,
       destinationBackingRect: geometry.destinationBackingRect
     });
-    expect(geometry.clampReasons).toEqual([]);
     expect(geometry.byteTerms).toEqual({
       bytesPerPlane: 160_000,
       totalBackingBytes: 160_000
@@ -106,7 +104,6 @@ describe("computePresentationGeometry", () => {
       devicePixelRatio: 1.5
     }));
 
-    expect(geometry.desiredBacking).toEqual({ width: 56, height: 36 });
     expect(geometry.backing).toEqual({ width: 56, height: 36 });
     expect(geometry.effectiveDevicePixelRatio).toEqual({
       x: 56 / 37.25,
@@ -128,11 +125,8 @@ describe("computePresentationGeometry", () => {
       maxBackingBytes: 4_000 * 2_000 * 8
     }));
 
-    expect(geometry.desiredBacking).toEqual({ width: 4_000, height: 2_000 });
     expect(geometry.backing).toEqual({ width: 4_000, height: 2_000 });
     expect(geometry.byteTerms.totalBackingBytes).toBe(32_000_000);
-    expect(geometry.resolutionScale).toBe(1);
-    expect(geometry.clampReasons).toEqual([]);
   });
 
   it("rejects an explicit host or device dimension without downscaling", () => {
@@ -171,7 +165,6 @@ describe("computePresentationGeometry", () => {
     expect(Object.isFrozen(first.destinationCssRect)).toBe(true);
     expect(Object.isFrozen(first.destinationBackingRect)).toBe(true);
     expect(Object.isFrozen(first.backing)).toBe(true);
-    expect(Object.isFrozen(first.clampReasons)).toBe(true);
     expect(Object.isFrozen(first.planes)).toBe(true);
   });
 

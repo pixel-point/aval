@@ -45,7 +45,6 @@ export function replayPresentationOptions(
     ...(captured.initialPresentation === null
       ? {}
       : { initialPresentation: captured.initialPresentation }),
-    ...(captured.onClamp === undefined ? {} : { onClamp: captured.onClamp }),
     ...(captured.createBackend === undefined
       ? {}
       : { createBackend: captured.createBackend }),

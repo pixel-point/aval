@@ -1,3 +1,5 @@
+import { IDENTIFIER_PATTERN } from "@pixel-point/aval-format";
+
 import type {
   AvalAutoplay,
   AvalBindings,
@@ -9,7 +11,6 @@ import type {
 export const MAX_ELEMENT_URL_CODE_UNITS = 4_096;
 export const MAX_INTERACTION_ID_CODE_UNITS = 256;
 const MAX_SAFE_INTEGER_DECIMAL_DIGITS = String(Number.MAX_SAFE_INTEGER).length;
-const IDENTIFIER_PATTERN = /^[a-z][a-z0-9._-]{0,63}$/u;
 const EXTERNAL_INTEGRITY_PATTERN = /^sha256-([A-Za-z0-9+/]{43})=$/u;
 const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

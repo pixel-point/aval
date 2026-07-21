@@ -6,7 +6,11 @@ import { releasePackageDirectory } from "./release-set-model.mjs";
 const config = JSON.parse(await readFile("config/release/api-classification.json", "utf8"));
 const change = JSON.parse(await readFile("config/release/api-changes.json", "utf8"));
 const failures = [];
-if (change.releaseVersion !== "1.0.0" || change.changeKind !== "initial-stable-release") failures.push("API change classification does not identify the initial 1.0 stable release");
+if (
+  change.releaseVersion !== "1.0.0" ||
+  change.changeKind !== "technical-preview-reset" ||
+  config.defaultClassification !== "experimental"
+) failures.push("API change classification must identify the technical-preview reset");
 for (const [name, packageConfig] of Object.entries(config.packages)) {
   const short = releasePackageDirectory(name);
   const reportPath = `etc/api/${short}.api.md`;

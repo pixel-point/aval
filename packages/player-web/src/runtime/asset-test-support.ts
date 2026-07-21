@@ -3,19 +3,19 @@ import {
   type CanonicalAssetInput,
   type ChunkDigestInput,
   type EncodedChunkInput,
-  type ProductionRenditionV1_0,
+  type OpaqueProductionRenditionV1_1,
   type UnitInput
 } from "@pixel-point/aval-format";
 
 const DIGEST = "0".repeat(64);
 const TWO_FRAME_H264_DIGEST =
-  "3801db7b8816b53a06db163aea978616c754e3bc193d8cc90434da506c168341";
+  "bc6adcfa25b1d353a2a4ff697898f3755c62c3cd775f9081f4ebd17e2d1ea453";
 
 const KEY_ACCESS_UNIT = hexNumbers(
-  "0000000109100000000167640020ace5109a6a02020280000003008000001e46d04422cb0000000168eeb2c8b00000000165b840fc"
+  "000000010910000000016742e020f42134d40404050000030001000003003c8da08846a00000000168ce32c80000000165b840fc"
 );
 const DELTA_ACCESS_UNIT = hexNumbers(
-  "0000000109300000000141e243f8"
+  "0000000109300000000141e243f0"
 );
 
 export interface RuntimeTestAssetOptions {
@@ -29,10 +29,10 @@ export function opaqueTestRendition(
   codedHeight = 64,
   peakBitrate = 2_000_000,
   averageBitrate = 1_000_000
-): ProductionRenditionV1_0 {
+): OpaqueProductionRenditionV1_1 {
   return Object.freeze({
     id,
-    codec: "avc1.640020",
+    codec: "avc1.42E020",
     bitDepth: 8,
     codedWidth,
     codedHeight,
@@ -267,7 +267,7 @@ export function createIntegratedPathTestAsset(): Uint8Array {
 interface BaseManifestInput {
   readonly generator: string;
   readonly pixelAspect: readonly [number, number];
-  readonly renditions: readonly ProductionRenditionV1_0[];
+  readonly renditions: readonly OpaqueProductionRenditionV1_1[];
   readonly units: readonly UnitInput[];
   readonly initialState: string;
   readonly states: CanonicalAssetInput["manifest"]["states"];
@@ -284,7 +284,7 @@ function baseManifest(
   input: BaseManifestInput
 ): CanonicalAssetInput["manifest"] {
   return {
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: input.generator,
     codec: "h264",
     bitstream: "annex-b",
@@ -319,7 +319,7 @@ function baseManifest(
 }
 
 function chunkDescriptors(
-  renditions: readonly ProductionRenditionV1_0[],
+  renditions: readonly OpaqueProductionRenditionV1_1[],
   sha256 = DIGEST
 ): readonly ChunkDigestInput[] {
   return Object.freeze(renditions.map(({ id }) => Object.freeze({

@@ -9,8 +9,8 @@ toolchain invocations. The copies under
 `examples/end-user-playground/public/favorite` are consumers of this bundle;
 `npm run fixtures:verify` requires every copied byte to remain identical.
 
-`fixtures/conformance/v1` remains the frozen wire-1.0 compatibility authority.
-It is intentionally not used for current packed-alpha playback certification.
+This is the sole checked-in compiled-asset authority for the current wire-1.1
+format.
 
 Run `node fixtures/certification/v1/update-fixture.mjs` after building the
 compiler to rebuild into temporary storage, prepare complete authority and

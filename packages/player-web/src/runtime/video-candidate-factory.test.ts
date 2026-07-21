@@ -9,7 +9,7 @@ import { VideoCandidateFactory } from "./video-candidate-factory.js";
 import { certifyVideoRenditions } from "./video-rendition-certification.js";
 
 const SPECS = Object.freeze({
-  h264: Object.freeze({ codec: "avc1.640020", bitstream: "annex-b" as const }),
+  h264: Object.freeze({ codec: "avc1.42E020", bitstream: "annex-b" as const }),
   h265: Object.freeze({ codec: "hvc1.1.6.L30.90", bitstream: "annex-b" as const }),
   vp9: Object.freeze({
     codec: "vp09.00.10.08.01.01.01.01.00",
@@ -115,7 +115,7 @@ function createManifest(family: keyof typeof SPECS): CompiledManifest {
   const spec = SPECS[family];
   const bitDepth = family === "av1" ? 10 as const : 8 as const;
   return {
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "candidate-test",
     codec: family as VideoCodec,
     bitstream: spec.bitstream,

@@ -109,8 +109,8 @@
 
 **Files:**
 
-- Create: `scripts/browser-compatibility/certification-policy.json`
-- Create: `scripts/browser-compatibility/certification-policy.schema.json`
+- Create: `config/release/browser-certification-policy.json`
+- Create: `config/release/browser-certification-policy.schema.json`
 - Create: `scripts/browser-compatibility/brave/resolve-builds.mjs`
 - Create: `scripts/browser-compatibility/brave/acquire-builds.mjs`
 - Create: `scripts/browser-compatibility/brave/run-matrix.mjs`
@@ -163,13 +163,13 @@
   ```bash
   node scripts/browser-compatibility/brave/resolve-builds.mjs \
     --boundary-date 2024-07-19 \
-    --policy scripts/browser-compatibility/certification-policy.json
+    --policy config/release/browser-certification-policy.json
   AVAL_BRAVE_TMP="$(mktemp -d /tmp/aval-brave-macos.XXXXXX)"
   node scripts/browser-compatibility/brave/acquire-builds.mjs \
-    --policy scripts/browser-compatibility/certification-policy.json \
+    --policy config/release/browser-certification-policy.json \
     --platform macos-arm64 --output "$AVAL_BRAVE_TMP"
   node scripts/browser-compatibility/brave/run-matrix.mjs \
-    --policy scripts/browser-compatibility/certification-policy.json \
+    --policy config/release/browser-certification-policy.json \
     --platform macos --install-root "$AVAL_BRAVE_TMP" \
     --base-url "$TUNNEL_URL" --run-root "$RUN_ROOT" \
     --source-commit "$COMMIT" --session-id "$SESSION" \
@@ -813,7 +813,7 @@
 - Modify: `examples/support/aval-browser-diagnostics.js`
 - Modify: `tests/support/browser-diagnostic-capture.ts`
 - Modify: the four example `diagnostics.spec.ts` files
-- Modify: `scripts/browser-compatibility/certification-policy.json`
+- Modify: `config/release/browser-certification-policy.json`
 - Create: `scripts/browser-compatibility/evidence-schema.mjs`
 - Create: `scripts/browser-compatibility/source-tree-attestation.mjs`
 - Create: `scripts/browser-compatibility/validate-evidence.mjs`

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { PackedAlphaWitnessV1 } from "../src/asset.js";
+import type { PackedAlphaWitnessV1 } from "@pixel-point/aval-format";
 import {
   DecodedOutputIncompatibleError,
   qualifyDecodedPackedAlphaOutput

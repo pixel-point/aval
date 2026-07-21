@@ -34,7 +34,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       initialPresentation: { width: 6, height: 4, dpr: 2, fit: "contain" }
     });
 
-    await renderer.draw(packedFrame([0, 128, 255]));
+    await renderer.draw(packedFrame([0, 128, 255]), false);
 
     const snapshot = renderer.snapshot();
     expect(snapshot).toMatchObject({
@@ -70,15 +70,15 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     }
   });
 
-  it("keeps resident identities independent and redraws after resize", async () => {
+  it("accepts an explicit decoder boundary for a nonzero resident index", async () => {
     const fixture = canvasFixture();
     const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
       createCanvas: fixture.createCanvas
     });
-    await renderer.store("idle", 0, packedFrame([0, 128, 255]));
-    expect(() => renderer.store("idle", 0, packedFrame([1, 2, 3])))
+    await renderer.store("idle", 7, packedFrame([0, 128, 255]), true);
+    expect(() => renderer.store("idle", 7, packedFrame([1, 2, 3]), false))
       .toThrow(/already exists/u);
-    await renderer.drawStored("idle", 0);
+    await renderer.drawStored("idle", 7);
     const before = fixture.output.context.draws.length;
 
     renderer.resize(20, 10, 2, "cover");
@@ -125,7 +125,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       contextListenerCount: 0
     });
     expect(fixture.output.listenerCount).toBe(0);
-    await expect(renderer.draw(packedFrame([1, 2, 3])))
+    await expect(renderer.draw(packedFrame([1, 2, 3]), false))
       .rejects.toThrow(/unavailable/u);
     expect(renderer.snapshot().failure).toBe(rejected.diagnostic);
   });
@@ -136,7 +136,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       createCanvas: fixture.createCanvas
     });
 
-    await renderer.draw(opaqueFrame());
+    await renderer.draw(opaqueFrame(), false);
 
     expect(fixture.surfaces.filter((surface) =>
       surface.initialWidth === 3 && surface.initialHeight === 2
@@ -154,7 +154,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     const bytes = renderer.snapshot().stagingBytes;
 
     for (let index = 0; index < 7; index += 1) {
-      await renderer.draw(packedFrame([index, index + 1, index + 2]));
+      await renderer.draw(packedFrame([index, index + 1, index + 2]), false);
     }
 
     expect(renderer.snapshot().stagingBytes).toBe(bytes);
@@ -197,7 +197,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       resourceCount: before.resourceCount
     });
 
-    await renderer.draw(packedFrame([1, 2, 3]));
+    await renderer.draw(packedFrame([1, 2, 3]), false);
     expect(fixture.output.context.draws).toHaveLength(2);
   });
 
@@ -218,13 +218,13 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
 
     expect(renderer.snapshot().failure).toBeNull();
     expect(fixture.output.context.draws).toHaveLength(0);
-    await renderer.draw(packedFrame([1, 2, 3]));
+    await renderer.draw(packedFrame([1, 2, 3]), false);
     expect(fixture.output.context.draws).toHaveLength(2);
     const invalid = {
       ...packedFrame([4, 5, 6]),
       displayWidth: 3
     } as unknown as VideoFrame;
-    await expect(renderer.draw(invalid)).rejects.toMatchObject({
+    await expect(renderer.draw(invalid, false)).rejects.toMatchObject({
       diagnostic: { phase: "semantic-upload", operationOrdinal: 3 }
     });
   });
@@ -271,7 +271,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       contextListenerCount: 0
     });
     expect(fixture.output.listenerCount).toBe(0);
-    await expect(renderer.draw(packedFrame([1, 2, 3])))
+    await expect(renderer.draw(packedFrame([1, 2, 3]), false))
       .rejects.toThrow(/unavailable/u);
   });
 
@@ -280,7 +280,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
       createCanvas: fixture.createCanvas
     });
-    await renderer.draw(packedFrame([0, 128, 255]));
+    await renderer.draw(packedFrame([0, 128, 255]), false);
     const draws = fixture.output.context.draws.length;
 
     await renderer.inspectAndPrime(
@@ -306,7 +306,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       resolve = done;
     });
     let inspected = false;
-    const drawing = renderer.draw(frameWithCopy(async () => pendingCopy));
+    const drawing = renderer.draw(frameWithCopy(async () => pendingCopy), false);
     const priming = renderer.inspectAndPrime(
       packedFrame([0, 128, 255]),
       () => { inspected = true; }
@@ -324,7 +324,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       ...packedFrame([1, 2, 3]),
       displayWidth: 3
     } as unknown as VideoFrame;
-    await expect(renderer.draw(invalid)).rejects.toMatchObject({
+    await expect(renderer.draw(invalid, false)).rejects.toMatchObject({
       diagnostic: { phase: "semantic-upload", operationOrdinal: 3 }
     });
   });
@@ -342,7 +342,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
 
     expect(renderer.snapshot().failure).toBeNull();
     expect(fixture.output.context.draws).toHaveLength(0);
-    await renderer.draw(packedFrame([1, 2, 3]));
+    await renderer.draw(packedFrame([1, 2, 3]), false);
     expect(fixture.output.context.draws).toHaveLength(2);
   });
 
@@ -354,7 +354,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     let reentrantDraw: Promise<void> | undefined;
 
     await renderer.inspectAndPrime(packedFrame([0, 128, 255]), () => {
-      reentrantDraw = renderer.draw(packedFrame([1, 2, 3]));
+      reentrantDraw = renderer.draw(packedFrame([1, 2, 3]), false);
     });
     await reentrantDraw;
 
@@ -397,7 +397,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       copyOptions = options;
       destinationBytes(destination).set(packedPixels([0, 128, 255]));
       return [{ offset: 0, stride: 16 }];
-    }));
+    }), false);
 
     expect((copiedInto as Uint8Array | null)?.byteLength).toBe(192);
     expect(copyOptions).toEqual({
@@ -439,7 +439,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     });
     await renderer.draw(frameWithCopy(() => {
       throw new DOMException("RGBA is unsupported", "NotSupportedError");
-    }));
+    }), false);
 
     const readback = fixture.surface(4, 12, 0).context;
     expect(readback.draws).toHaveLength(1);
@@ -462,7 +462,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       visibleRect: { x: 2, y: 3, width: 4, height: 12 }
     } as unknown as VideoFrame;
 
-    await renderer.draw(candidate);
+    await renderer.draw(candidate, false);
 
     const readback = fixture.surface(4, 12, 0).context;
     expect(readback.draws[0]?.args.slice(1, 5)).toEqual([0, 0, 8, 24]);
@@ -476,7 +476,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       createCanvas: fixture.createCanvas
     });
 
-    const storing = renderer.store("idle", 0, frameWithCopy(() => copy));
+    const storing = renderer.store("idle", 0, frameWithCopy(() => copy), false);
     expect(renderer.snapshot()).toMatchObject({
       residentBytes: 48,
       runtimeBytes: 684
@@ -500,7 +500,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
     const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
       createCanvas: fixture.createCanvas
     });
-    await expect(renderer.draw(frameWithCopy(copy))).rejects
+    await expect(renderer.draw(frameWithCopy(copy), false)).rejects
       .toBeInstanceOf(RendererFailureError);
     expect(fixture.surfaces.filter((surface) =>
       surface.initialWidth === 4 && surface.initialHeight === 12
@@ -521,7 +521,7 @@ describe("Canvas2dRenderer packed-alpha presentation", () => {
       setTimeout: (callback) => { fire = callback; return 7; },
       clearTimeout() {}
     });
-    const pending = renderer.draw(frameWithCopy(() => new Promise(() => undefined)));
+    const pending = renderer.draw(frameWithCopy(() => new Promise(() => undefined)), false);
     await Promise.resolve();
     await Promise.resolve();
     fire?.();
@@ -558,7 +558,7 @@ describe("Canvas2dRenderer geometry and lifecycle", () => {
       createCanvas: fixture.createCanvas,
       onContextChange: (change) => changes.push(change)
     });
-    await renderer.draw(packedFrame([0, 128, 255]));
+    await renderer.draw(packedFrame([0, 128, 255]), false);
     const before = fixture.output.context.draws.length;
 
     fixture.output.dispatch("contextlost");
@@ -582,7 +582,7 @@ describe("Canvas2dRenderer geometry and lifecycle", () => {
     const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
       createCanvas: fixture.createCanvas
     });
-    await renderer.store("idle", 0, packedFrame([0, 128, 255]));
+    await renderer.store("idle", 0, packedFrame([0, 128, 255]), false);
     renderer.dispose();
 
     expect(renderer.snapshot()).toMatchObject({
@@ -607,7 +607,7 @@ describe("Canvas2dRenderer geometry and lifecycle", () => {
       createCanvas: fixture.createCanvas,
       onContextChange: (change) => changes.push(change)
     });
-    await renderer.draw(packedFrame([0, 128, 255]));
+    await renderer.draw(packedFrame([0, 128, 255]), false);
     fixture.output.dispatch("contextlost");
     fixture.surfaces[0]!.context.contextLost = true;
     fixture.output.dispatch("contextrestored");
@@ -629,7 +629,7 @@ describe("Canvas2dRenderer geometry and lifecycle", () => {
       createCanvas: fixture.createCanvas,
       onContextChange: (change) => changes.push(change)
     });
-    await renderer.draw(packedFrame([0, 128, 255]));
+    await renderer.draw(packedFrame([0, 128, 255]), false);
     fixture.output.dispatch("contextlost");
     fixture.output.context.throwOnDraw = true;
     fixture.output.dispatch("contextrestored");
@@ -652,7 +652,7 @@ describe("Canvas2dRenderer geometry and lifecycle", () => {
     const renderer = new Canvas2dRenderer(htmlCanvas(fixture.output), packedLayout(), {
       createCanvas: fixture.createCanvas
     });
-    const drawing = renderer.draw(frameWithCopy(() => copy));
+    const drawing = renderer.draw(frameWithCopy(() => copy), false);
     await Promise.resolve();
     await Promise.resolve();
 

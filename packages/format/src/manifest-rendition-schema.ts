@@ -22,7 +22,6 @@ import type {
   Bitrate,
   Canvas,
   FormatBudgets,
-  FormatVersion,
   PackedAlphaWitnessV1,
   ProductionRendition,
   Rational,
@@ -72,7 +71,6 @@ export function cloneRenditions(
   canvas: Canvas,
   codecFamily: VideoCodec,
   layout: VideoLayout,
-  formatVersion: FormatVersion,
   budgets: FormatBudgets,
   path: string
 ): readonly ProductionRendition[] {
@@ -84,7 +82,6 @@ export function cloneRenditions(
       canvas,
       codecFamily,
       layout,
-      formatVersion,
       `${path}[${String(index)}]`
     );
     if (seen.has(rendition.id)) {
@@ -101,7 +98,6 @@ function cloneRendition(
   canvas: Canvas,
   codecFamily: VideoCodec,
   layout: VideoLayout,
-  formatVersion: FormatVersion,
   path: string
 ): ProductionRendition {
   const input = record(value, path);
@@ -114,7 +110,7 @@ function cloneRendition(
     "alphaLayout",
     "bitrate"
   ] as const;
-  if (formatVersion === "1.1" && layout === "packed-alpha") {
+  if (layout === "packed-alpha") {
     exactKeys(input, [...commonKeys, "outputQualification"], path);
   } else {
     exactKeys(input, commonKeys, path);
@@ -145,7 +141,7 @@ function cloneRendition(
     `${path}.alphaLayout`
   );
   const bitrate = cloneBitrate(input.bitrate, `${path}.bitrate`);
-  if (formatVersion === "1.1" && layout === "packed-alpha") {
+  if (layout === "packed-alpha") {
     if (alphaLayout.type !== "stacked") {
       invalid(`${path}.alphaLayout`, "must describe a packed-alpha rendition");
     }
@@ -164,6 +160,9 @@ function cloneRendition(
       bitrate,
       outputQualification
     });
+  }
+  if (alphaLayout.type !== "opaque") {
+    invalid(`${path}.alphaLayout`, "must describe an opaque rendition");
   }
   return Object.freeze({
     id,

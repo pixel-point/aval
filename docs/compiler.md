@@ -46,9 +46,8 @@ The current permanent compatibility rows are:
 | 640×368 | 24 fps | `avc1.42E01E` |
 | 1280×720 | 24 fps | `avc1.42E01F` |
 
-Format-version `1.0` readers continue to accept canonical legacy High-profile
-`avc1.6400xx` assets, but the compiler never emits that profile for new H.264
-bundles.
+The format accepts only the compiler's Constrained Baseline H.264 profile.
+High-profile declarations are rejected at the asset boundary.
 
 See [preparing video and authoring states](compiler/authoring-video-and-states.md)
 for accepted files, timing and alpha requirements, half-open ranges, a complete
@@ -59,6 +58,5 @@ tools. Codec patent/licensing obligations are not bundled or cleared by this
 project. Use a reviewed local toolchain and obtain legal review for production
 distribution.
 
-See [project 1.0](project/1.0.md), [wire format 1.1](format/1.1.md), and the
-[legacy wire 1.0 contract](format/1.0.md) for the exact authoring and payload
-contracts.
+See [project 1.0](project/1.0.md) and [wire format 1.1](format/1.1.md) for the
+exact authoring and payload contracts.

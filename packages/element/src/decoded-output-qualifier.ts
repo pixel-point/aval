@@ -1,6 +1,4 @@
-import type {
-  PackedAlphaWitnessV1
-} from "./asset.js";
+import type { PackedAlphaWitnessV1 } from "@pixel-point/aval-format";
 import type {
   MaterializedRgbaFrameReference
 } from "./rgba-materializer.js";

@@ -1,7 +1,6 @@
 import {
   MotionGraphEngine,
   type GraphEdgeDefinition,
-  type GraphPresentation,
   type MotionGraphResult,
   type MotionGraphSnapshot
 } from "@pixel-point/aval-graph";
@@ -425,20 +424,5 @@ export function assertReadinessActive(
   if (input.signal.aborted) throw input.signal.reason;
   if (input.clock.now() >= input.deadlineMs) {
     throw new DOMException("production readiness deadline expired", "TimeoutError");
-  }
-}
-
-export function presentationFrameIdentity(
-  presentation: Readonly<GraphPresentation>
-): string {
-  switch (presentation.kind) {
-    case "static":
-      return `static:${presentation.state}`;
-    case "intro":
-    case "body":
-      return `${presentation.kind}:${presentation.state}:${presentation.unitId}:${String(presentation.frameIndex)}`;
-    case "locked":
-    case "reversible":
-      return `${presentation.kind}:${presentation.edgeId}:${presentation.unitId}:${String(presentation.frameIndex)}`;
   }
 }

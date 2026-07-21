@@ -18,8 +18,7 @@ const required = [
   "docs/compiler/authoring-video-and-states.md",
   "docs/network-and-integrity.md",
   "docs/accessibility-and-motion.md", "docs/performance-and-budgets.md",
-  "docs/troubleshooting.md", "docs/browser-support.md", "docs/format/1.0.md",
-  "docs/format/1.1.md",
+  "docs/troubleshooting.md", "docs/browser-support.md", "docs/format/1.1.md",
   "docs/project/1.0.md", "docs/security.md", "docs/versioning.md",
   "docs/releases/1.0.0.md",
   "docs/certification/method.md", "SECURITY.md", "THREAT-MODEL.md",
@@ -28,6 +27,30 @@ const required = [
 const failures = [];
 for (const path of required) {
   try { await access(path); } catch { failures.push(`${path}: required document is missing`); }
+}
+const releasePolicy = JSON.parse(
+  await readFile("config/release/release-policy.json", "utf8")
+);
+if (
+  releasePolicy.releaseStage !== "technical-preview" ||
+  releasePolicy.wireFormatVersion !== "1.1" ||
+  releasePolicy.projectSchemaVersion !== "1.0"
+) failures.push("release policy must identify project 1.0, wire 1.1 technical preview");
+for (const path of [
+  "README.md",
+  "docs/compiler.md",
+  "docs/project/1.0.md",
+  "docs/versioning.md",
+  "packages/format/README.md",
+  "packages/compiler/README.md"
+]) {
+  const text = await readFile(path, "utf8");
+  if (/wire(?:\s+format|[- ])?\s*`?1\.0`?/iu.test(text)) {
+    failures.push(`${path}: current documentation still advertises wire 1.0`);
+  }
+  if (/project(?:\s+schema)?\s+`?0\.2`?/iu.test(text)) {
+    failures.push(`${path}: current documentation still advertises project 0.2`);
+  }
 }
 const files = [];
 await collect("docs", files);

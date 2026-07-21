@@ -14,7 +14,7 @@ describe("WebGL renderer operation identity", () => {
     const renderer = new Renderer(fixture.canvas, layout());
     fixture.gl.loseOnDraw = true;
 
-    await expect(renderer.draw(frame())).rejects.toMatchObject({
+    await expect(renderer.draw(frame(), false)).rejects.toMatchObject({
       diagnostic: {
         operation: "runtime",
         operationOrdinal: 1,
@@ -26,13 +26,13 @@ describe("WebGL renderer operation identity", () => {
   it("consumes one ordinal for a successful resize redraw", async () => {
     const fixture = webglCanvas();
     const renderer = new Renderer(fixture.canvas, layout());
-    await renderer.draw(frame());
+    await renderer.draw(frame(), false);
 
     renderer.resize(25, 52, 2, "contain");
     await renderer.settled();
     expect(fixture.gl.drawnTextures).toHaveLength(2);
 
-    await expect(renderer.draw(frame(undefined, 47, 104))).rejects.toMatchObject({
+    await expect(renderer.draw(frame(undefined, 47, 104), false)).rejects.toMatchObject({
       diagnostic: {
         operation: "runtime",
         operationOrdinal: 4,
@@ -46,7 +46,7 @@ describe("WebGL renderer operation identity", () => {
     const renderer = new Renderer(fixture.canvas, layout());
     fixture.gl.storageError = fixture.gl.OUT_OF_MEMORY;
 
-    await expect(renderer.store("idle", 0, frame())).rejects.toMatchObject({
+    await expect(renderer.store("idle", 0, frame(), false)).rejects.toMatchObject({
       diagnostic: {
         operation: "runtime",
         operationOrdinal: 1,
@@ -58,7 +58,7 @@ describe("WebGL renderer operation identity", () => {
   it("keeps a stored draw failure on the drawStored ordinal", async () => {
     const fixture = webglCanvas();
     const renderer = new Renderer(fixture.canvas, layout());
-    await renderer.store("idle", 0, frame());
+    await renderer.store("idle", 0, frame(), false);
     fixture.gl.loseOnDraw = true;
 
     await expect(renderer.drawStored("idle", 0)).rejects.toMatchObject({
@@ -75,7 +75,7 @@ describe("WebGL renderer operation identity", () => {
     const renderer = new Renderer(fixture.canvas, layout());
     fixture.gl.rgbaUploadError = fixture.gl.OUT_OF_MEMORY;
 
-    await expect(renderer.store("idle", 0, frame())).rejects.toMatchObject({
+    await expect(renderer.store("idle", 0, frame(), false)).rejects.toMatchObject({
       diagnostic: {
         operation: "runtime",
         operationOrdinal: 1,
@@ -125,7 +125,7 @@ describe("WebGL renderer operation identity", () => {
 
     expect(() => renderer.resize(20, 10, 1, "contain"))
       .toThrowError(expect.objectContaining({ name: "AbortError" }));
-    await expect(renderer.draw(frame())).rejects.toMatchObject({
+    await expect(renderer.draw(frame(), false)).rejects.toMatchObject({
       name: "AbortError"
     });
     expect(renderer.snapshot().failure).toBe(rejected.diagnostic);
@@ -147,7 +147,7 @@ describe("WebGL renderer operation identity", () => {
       onContextChange: (change) => changes.push(change)
     });
 
-    await expect(renderer.draw(frame())).rejects.toBe(terminal);
+    await expect(renderer.draw(frame(), false)).rejects.toBe(terminal);
     await Promise.resolve();
 
     expect(renderer.snapshot()).toMatchObject({
@@ -171,7 +171,7 @@ describe("WebGL resident upload policy", () => {
     await expect(renderer.store(
       "idle",
       0,
-      frame(undefined, 47, 104)
+      frame(undefined, 47, 104), false
     )).rejects.toMatchObject({
       diagnostic: { phase: "semantic-upload", operationOrdinal: 1 }
     });
@@ -187,7 +187,7 @@ describe("WebGL resident upload policy", () => {
     await expect(renderer.store(
       "idle",
       0,
-      frame(async () => Promise.reject(copyReason))
+      frame(async () => Promise.reject(copyReason)), false
     )).rejects.toMatchObject({
       diagnostic: {
         phase: "rgba-copy",
@@ -202,7 +202,7 @@ describe("WebGL resident upload policy", () => {
     const fixture = webglCanvas();
     const renderer = new Renderer(fixture.canvas, layout());
 
-    await renderer.store("idle", 0, frame());
+    await renderer.store("idle", 0, frame(), false);
     await renderer.drawStored("idle", 0);
 
     expect(fixture.gl.nativeUploadCount).toBe(0);
@@ -262,7 +262,7 @@ describe("WebGL provisional output priming", () => {
       nativeProbeAttempts: 0
     });
 
-    await renderer.draw(frame());
+    await renderer.draw(frame(), false);
     expect(fixture.gl.drawnTextures).toEqual([fixture.gl.createdTextures[0]]);
   });
 
@@ -280,9 +280,9 @@ describe("WebGL provisional output priming", () => {
     expect(fixture.gl.nativeUploadCount).toBe(0);
     expect(fixture.gl.rgbaUploadCount).toBe(0);
     expect(fixture.gl.drawnTextures).toHaveLength(0);
-    await renderer.draw(frame());
+    await renderer.draw(frame(), false);
     expect(fixture.gl.drawnTextures).toHaveLength(1);
-    await expect(renderer.draw(frame(undefined, 47, 104))).rejects.toMatchObject({
+    await expect(renderer.draw(frame(undefined, 47, 104), false)).rejects.toMatchObject({
       diagnostic: { phase: "semantic-upload", operationOrdinal: 3 }
     });
   });
@@ -343,7 +343,7 @@ describe("WebGL provisional output priming", () => {
       resolve = done;
     });
     let inspected = false;
-    const drawing = renderer.draw(frame(async () => pendingCopy));
+    const drawing = renderer.draw(frame(async () => pendingCopy), false);
     const priming = renderer.inspectAndPrime(frame(), () => {
       inspected = true;
     });
@@ -357,7 +357,7 @@ describe("WebGL provisional output priming", () => {
     await priming;
     expect(inspected).toBe(true);
 
-    await expect(renderer.draw(frame(undefined, 47, 104))).rejects.toMatchObject({
+    await expect(renderer.draw(frame(undefined, 47, 104), false)).rejects.toMatchObject({
       diagnostic: { phase: "semantic-upload", operationOrdinal: 3 }
     });
   });
@@ -371,7 +371,7 @@ describe("WebGL provisional output priming", () => {
 
     expect(renderer.snapshot().failure).toBeNull();
     expect(fixture.gl.rgbaUploadCount).toBe(0);
-    await renderer.draw(frame());
+    await renderer.draw(frame(), false);
     expect(fixture.gl.drawnTextures).toHaveLength(1);
   });
 
@@ -381,7 +381,7 @@ describe("WebGL provisional output priming", () => {
     let reentrantDraw: Promise<void> | undefined;
 
     await renderer.inspectAndPrime(frame(), () => {
-      reentrantDraw = renderer.draw(frame());
+      reentrantDraw = renderer.draw(frame(), false);
     });
     await reentrantDraw;
 

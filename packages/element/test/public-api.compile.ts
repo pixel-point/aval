@@ -65,8 +65,8 @@ const attributes: AvalElementAttributes = {
 void attributes;
 const sourceCandidate: AvalSourceCandidate = {
   src: "/motion.av1.avl",
-  type: 'application/vnd.aval; codecs="av01.0.08M.10"',
-  codec: "av01.0.08M.10",
+  type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"',
+  codec: "av01.0.08M.10.0.110.01.01.01.0",
   integrity: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 };
 void sourceCandidate;

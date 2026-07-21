@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { performance } from "node:perf_hooks";
 
 import {
+  analyzeRenderedFrame,
   captureBrowserFailures,
   installInteractionLedger,
   openIdleOrb,
@@ -115,6 +116,19 @@ async function monitorPlayback(
     const secondFrame = await sampleRenderedFrame(motion);
     expect(secondFrame.equals(first), `rendered pixels did not change at second ${String(second)}`)
       .toBe(false);
+    const color = await analyzeRenderedFrame(page, secondFrame);
+    expect(
+      color.greenDominantRatio,
+      `rendered frame became green-dominant at second ${String(second)}`
+    ).toBeLessThan(0.2);
+    expect(
+      color.vividGreenRatio,
+      `rendered frame became vivid green at second ${String(second)}`
+    ).toBeLessThan(0.1);
+    expect(
+      color.quantizedColorCount,
+      `rendered frame lost authored color detail at second ${String(second)}`
+    ).toBeGreaterThan(32);
     samples.push(Object.freeze({
       second,
       capturedAtMilliseconds: Math.round(performance.now() - started),
@@ -123,6 +137,7 @@ async function monitorPlayback(
       visualState: current.visualState,
       lifecycle: current.playbackLifecycle,
       renderedPixelsChanged: true,
+      color,
       underflows: current.underflows
     }));
     previous = current;

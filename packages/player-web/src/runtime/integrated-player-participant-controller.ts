@@ -45,7 +45,6 @@ export class IntegratedPlayerParticipantController {
 
   public markLoading(): void { this.#setPhase("loading"); }
   public markPreparing(): void { this.#setPhase("preparing"); }
-  public markAnimated(): void { this.#setPhase("animated"); }
 
   public markReady(result: Readonly<RuntimeReadinessResult>): void {
     this.#setPhase(result.mode === "animated"

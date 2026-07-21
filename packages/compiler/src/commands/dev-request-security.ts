@@ -13,15 +13,6 @@ export type DevRequestAuthorization =
 
 type DenialCode = Extract<DevRequestAuthorization, { readonly allowed: false }>["code"];
 
-export function authorizeDevRequest(
-  request: IncomingMessage,
-  authority: DevRequestAuthority,
-  endpoint: DevBrowserEndpoint
-): DevRequestAuthorization {
-  const host = authorizeHost(request, authority);
-  return host.allowed ? authorizeBrowserRequest(request, authority, endpoint) : host;
-}
-
 export function authorizeHost(request: IncomingMessage, authority: DevRequestAuthority): DevRequestAuthorization {
   const hosts = rawHeaderValues(request, "host");
   return hosts.length === 1 && hosts[0] === authority.hostHeader

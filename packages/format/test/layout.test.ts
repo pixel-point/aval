@@ -20,7 +20,7 @@ function expectFormatError(action: () => unknown, code?: FormatError["code"]): F
   throw new Error("expected operation to throw");
 }
 
-describe("canonical 1.0 asset layout", () => {
+describe("canonical 1.1 asset layout", () => {
   it("derives the exact front index, unit blobs, padding, and file range", () => {
     const fixture = canonicalAssetFixture();
     const front = parseFrontIndex(fixture.bytes);

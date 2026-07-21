@@ -25,7 +25,7 @@ export default defineConfig({
     command:
       `npm run dev -w @pixel-point/aval-playground -- --port ${browserPort} --strictPort`,
     url: browserBaseUrl,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 30_000
   },
   projects: [

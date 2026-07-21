@@ -49,7 +49,6 @@ import {
   PathSchedulerTraceLog
 } from "./path-scheduler-trace.js";
 import type {
-  PathSchedulerClock,
   CommitResidentRunwayOptions,
   PathSchedulerOptions,
   PathSchedulerPumpOptions,
@@ -356,15 +355,13 @@ export class PathScheduler {
    */
   public commitResidentRunway(
     transaction: Readonly<PathSchedulerResidentRunwayTransaction>,
-    options: Readonly<CommitResidentRunwayOptions> = {}
+    options: Readonly<CommitResidentRunwayOptions>
   ): PathSchedulerWorkerActivation {
     this.#requireActive();
     const committed = this.#residentRunwayOwner.commit(transaction, options);
     this.#build = committed.build;
     this.#residentTarget = committed.residentTarget;
-    if (committed.firstPresented !== null) {
-      this.#trace("resident-present", null, null, committed.firstPresented);
-    }
+    this.#trace("resident-present", null, null, committed.firstPresented);
     this.#trace(
       "generation-retire",
       null,
@@ -379,14 +376,6 @@ export class PathScheduler {
     transaction: Readonly<PathSchedulerResidentRunwayTransaction>
   ): boolean {
     return this.#residentRunwayOwner.rollback(transaction);
-  }
-
-  public async startResidentRunway(
-    input: StartResidentRunwayInput
-  ): Promise<void> {
-    const transaction = this.stageResidentRunway(input);
-    const activateWorker = this.commitResidentRunway(transaction);
-    await abortablePathSchedulerActivation(activateWorker(), input.signal);
   }
 
   public async pump(

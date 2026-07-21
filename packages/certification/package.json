@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "vitest run test"
+    "test": "cd ../.. && vitest run --config vitest.m9.config.ts packages/certification/test"
   },
   "dependencies": {
     "@pixel-point/aval-format": "1.0.0"

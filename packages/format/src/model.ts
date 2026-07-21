@@ -13,7 +13,7 @@ export type VideoCodec = "h264" | "h265" | "vp9" | "av1";
 export type VideoBitstream = "annex-b" | "frame" | "low-overhead";
 export type VideoLayout = "opaque" | "packed-alpha";
 export type VideoBitDepth = 8 | 10;
-export type FormatVersion = "1.0" | "1.1";
+export type FormatVersion = "1.1";
 
 export interface FormatBudgets {
   readonly maxFileBytes: number;
@@ -92,12 +92,6 @@ export interface ProductionRenditionBase {
   readonly bitrate: Bitrate;
 }
 
-/** One quality rung in a single-codec asset. Array order is author preference. */
-export interface ProductionRenditionV1_0 extends ProductionRenditionBase {
-  readonly alphaLayout: AlphaLayout;
-  readonly outputQualification?: never;
-}
-
 export interface OpaqueProductionRenditionV1_1
   extends ProductionRenditionBase {
   readonly alphaLayout: Extract<AlphaLayout, { readonly type: "opaque" }>;
@@ -111,7 +105,6 @@ export interface PackedAlphaProductionRenditionV1_1
 }
 
 export type ProductionRendition =
-  | ProductionRenditionV1_0
   | OpaqueProductionRenditionV1_1
   | PackedAlphaProductionRenditionV1_1;
 
@@ -263,12 +256,6 @@ export interface CompiledManifestBase {
   readonly limits: DeclaredLimits;
 }
 
-export interface CompiledManifestV1_0 extends CompiledManifestBase {
-  readonly formatVersion: "1.0";
-  readonly layout: VideoLayout;
-  readonly renditions: readonly ProductionRenditionV1_0[];
-}
-
 export interface OpaqueCompiledManifestV1_1 extends CompiledManifestBase {
   readonly formatVersion: "1.1";
   readonly layout: "opaque";
@@ -282,7 +269,6 @@ export interface PackedAlphaCompiledManifestV1_1 extends CompiledManifestBase {
 }
 
 export type CompiledManifest =
-  | CompiledManifestV1_0
   | OpaqueCompiledManifestV1_1
   | PackedAlphaCompiledManifestV1_1;
 
@@ -296,10 +282,10 @@ export interface FormatHeaderBase {
   readonly indexLength: number;
 }
 
-export type FormatHeader = FormatHeaderBase & (
-  | { readonly major: 1; readonly minor: 0 }
-  | { readonly major: 1; readonly minor: 1 }
-);
+export type FormatHeader = FormatHeaderBase & {
+  readonly major: 1;
+  readonly minor: 1;
+};
 
 /** Fixed-width decode-order metadata for one elementary encoded chunk. */
 export interface EncodedChunkRecord {
@@ -323,6 +309,12 @@ export interface UnitBlobRange extends ByteRange {
   readonly chunkCount: number;
   readonly frameCount: number;
   readonly sha256: Sha256Hex;
+}
+
+export interface ParsedManifestPrefix {
+  readonly header: FormatHeader;
+  readonly manifest: CompiledManifest;
+  readonly frontIndexRange: ByteRange;
 }
 
 export interface ParsedFrontIndex {
@@ -357,11 +349,6 @@ export type UnitInput =
   | UnitInputOf<"reversible">
   | UnitInputOf<"one-shot">;
 
-export type CompiledManifestInputV1_0 = Omit<
-  CompiledManifestV1_0,
-  "units"
-> & { readonly units: readonly UnitInput[] };
-
 export type OpaqueCompiledManifestInputV1_1 = Omit<
   OpaqueCompiledManifestV1_1,
   "units"
@@ -373,7 +360,6 @@ export type PackedAlphaCompiledManifestInputV1_1 = Omit<
 > & { readonly units: readonly UnitInput[] };
 
 export type CompiledManifestInput =
-  | CompiledManifestInputV1_0
   | OpaqueCompiledManifestInputV1_1
   | PackedAlphaCompiledManifestInputV1_1;
 

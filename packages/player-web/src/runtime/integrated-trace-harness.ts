@@ -45,7 +45,6 @@ export class IntegratedTraceHarness {
   #underflows = 0;
   #staticTransitions = 0;
   #settledRequests = 0;
-  #cleanedFrames = 0;
 
   public recordOperation(input: IntegratedOperationTraceInput): void {
     this.#updateGraphCounters(input.result);
@@ -116,17 +115,6 @@ export class IntegratedTraceHarness {
     });
   }
 
-  public recordCleanedFrames(count: number): void {
-    if (!Number.isSafeInteger(count) || count < 0) {
-      throw new RangeError("cleaned frame count must be a non-negative integer");
-    }
-    this.#cleanedFrames = checkedAdd(
-      this.#cleanedFrames,
-      count,
-      "cleaned frame trace count"
-    );
-  }
-
   public getTrace(): readonly Readonly<RuntimeTraceRecord>[] {
     return Object.freeze([...this.#records]);
   }
@@ -156,8 +144,7 @@ export class IntegratedTraceHarness {
     return Object.freeze({
       underflows: this.#underflows,
       staticTransitions: this.#staticTransitions,
-      settledRequests: this.#settledRequests,
-      cleanedFrames: this.#cleanedFrames
+      settledRequests: this.#settledRequests
     });
   }
 

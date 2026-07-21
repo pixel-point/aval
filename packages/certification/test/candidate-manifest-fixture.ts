@@ -17,7 +17,7 @@ const REQUIRED: readonly (readonly [role: string, path: string, mediaType: strin
   ["api-report", "etc/api/element.api.md", "text/markdown"],
   ["api-report", "etc/api/compiler.api.md", "text/markdown"],
   ["schema", "schemas/candidate-manifest.schema.json", "application/json"],
-  ["fixture", "fixtures/conformance/example.avl", "application/octet-stream"],
+  ["fixture", "fixtures/certification/v1/av1.avl", "application/octet-stream"],
   ["documentation", "docs/quick-start.md", "text/markdown"],
   ["example", "examples/plain-html/package.json", "application/json"],
   ["browser-harness", "certification.html", "text/html"],

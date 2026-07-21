@@ -142,15 +142,6 @@ export function validateRunConfig(value: unknown): CertificationRunConfig {
   });
 }
 
-export async function verifySourceDigest(
-  sourceUrl: string,
-  expectedSha256: string,
-  maximumBytes = 16 * 1024 * 1024
-): Promise<Readonly<{ sha256: string; byteLength: number; matched: boolean }>> {
-  const loaded = await fetchVerifiedSource(sourceUrl, expectedSha256, maximumBytes);
-  return loaded.evidence;
-}
-
 export async function fetchVerifiedSource(
   sourceUrl: string,
   expectedSha256: string,

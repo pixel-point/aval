@@ -367,10 +367,6 @@ function assertCodecString(
   inspectedCodec: string
 ): void {
   if (rendition.codec === inspectedCodec) return;
-  const permitsExtendedForm =
-    (rendition.codec.startsWith("vp09.") || rendition.codec.startsWith("av01.")) &&
-    inspectedCodec.startsWith(`${rendition.codec}.`);
-  if (permitsExtendedForm) return;
   throw new CompilerError(
     "ASSET_INVALID",
     `Rendition ${rendition.id} codec string disagrees with its bitstream`

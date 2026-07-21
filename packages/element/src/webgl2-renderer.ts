@@ -199,13 +199,13 @@ export class WebGl2Renderer implements RendererRuntime {
     }
   }
 
-  public draw(frame: VideoFrame): Promise<void> {
+  public draw(frame: VideoFrame, newDecoderRun: boolean): Promise<void> {
     return this.#operations.enqueue("runtime", async (operationOrdinal) => {
       if (this.#state === "lost") { this.#last = null; throw unavailable(); }
       const slot = this.#nextStream;
       const target = this.#streams[slot];
       if (target === undefined) throw unavailable();
-      await this.#upload(target, frame, operationOrdinal);
+      await this.#upload(target, frame, operationOrdinal, newDecoderRun);
       if (this.#state !== "active") throw unavailable();
       this.#drawTarget(target, "runtime", operationOrdinal);
       this.#last = slot;
@@ -223,7 +223,8 @@ export class WebGl2Renderer implements RendererRuntime {
       if (this.#state === "lost") throw unavailable();
       const materialization = this.#createMaterialization(
         frame,
-        operationOrdinal
+        operationOrdinal,
+        true
       );
       try {
         const source = await this.#materialize(
@@ -246,7 +247,12 @@ export class WebGl2Renderer implements RendererRuntime {
     rethrowInspectionRejection(outcome);
   }
 
-  public store(group: string, index: number, frame: VideoFrame): Promise<void> {
+  public store(
+    group: string,
+    index: number,
+    frame: VideoFrame,
+    newDecoderRun: boolean
+  ): Promise<void> {
     const key = rendererResidentKey(group, index);
     if (this.#resident.has(key) || this.#reserved.has(key)) {
       throw new Error("resident frame already exists");
@@ -258,7 +264,11 @@ export class WebGl2Renderer implements RendererRuntime {
     );
     this.#reserved.add(key);
     return this.#operations.enqueue("runtime", async (operationOrdinal) => {
-      const materialization = this.#createMaterialization(frame, operationOrdinal);
+      const materialization = this.#createMaterialization(
+        frame,
+        operationOrdinal,
+        newDecoderRun
+      );
       try {
         const source = await this.#materialize(materialization, operationOrdinal);
         if (this.#state !== "active") throw unavailable();
@@ -413,9 +423,14 @@ export class WebGl2Renderer implements RendererRuntime {
   async #upload(
     target: RendererBackendTarget,
     frame: VideoFrame,
-    operationOrdinal: number
+    operationOrdinal: number,
+    newDecoderRun: boolean
   ): Promise<void> {
-    const materialization = this.#createMaterialization(frame, operationOrdinal);
+    const materialization = this.#createMaterialization(
+      frame,
+      operationOrdinal,
+      newDecoderRun
+    );
     try {
       await this.#uploadMaterialization(target, materialization, operationOrdinal);
     } finally {
@@ -449,14 +464,15 @@ export class WebGl2Renderer implements RendererRuntime {
 
   #createMaterialization(
     frame: VideoFrame,
-    operationOrdinal: number
+    operationOrdinal: number,
+    newDecoderRun: boolean
   ): Readonly<RgbaMaterialization> {
     let rect: DOMRectReadOnly;
     try { rect = validateRenderFrame(frame, this.#layout); }
     catch (reason) {
       throw this.#failure("semantic-upload", "runtime", operationOrdinal, reason);
     }
-    return this.#materializer.create(frame, rect);
+    return this.#materializer.create(frame, rect, newDecoderRun);
   }
 
   async #materialize(

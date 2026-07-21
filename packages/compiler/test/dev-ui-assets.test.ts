@@ -460,7 +460,7 @@ function build(generation: number): Readonly<Record<string, unknown>> {
     sources: Object.freeze([Object.freeze({
       codec: "h264",
       src: `h264.avl#v=${String(generation)}`,
-      type: 'application/vnd.aval; codecs="avc1.64000A"',
+      type: 'application/vnd.aval; codecs="avc1.42E00A"',
       integrity: "sha256-test",
       bytes: 128,
       sha256: "a".repeat(64)

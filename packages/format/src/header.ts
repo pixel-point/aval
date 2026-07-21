@@ -1,10 +1,10 @@
 import {
   CHUNK_INDEX_HEADER_LENGTH,
   CHUNK_INDEX_RECORD_LENGTH,
-  FORMAT_DEFAULT_BUDGETS,
   FORMAT_HEADER_LENGTH,
   FORMAT_MAGIC,
-  FORMAT_SUPPORTED_VERSIONS,
+  FORMAT_VERSION_MAJOR,
+  FORMAT_VERSION_MINOR,
   resolveFormatBudgets
 } from "./constants.js";
 import {
@@ -53,12 +53,14 @@ function validateHeaderShape(
 ): void {
   const budgets = resolveFormatBudgets(options);
 
-  const version = `${String(header.major)}.${String(header.minor)}`;
-  if (!FORMAT_SUPPORTED_VERSIONS.some((candidate) => candidate === version)) {
+  if (
+    header.major !== FORMAT_VERSION_MAJOR ||
+    header.minor !== FORMAT_VERSION_MINOR
+  ) {
     throw new FormatError(
       "VERSION_UNSUPPORTED",
       `format version ${header.major}.${header.minor} is unsupported`,
-      { offset: header.major !== 1 ? 8 : 10 }
+      { offset: header.major !== FORMAT_VERSION_MAJOR ? 8 : 10 }
     );
   }
   if (header.headerLength !== FORMAT_HEADER_LENGTH) {
@@ -312,7 +314,3 @@ export function encodeHeader(
     throw new FormatError("HEADER_INVALID", "format header could not be encoded");
   }
 }
-
-export const MINIMUM_CANONICAL_FILE_LENGTH =
-  FORMAT_HEADER_LENGTH + CHUNK_INDEX_HEADER_LENGTH;
-export const MAXIMUM_DEFAULT_FILE_LENGTH = FORMAT_DEFAULT_BUDGETS.maxFileBytes;

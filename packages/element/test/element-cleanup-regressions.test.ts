@@ -503,7 +503,7 @@ function createElement(withSource: boolean): Readonly<{
     const source = new FakeElement("source", currentDocument, controls);
     source.parentElement = element;
     source.setAttribute("src", "/motion.avl");
-    source.setAttribute("type", 'application/vnd.aval; codecs="avc1.64001E"');
+    source.setAttribute("type", 'application/vnd.aval; codecs="avc1.42E01E"');
     element.childElements.push(source);
   }
   elements.push(element);
@@ -740,7 +740,7 @@ function playerSnapshot(live: boolean): Readonly<PlayerSnapshot> {
     visualState: "idle",
     transitioning: false,
     selectedRendition: live ? "main" : null,
-    selectedCodec: live ? "avc1.64001E" : null,
+    selectedCodec: live ? "avc1.42E01E" : null,
     rendererBackend: live ? "webgl2" : null,
     selectedBitDepth: live ? 8 : null,
     transportMode: live ? "full" : null,

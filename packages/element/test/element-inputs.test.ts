@@ -35,7 +35,7 @@ describe("element inputs", () => {
         source({ src: "/bad.avl", type: "video/mp4" }),
         source({
           src: "/valid.avl",
-          type: 'application/vnd.aval; codecs="avc1.64001E"'
+          type: 'application/vnd.aval; codecs="avc1.42E01E"'
         }),
         element("div")
       ])
@@ -45,7 +45,7 @@ describe("element inputs", () => {
     expect(read.failures).toEqual([{ sourceIndex: 0, attribute: "type" }]);
     expect(read.sources).toEqual([{
       src: "/valid.avl",
-      codec: "avc1.64001E",
+      codec: "avc1.42E01E",
       integrity: "",
       sourceIndex: 1
     }]);
@@ -59,7 +59,7 @@ describe("element inputs", () => {
       children: collection([
         source({
           src: "/bad\navl",
-          type: 'application/vnd.aval; codecs="avc1.64001E"'
+          type: 'application/vnd.aval; codecs="avc1.42E01E"'
         }),
         source({
           src: "/bad-codec.avl",
@@ -67,7 +67,7 @@ describe("element inputs", () => {
         }),
         source({
           src: "/bad-sri.avl",
-          type: 'application/vnd.aval; codecs="avc1.64001E"',
+          type: 'application/vnd.aval; codecs="avc1.42E01E"',
           integrity: `sha256-${"A".repeat(42)}B=`
         })
       ])
@@ -81,10 +81,11 @@ describe("element inputs", () => {
 
   it("accepts only the supported canonical codec grammar", () => {
     const codecs = [
-      ["avc1.64000A", true], ["avc1.64001E", true], ["avc1.64003E", true],
+      ["avc1.64000A", false], ["avc1.64001E", false], ["avc1.64003E", false],
       ["hvc1.1.2.L1.90", true], ["hvc1.1.6.L93.B0", true],
-      ["hvc1.1.FFFFFFFF.H255.90", true], ["vp09.00.10.08", true],
-      ["vp09.00.62.08.01.01.01.01.00", true], ["av01.0.00M.08", true],
+      ["hvc1.1.FFFFFFFF.H255.90", true], ["vp09.00.10.08", false],
+      ["vp09.00.62.08.01.01.01.01.00", true], ["av01.0.00M.08", false],
+      ["av01.0.00M.08.0.110.01.01.01.0", true],
       ["av01.0.31H.10.0.113.01.01.01.0", true],
       ["avc1.42E00A", true], ["avc1.42E01E", true],
       ["avc1.42E03E", true], ["avc1.42C01E", false],
@@ -117,20 +118,20 @@ describe("element inputs", () => {
   it("preserves duplicate direct sources while ignoring nested and foreign elements", () => {
     const first = source({
       src: "/motion.avl",
-      type: 'application/vnd.aval; codecs="av01.0.08M.10"'
+      type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"'
     });
     const duplicate = source({
       src: "/motion.avl",
-      type: 'application/vnd.aval; codecs="av01.0.08M.10"'
+      type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"'
     });
     const container = element("div");
     source({
       src: "/nested.avl",
-      type: 'application/vnd.aval; codecs="av01.0.08M.10"'
+      type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"'
     }, container as unknown as HTMLElement);
     const foreign = source({
       src: "/foreign.avl",
-      type: 'application/vnd.aval; codecs="av01.0.08M.10"'
+      type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"'
     }, null, "http://www.w3.org/2000/svg");
     const read = readSources({
       children: collection([first, container, duplicate, foreign])
@@ -138,13 +139,13 @@ describe("element inputs", () => {
     expect(read.sources).toEqual([
       {
         src: "/motion.avl",
-        codec: "av01.0.08M.10",
+        codec: "av01.0.08M.10.0.110.01.01.01.0",
         integrity: "",
         sourceIndex: 0
       },
       {
         src: "/motion.avl",
-        codec: "av01.0.08M.10",
+        codec: "av01.0.08M.10.0.110.01.01.01.0",
         integrity: "",
         sourceIndex: 1
       }

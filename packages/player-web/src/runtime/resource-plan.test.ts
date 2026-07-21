@@ -86,7 +86,7 @@ function encodedWindowCatalog(
     }]
   };
   const manifest: CompiledManifest = {
-    formatVersion: "1.0",
+    formatVersion: "1.1",
     generator: "resource-plan-test",
     codec: "vp9",
     bitstream: "frame",
@@ -101,7 +101,7 @@ function encodedWindowCatalog(
     frameRate: { numerator: 30, denominator: 1 },
     renditions: [{
       id: "video",
-      codec: "vp09.00.10.08",
+      codec: "vp09.00.10.08.01.01.01.01.00",
       bitDepth: 8,
       codedWidth: 64,
       codedHeight: 64,

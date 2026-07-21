@@ -16,7 +16,7 @@ describe("RgbaMaterializer", () => {
     });
     const frame = videoFrame(copyTo);
     const materializer = new RgbaMaterializer(2, 1);
-    const operation = materializer.create(frame, visibleRect());
+    const operation = materializer.create(frame, visibleRect(), false);
     expect(copyTo).not.toHaveBeenCalled();
 
     const [first, second] = await Promise.all([
@@ -40,7 +40,7 @@ describe("RgbaMaterializer", () => {
 
     operation.release();
     await expect(operation.rgba()).rejects.toMatchObject({ name: "AbortError" });
-    const next = materializer.create(frame, visibleRect());
+    const next = materializer.create(frame, visibleRect(), false);
     await next.rgba();
     next.release();
     expect(copyTo).toHaveBeenCalledTimes(2);
@@ -49,6 +49,180 @@ describe("RgbaMaterializer", () => {
       maximumFallbackBackingBytes: 8,
       maximumTransientReadbackBytes: 8
     });
+  });
+
+  it("rejects a successful green-corrupt copy in favor of Canvas2D readback", async () => {
+    const copied = [
+      0, 220, 0, 255,
+      0, 180, 0, 255
+    ];
+    const reference = [
+      20, 80, 180, 255,
+      30, 110, 220, 255
+    ];
+    const copyTo = vi.fn(async (destination: AllowSharedBufferSource) => {
+      bytes(destination).set(copied);
+      return [{ offset: 0, stride: 8 }];
+    });
+    const fixture = readbackFixture(2, 1, reference);
+    const materializer = new RgbaMaterializer(2, 1, {
+      createCanvas: fixture.createCanvas
+    });
+
+    const first = materializer.create(videoFrame(copyTo), visibleRect(), true);
+    await expect(first.rgba()).resolves.toMatchObject({
+      pixels: new Uint8Array(reference)
+    });
+    first.release();
+
+    const second = materializer.create(videoFrame(copyTo), visibleRect(), false);
+    await expect(second.rgba()).resolves.toMatchObject({
+      pixels: new Uint8Array(reference)
+    });
+    second.release();
+
+    expect(copyTo).toHaveBeenCalledTimes(1);
+    expect(fixture.context.drawCalls).toHaveLength(2);
+  });
+
+  it("requalifies a green copy when the decoder run changes", async () => {
+    const reference = [
+      20, 80, 180, 255,
+      30, 110, 220, 255
+    ];
+    const green = [
+      0, 220, 0, 255,
+      0, 180, 0, 255
+    ];
+    const copyTo = vi.fn(async (destination: AllowSharedBufferSource) => {
+      bytes(destination).set(green);
+      return [{ offset: 0, stride: 8 }];
+    });
+    const fixture = readbackFixture(2, 1, green);
+    const materializer = new RgbaMaterializer(2, 1, {
+      createCanvas: fixture.createCanvas
+    });
+
+    for (const newDecoderRun of [false, false]) {
+      const operation = materializer.create(
+        videoFrame(copyTo),
+        visibleRect(),
+        newDecoderRun
+      );
+      await expect(operation.rgba()).resolves.toMatchObject({
+        pixels: new Uint8Array(green)
+      });
+      operation.release();
+    }
+    fixture.context.setValues(reference);
+    const restarted = materializer.create(videoFrame(copyTo), visibleRect(), true);
+    await expect(restarted.rgba()).resolves.toMatchObject({
+      pixels: new Uint8Array(reference)
+    });
+    restarted.release();
+
+    expect(copyTo).toHaveBeenCalledTimes(3);
+    expect(fixture.context.drawCalls).toHaveLength(2);
+  });
+
+  it("checks green corruption that begins within one decoder run", async () => {
+    const healthy = [
+      20, 80, 180, 255,
+      30, 110, 220, 255
+    ];
+    const corrupt = [
+      0, 220, 0, 255,
+      0, 180, 0, 255
+    ];
+    const copyTo = vi.fn(async (destination: AllowSharedBufferSource) => {
+      bytes(destination).set(copyTo.mock.calls.length === 1 ? healthy : corrupt);
+      return [{ offset: 0, stride: 8 }];
+    });
+    const fixture = readbackFixture(2, 1, healthy);
+    const materializer = new RgbaMaterializer(2, 1, {
+      createCanvas: fixture.createCanvas
+    });
+
+    for (const _index of [0, 1]) {
+      const operation = materializer.create(
+        videoFrame(copyTo),
+        visibleRect(), false
+      );
+      await expect(operation.rgba()).resolves.toMatchObject({
+        pixels: new Uint8Array(healthy)
+      });
+      operation.release();
+    }
+
+    expect(copyTo).toHaveBeenCalledTimes(2);
+    expect(fixture.context.drawCalls).toHaveLength(1);
+  });
+
+  it("keeps a proven corrupt copy disabled across owner reset", async () => {
+    const copied = [
+      0, 220, 0, 255,
+      0, 180, 0, 255
+    ];
+    const reference = [
+      20, 80, 180, 255,
+      30, 110, 220, 255
+    ];
+    const copyTo = vi.fn(async (destination: AllowSharedBufferSource) => {
+      bytes(destination).set(copied);
+      return [{ offset: 0, stride: 8 }];
+    });
+    const fixture = readbackFixture(2, 1, reference);
+    const materializer = new RgbaMaterializer(2, 1, {
+      createCanvas: fixture.createCanvas
+    });
+
+    const first = materializer.create(videoFrame(copyTo), visibleRect(), true);
+    await first.rgba();
+    first.release();
+    materializer.reset();
+    const second = materializer.create(videoFrame(copyTo), visibleRect(), true);
+    await expect(second.rgba()).resolves.toMatchObject({
+      pixels: new Uint8Array(reference)
+    });
+    second.release();
+
+    expect(copyTo).toHaveBeenCalledTimes(1);
+    expect(fixture.creations).toBe(2);
+    expect(fixture.context.drawCalls).toHaveLength(2);
+  });
+
+  it("periodically rechecks a continuous green sequence within one run", async () => {
+    const reference = [
+      20, 80, 180, 255,
+      30, 110, 220, 255
+    ];
+    const green = [
+      0, 220, 0, 255,
+      0, 180, 0, 255
+    ];
+    const copyTo = vi.fn(async (destination: AllowSharedBufferSource) => {
+      bytes(destination).set(green);
+      return [{ offset: 0, stride: 8 }];
+    });
+    const fixture = readbackFixture(2, 1, green);
+    const materializer = new RgbaMaterializer(2, 1, {
+      createCanvas: fixture.createCanvas
+    });
+
+    const first = materializer.create(videoFrame(copyTo), visibleRect(), false);
+    await first.rgba();
+    first.release();
+    fixture.context.setValues(reference);
+    for (let frameIndex = 1; frameIndex < 8; frameIndex += 1) {
+      const operation = materializer.create(videoFrame(copyTo), visibleRect(), false);
+      const result = await operation.rgba();
+      operation.release();
+      if (frameIndex < 7) expect(result.pixels).toEqual(new Uint8Array(green));
+      else expect(result.pixels).toEqual(new Uint8Array(reference));
+    }
+
+    expect(copyTo).toHaveBeenCalledTimes(8);
+    expect(fixture.context.drawCalls).toHaveLength(2);
   });
 
   it("rejects a second deferred frame before reverse settlement can corrupt RGBA", async () => {
@@ -64,12 +238,12 @@ describe("RgbaMaterializer", () => {
       return secondCopy.promise;
     });
     const materializer = new RgbaMaterializer(2, 1);
-    const first = materializer.create(videoFrame(firstCopyTo), visibleRect());
+    const first = materializer.create(videoFrame(firstCopyTo), visibleRect(), false);
     const firstRgba = first.rgba();
     expect(first.rgba()).toBe(firstRgba);
     const overlapping = materializer.create(
       videoFrame(secondCopyTo),
-      visibleRect()
+      visibleRect(), false
     );
     const rejected = overlapping.rgba();
     expect(overlapping.rgba()).toBe(rejected);
@@ -91,7 +265,7 @@ describe("RgbaMaterializer", () => {
     first.release();
     overlapping.release();
 
-    const next = materializer.create(videoFrame(secondCopyTo), visibleRect());
+    const next = materializer.create(videoFrame(secondCopyTo), visibleRect(), false);
     await expect(next.rgba()).resolves.toMatchObject({
       pixels: new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2])
     });
@@ -119,7 +293,7 @@ describe("RgbaMaterializer", () => {
       createCanvas: fixture.createCanvas
     });
 
-    const operation = materializer.create(frame, visibleRect());
+    const operation = materializer.create(frame, visibleRect(), false);
     const result = await operation.rgba();
     operation.release();
 
@@ -139,7 +313,7 @@ describe("RgbaMaterializer", () => {
       sourceCopiesInFlight: 0,
       resourceCount: 1
     });
-    const next = materializer.create(frame, visibleRect());
+    const next = materializer.create(frame, visibleRect(), false);
     await next.rgba();
     next.release();
     expect(fixture.creations).toBe(1);
@@ -170,7 +344,7 @@ describe("RgbaMaterializer", () => {
       createCanvas: fixture.createCanvas
     });
 
-    await expect(materializer.create(videoFrame(copyTo), visibleRect()).rgba())
+    await expect(materializer.create(videoFrame(copyTo), visibleRect(), false).rgba())
       .rejects.toBeInstanceOf(MaterializerFailureError);
     expect(fixture.creations).toBe(0);
   });
@@ -191,7 +365,7 @@ describe("RgbaMaterializer", () => {
         abandonedDestination = bytes(destination);
         return pending.promise;
       }),
-      visibleRect()
+      visibleRect(), false
     );
     const rgba = operation.rgba();
     await Promise.resolve();
@@ -212,7 +386,7 @@ describe("RgbaMaterializer", () => {
     });
     const overlapping = materializer.create(
       videoFrame(nextCopyTo),
-      visibleRect()
+      visibleRect(), false
     );
     const overlappingRgba = overlapping.rgba();
     expect(overlapping.rgba()).toBe(overlappingRgba);
@@ -229,7 +403,7 @@ describe("RgbaMaterializer", () => {
     expect(materializer.snapshot().sourceCopiesInFlight).toBe(1);
     pending.resolve([{ offset: 0, stride: 8 }]);
     await eventually(() => materializer.snapshot().sourceCopiesInFlight === 0);
-    const next = materializer.create(videoFrame(nextCopyTo), visibleRect());
+    const next = materializer.create(videoFrame(nextCopyTo), visibleRect(), false);
     await expect(next.rgba()).resolves.toMatchObject({
       pixels: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
     });
@@ -246,7 +420,7 @@ describe("RgbaMaterializer", () => {
     });
     const operation = materializer.create(
       videoFrame(async () => { throw copyError; }),
-      visibleRect()
+      visibleRect(), false
     );
 
     const first = operation.rgba();
@@ -260,6 +434,29 @@ describe("RgbaMaterializer", () => {
     expect(fixture.context.readCalls).toHaveLength(1);
   });
 
+  it("rejects suspicious green copy output when qualification readback fails", async () => {
+    const readbackError = new DOMException("canvas is tainted", "SecurityError");
+    const fixture = readbackFixture(2, 1, new Array(8).fill(0));
+    fixture.context.readError = readbackError;
+    const materializer = new RgbaMaterializer(2, 1, {
+      createCanvas: fixture.createCanvas
+    });
+    const operation = materializer.create(videoFrame(async (destination) => {
+      bytes(destination).set([
+        0, 220, 0, 255,
+        0, 180, 0, 255
+      ]);
+      return [{ offset: 0, stride: 8 }];
+    }), visibleRect(), false);
+
+    await expect(operation.rgba()).rejects.toMatchObject({
+      name: "MaterializerFailureError",
+      stage: "readback",
+      reason: readbackError
+    });
+    expect(fixture.context.readCalls).toHaveLength(1);
+  });
+
   it("invalidates a pending operation on owner reset without falling back", async () => {
     const pending = deferred<readonly PlaneLayout[]>();
     const fixture = readbackFixture(2, 1, new Array(8).fill(0));
@@ -268,7 +465,7 @@ describe("RgbaMaterializer", () => {
     });
     const rgba = materializer.create(
       videoFrame(() => pending.promise),
-      visibleRect()
+      visibleRect(), false
     ).rgba();
     await Promise.resolve();
 
@@ -285,7 +482,7 @@ describe("RgbaMaterializer", () => {
     const materializer = new RgbaMaterializer(2, 1);
     const rgba = materializer.create(
       videoFrame(() => pending.promise),
-      visibleRect()
+      visibleRect(), false
     ).rgba();
     await Promise.resolve();
     expect(materializer.snapshot().sourceCopiesInFlight).toBe(1);
@@ -307,7 +504,7 @@ describe("RgbaMaterializer", () => {
     const copyTo = vi.fn(async () => [{ offset: 0, stride: 8 }]);
     const materializer = new RgbaMaterializer(2, 1);
     materializer.dispose();
-    const operation = materializer.create(videoFrame(copyTo), visibleRect());
+    const operation = materializer.create(videoFrame(copyTo), visibleRect(), false);
 
     await expect(operation.rgba()).rejects.toMatchObject({ name: "AbortError" });
     expect(copyTo).not.toHaveBeenCalled();
@@ -378,7 +575,7 @@ function readbackFixture(
 class TestContext {
   readonly #width: number;
   readonly #height: number;
-  readonly #values: readonly number[];
+  #values: readonly number[];
   public globalCompositeOperation = "source-over";
   public imageSmoothingEnabled = false;
   public imageSmoothingQuality: ImageSmoothingQuality = "high";
@@ -397,6 +594,7 @@ class TestContext {
   }
 
   public clearRect(): void {}
+  public setValues(values: readonly number[]): void { this.#values = values; }
   public drawImage(...args: unknown[]): void { this.drawCalls.push(args); }
   public getImageData(...args: number[]): ImageData {
     this.readCalls.push(args);

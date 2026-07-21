@@ -4,6 +4,10 @@ import { readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { loadCandidateFixtureAuthority } from "./candidate-fixtures.mjs";
 import { displayQualificationPolicy } from "./display-qualification.mjs";
+import {
+  deriveNamedProfileMatrixPolicy,
+  resolveBrowserCertificationPolicyPath
+} from "./named-profile-policy.mjs";
 
 const args = parse(process.argv.slice(2));
 const reportsRoot = resolve(required(args, "reports"));
@@ -15,15 +19,32 @@ const policy = parseJson(
   await stableRead("config/release/release-policy.json", 1024 * 1024, "release policy"),
   "release policy"
 );
+const candidatePath = args.candidate === undefined
+  ? undefined : resolve(args.candidate);
+const browserPolicyPath = resolveBrowserCertificationPolicyPath(
+  policy.namedProfiles,
+  { candidateManifestPath: candidatePath, repositoryRoot: process.cwd() }
+);
+const namedProfilePolicy = deriveNamedProfileMatrixPolicy(
+  policy.namedProfiles,
+  parseJson(
+    await stableRead(
+      browserPolicyPath,
+      policy.limits.maximumReportBytes,
+      "browser certification policy"
+    ),
+    "browser certification policy"
+  )
+);
 let candidate = null;
 let candidateDigest = null;
 let fixtureAuthority = Object.freeze({ digests: new Set(), models: new Map(), displayPatterns: new Map(), fatalBoundaryFixtureDigests: new Set(), harnessDigests: new Set() });
 if (args.candidate !== undefined) {
-  const candidateBytes = await stableRead(resolve(args.candidate), policy.limits.maximumReportBytes, "candidate manifest");
+  const candidateBytes = await stableRead(candidatePath, policy.limits.maximumReportBytes, "candidate manifest");
   candidate = certification.validateCandidateManifest(parseJson(candidateBytes, "candidate manifest"));
   if (Buffer.compare(candidateBytes, certification.canonicalJsonBytes(candidate)) !== 0) throw new Error("candidate manifest is not canonical JSON");
   candidateDigest = createHash("sha256").update(candidateBytes).digest("hex");
-  fixtureAuthority = await loadCandidateFixtureAuthority(candidate, resolve(args.candidate), certification, { maximumArtifactBytes: policy.limits.maximumAttachmentBytes });
+  fixtureAuthority = await loadCandidateFixtureAuthority(candidate, candidatePath, certification, { maximumArtifactBytes: policy.limits.maximumAttachmentBytes });
 }
 const profiles = [];
 const reportReferences = [];
@@ -134,7 +155,7 @@ const matrix = certification.evaluateNamedProfileMatrix(profiles.map((profile) =
   animationSupported: profile.animated,
   runtimeScheduling: profile.runtimeScheduling,
   fatalErrorBoundary: profile.fatalErrorBoundary
-})), policy.namedProfiles);
+})), namedProfilePolicy);
 let reviews = [];
 let reviewRecord = null;
 try {
@@ -176,7 +197,7 @@ const index = {
   reviewRecord,
   reviews
 };
-const validatedIndex = certification.validateReportIndex(index, policy.namedProfiles);
+const validatedIndex = certification.validateReportIndex(index, namedProfilePolicy);
 await writeFile(outputJson, certification.canonicalJsonBytes(validatedIndex), { flag: "wx" });
 await writeFile(outputMarkdown, render(validatedIndex), { flag: "wx" });
 process.stdout.write(`${JSON.stringify({ status: "passed", releaseStatus: validatedIndex.releaseStatus, profiles: profiles.length })}\n`);

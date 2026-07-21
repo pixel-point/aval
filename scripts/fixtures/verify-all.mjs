@@ -1,53 +1,31 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CERTIFICATION_FIXTURE_DIRECTORY } from "../certification/certification-fixture-authority.mjs";
 import { discoverProvenanceFiles, verifyProvenanceFile } from "./verify-provenance.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const codecs = Object.freeze(["av1", "vp9", "h265", "h264"]);
 const generatorChecks = Object.freeze([
-  "fixtures/certification/v1/update-fixture.mjs",
-  "fixtures/compiler/v1/update-provenance.mjs",
-  "fixtures/conformance/v1/update-provenance.mjs"
+  `${CERTIFICATION_FIXTURE_DIRECTORY}/update-fixture.mjs`,
+  "fixtures/compiler/v1/update-provenance.mjs"
 ]);
-const bundleChecks = Object.freeze([
-  Object.freeze({
-    directory: "fixtures/conformance/v1",
-    expectedEntries: Object.freeze([
-      "README.md",
-      "av1.avl",
-      "build.json",
-      "h264.avl",
-      "h265.avl",
-      "provenance.json",
-      "update-provenance.mjs",
-      "vp9.avl"
-    ]),
-    formatVersion: "1.0",
-    outputQualified: false,
-    consumerDirectory: null
-  }),
-  Object.freeze({
-    directory: "fixtures/certification/v1",
-    expectedEntries: Object.freeze([
-      "README.md",
-      "av1.avl",
-      "build.json",
-      "h264.avl",
-      "h265.avl",
-      "provenance.json",
-      "update-fixture.mjs",
-      "vp9.avl"
-    ]),
-    formatVersion: "1.1",
-    outputQualified: true,
-    consumerDirectory: "examples/end-user-playground/public/favorite"
-  })
+const certificationFixtureEntries = Object.freeze([
+  "README.md",
+  "av1.avl",
+  "build.json",
+  "h264.avl",
+  "h265.avl",
+  "provenance.json",
+  "update-fixture.mjs",
+  "vp9.avl"
 ]);
+const certificationConsumerDirectory =
+  "examples/end-user-playground/public/favorite";
 
 async function main() {
   await requireCleanV1FixtureLayout();
@@ -57,16 +35,12 @@ async function main() {
   }
   for (const script of generatorChecks) runGeneratorCheck(script);
   const formatModule = await import(join(root, "packages/format/dist/index.js"));
-  const [bundle, certificationBundle] = await Promise.all(
-    bundleChecks.map((check) => verifyBundle(formatModule, check))
-  );
+  const certificationBundle = await verifyCertificationBundle(formatModule);
   const starter = await verifyStarter();
   process.stdout.write(`${JSON.stringify({
     status: "passed",
     provenance,
-    completeAssets: [...bundle.assets, ...certificationBundle.assets]
-      .map(({ path }) => path),
-    bundle,
+    completeAssets: certificationBundle.assets.map(({ path }) => path),
     certificationBundle,
     starter,
     generatorChecks
@@ -74,7 +48,8 @@ async function main() {
 }
 
 async function requireCleanV1FixtureLayout() {
-  for (const kind of ["certification", "compiler", "conformance", "starter"]) {
+  await requireAbsent("fixtures/conformance");
+  for (const kind of ["certification", "compiler", "starter"]) {
     const entries = (await readdir(join(root, "fixtures", kind), { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
@@ -84,6 +59,16 @@ async function requireCleanV1FixtureLayout() {
       throw new Error(`fixtures/${kind} must contain only ${expected.join(", ")}`);
     }
   }
+}
+
+async function requireAbsent(path) {
+  try {
+    await lstat(join(root, path));
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(`${path} must be absent`);
 }
 
 function runGeneratorCheck(script) {
@@ -98,14 +83,16 @@ function runGeneratorCheck(script) {
   }
 }
 
-async function verifyBundle(formatModule, contract) {
-  const directory = join(root, contract.directory);
+async function verifyCertificationBundle(formatModule) {
+  const directory = join(root, CERTIFICATION_FIXTURE_DIRECTORY);
   const entries = (await readdir(directory)).sort();
-  const expectedEntries = [...contract.expectedEntries].sort();
+  const expectedEntries = [...certificationFixtureEntries].sort();
   if (JSON.stringify(entries) !== JSON.stringify(expectedEntries)) {
-    throw new Error(`${contract.directory} contains an unexpected file set`);
+    throw new Error(
+      `${CERTIFICATION_FIXTURE_DIRECTORY} contains an unexpected file set`
+    );
   }
-  const buildReportPath = `${contract.directory}/build.json`;
+  const buildReportPath = `${CERTIFICATION_FIXTURE_DIRECTORY}/build.json`;
   const buildReportBytes = await readFile(join(root, buildReportPath));
   const report = JSON.parse(buildReportBytes.toString("utf8"));
   if (report.reportVersion !== "1.0") throw new Error("build report is not version 1.0");
@@ -118,7 +105,7 @@ async function verifyBundle(formatModule, contract) {
   const assets = [];
   for (const [index, codec] of codecs.entries()) {
     const fact = report.assets[index];
-    const path = `${contract.directory}/${codec}.avl`;
+    const path = `${CERTIFICATION_FIXTURE_DIRECTORY}/${codec}.avl`;
     if (fact?.path !== `${codec}.avl`) throw new Error(`${codec} report path drifted`);
     const bytes = new Uint8Array(await readFile(resolve(root, path)));
     const digest = createHash("sha256").update(bytes).digest("hex");
@@ -131,26 +118,27 @@ async function verifyBundle(formatModule, contract) {
     }
     const validated = formatModule.validateCompleteAsset({ bytes });
     const manifest = validated.frontIndex.manifest;
-    if (manifest.formatVersion !== contract.formatVersion || manifest.codec !== codec) {
+    if (manifest.formatVersion !== "1.1" || manifest.codec !== codec) {
       throw new Error(
-        `${codec} asset is not a codec-matched wire-${contract.formatVersion} asset`
+        `${codec} asset is not a codec-matched wire-1.1 asset`
       );
     }
     if (manifest.units.length !== 3 || manifest.states.length !== 2) {
       throw new Error(`${codec} asset graph drifted`);
     }
-    if (contract.outputQualified && (
+    if (
       manifest.layout !== "packed-alpha" ||
       manifest.renditions.length < 1 ||
       manifest.renditions.some(({ outputQualification }) =>
         outputQualification === undefined
       )
-    )) {
+    ) {
       throw new Error(`${codec} certification asset is not output-qualified`);
     }
-    if (contract.consumerDirectory !== null) {
-      await requireByteEqual(path, `${contract.consumerDirectory}/${codec}.avl`);
-    }
+    await requireByteEqual(
+      path,
+      `${certificationConsumerDirectory}/${codec}.avl`
+    );
     assets.push({
       codec,
       path,
@@ -164,19 +152,15 @@ async function verifyBundle(formatModule, contract) {
     `<source src="${asset.path}" type='${asset.type}' integrity="${asset.integrity}">`
   ).join("\n");
   if (report.sourceMarkup !== markup) throw new Error("ordered source markup drifted");
-  if (contract.consumerDirectory !== null) {
-    await requireByteEqual(
-      buildReportPath,
-      `${contract.consumerDirectory}/build.json`
-    );
-  }
+  await requireByteEqual(
+    buildReportPath,
+    `${certificationConsumerDirectory}/build.json`
+  );
   return {
     report: buildReportPath,
-    formatVersion: contract.formatVersion,
+    formatVersion: "1.1",
     assets,
-    ...(contract.consumerDirectory === null
-      ? {}
-      : { byteIdenticalConsumer: contract.consumerDirectory })
+    byteIdenticalConsumer: certificationConsumerDirectory
   };
 }
 

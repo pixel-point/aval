@@ -94,9 +94,8 @@ const BUNDLE_CONTRACTS = Object.freeze([
  * generated page markup, authored state graph, and wire/output profile.
  *
  * The end-user Playground consumes the canonical wire-1.1 packed-alpha
- * certification bundle byte-for-byte. `fixtures/conformance/v1` remains the
- * independent frozen wire-1.0 compatibility authority used only to verify the
- * typed unsupported-profile boundary.
+ * certification bundle byte-for-byte. It is the sole current fixture
+ * authority.
  */
 export async function validateExampleAssets({
   repositoryRoot = DEFAULT_REPOSITORY_ROOT

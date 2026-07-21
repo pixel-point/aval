@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { parseVideoCodecString } from "@pixel-point/aval-format";
 
 import { analyzePngWitness, isMeaningfulPixelWitness } from "./brave/run-matrix.mjs";
 import { assertCertificationPolicyIntegrity } from "./brave/resolve-builds.mjs";
@@ -38,10 +39,16 @@ const LANE_COUNTER_KEYS = Object.freeze([
   "nativeDecoderClosesByLane"
 ]);
 
+function codecFamily(value) {
+  return typeof value === "string"
+    ? parseVideoCodecString(value)?.family ?? null
+    : null;
+}
+
 export async function validateEvidenceRun({
   repoRoot,
   runRoot,
-  policyPath = "scripts/browser-compatibility/certification-policy.json",
+  policyPath = "config/release/browser-certification-policy.json",
   createAttestation = createSourceTreeAttestation,
   servedFiles
 }) {
@@ -62,7 +69,7 @@ export async function validateEvidenceRun({
       absoluteRepoRoot,
       resolveContained(
         absoluteRepoRoot,
-        "scripts/browser-compatibility/certification-policy.schema.json"
+        "config/release/browser-certification-policy.schema.json"
       ),
       "evidence-policy-schema-read-failed"
     ),
@@ -118,7 +125,7 @@ export async function validateEvidenceRun({
       if (evidenceCase.expectedOutcome !== expectedOutcome) {
         fail("evidence-case-outcome-mismatch", evidenceCase.id);
       }
-      const expectedCodecs = expectedCodecsForCase(policy, demo, evidenceCase);
+      const expectedCodecs = expectedCodecsForCase(policy, evidenceCase);
       if (!sameArray(evidenceCase.expectedAuthoredCodecs, expectedCodecs)) {
         fail("evidence-authored-codecs-mismatch", evidenceCase.id);
       }
@@ -316,14 +323,10 @@ export function assertSessionMatchesPolicy(session, manifest, policySlot) {
   }
 }
 
-export function expectedCodecsForCase(policy, demo, evidenceCase) {
-  if (demo.sourceContract === "h264-only") return Object.freeze(["h264"]);
-  if (demo.sourceContract === "multi-source") {
-    return Object.freeze([
-      ...policy.requirements.authoredCodecsByMode[evidenceCase.mode]
-    ]);
-  }
-  fail("evidence-demo-source-contract-invalid", demo.id);
+export function expectedCodecsForCase(policy, evidenceCase) {
+  return Object.freeze([
+    ...policy.requirements.authoredCodecsByMode[evidenceCase.mode]
+  ]);
 }
 
 async function readAndValidateCheckpoint({
@@ -1005,15 +1008,6 @@ function assertContained(root, path, code) {
   if (relation === ".." || relation.startsWith(`..${sep}`) || isAbsolute(relation)) {
     fail(code, path);
   }
-}
-
-function codecFamily(value) {
-  if (typeof value !== "string") return null;
-  if (/^av01(?:\.|$)/iu.test(value)) return "av1";
-  if (/^vp09(?:\.|$)/iu.test(value)) return "vp9";
-  if (/^(?:hvc1|hev1)(?:\.|$)/iu.test(value)) return "h265";
-  if (/^(?:avc1|avc3)(?:\.|$)/iu.test(value)) return "h264";
-  return null;
 }
 
 function assertUnique(values, code) {

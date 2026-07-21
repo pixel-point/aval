@@ -10,7 +10,7 @@ import {
   type AnnexBNalUnit
 } from "./annex-b.js";
 import { RbspBitReader } from "./bit-reader.js";
-import { h264CodecForProfileLevel, h264LevelLimits } from "./codec.js";
+import { h264CodecForLevel, h264LevelLimits } from "./codec.js";
 import { h264Invalid, requireH264 } from "./failure.js";
 import {
   parsePps,
@@ -61,17 +61,28 @@ interface H264AccessUnitStateResult {
   readonly parameterSets: H264ParameterSetState;
 }
 
+interface H264RenditionInspectionWithParameterSetIdentity {
+  readonly inspection: H264RenditionInspection;
+  readonly parameterSetIdentity: readonly [sps: string, pps: string];
+}
+
 /**
  * Inspects every access unit in an independently decodable rendition.
  *
  * This is intentionally a syntax/dependency verifier, not a decoder. It
- * accepts the production Constrained Baseline subset and the legacy
- * High-profile subset, and returns a
+ * accepts the production Constrained Baseline subset and returns a
  * deeply immutable scalar summary; no caller-owned byte views escape.
  */
 export function inspectH264AnnexBRendition(
   input: H264RenditionInspectionInput
 ): H264RenditionInspection {
+  return inspectH264AnnexBRenditionWithParameterSetIdentity(input).inspection;
+}
+
+/** Internal continuity view over the exact signatures already parsed by inspection. */
+export function inspectH264AnnexBRenditionWithParameterSetIdentity(
+  input: H264RenditionInspectionInput
+): Readonly<H264RenditionInspectionWithParameterSetIdentity> {
   return inspectRendition(input, "strict");
 }
 
@@ -79,13 +90,13 @@ export function inspectH264AnnexBRendition(
 export function inspectH264AnnexBEncoderCandidateRendition(
   input: H264RenditionInspectionInput
 ): H264RenditionInspection {
-  return inspectRendition(input, "encoder-candidate");
+  return inspectRendition(input, "encoder-candidate").inspection;
 }
 
 function inspectRendition(
   input: H264RenditionInspectionInput,
   compatibilityPolicy: H264SpsCompatibilityPolicy
-): H264RenditionInspection {
+): Readonly<H264RenditionInspectionWithParameterSetIdentity> {
   try {
     const profile = cloneH264Profile(input?.profile);
     requireH264(Array.isArray(input?.units), "units", "units must be an array");
@@ -131,7 +142,7 @@ function inspectRendition(
 
       const orderState = createH264PictureOrderState();
       const drafts: H264AccessUnitDraft[] = [];
-      const decodedPictureOrderCounts = new Set<number>();
+      let previousPictureOrderCount: number | undefined;
       let activeParameterSets = stableParameterSets;
 
       for (
@@ -163,30 +174,22 @@ function inspectRendition(
           );
         }
         requireH264(
-          !decodedPictureOrderCounts.has(result.summary.pictureOrderCount),
+          previousPictureOrderCount === undefined ||
+            result.summary.pictureOrderCount > previousPictureOrderCount,
           accessUnitPath,
-          "unit contains duplicate picture-order counts"
+          "picture-order counts must increase with decode order"
         );
-        decodedPictureOrderCounts.add(result.summary.pictureOrderCount);
+        previousPictureOrderCount = result.summary.pictureOrderCount;
         drafts.push(result.summary);
       }
 
-      const parameterSets = activeParameterSets;
-      if (parameterSets === undefined) {
-        h264Invalid(unitPath, "unit has no parameter sets");
-      }
-      const decodeToPresentation = deriveH264PresentationOrder(
-        drafts,
-        parameterSets.sps.maxNumReorderFrames,
-        `${unitPath}.accessUnits`
+      const decodeToPresentation = Object.freeze(
+        drafts.map((_draft, decodeIndex) => decodeIndex)
       );
-      const accessUnits = Object.freeze(drafts.map((draft) => {
-        const presentationIndex = decodeToPresentation[draft.decodeIndex];
-        if (presentationIndex === undefined) {
-          h264Invalid(unitPath, "presentation order is incomplete");
-        }
-        return Object.freeze({ ...draft, presentationIndex });
-      }));
+      const accessUnits = Object.freeze(drafts.map((draft) => Object.freeze({
+        ...draft,
+        presentationIndex: draft.decodeIndex
+      })));
       units.push(Object.freeze({
         id: unit.id,
         accessUnits,
@@ -198,10 +201,17 @@ function inspectRendition(
       h264Invalid("units", "no H264 parameter sets were found");
     }
     const parameterSet = createH264ParameterSetSummary(stableParameterSets.sps);
-    return Object.freeze({
+    const inspection = Object.freeze({
       parameterSet,
       macroblocksPerFrame,
       units: Object.freeze(units)
+    });
+    return Object.freeze({
+      inspection,
+      parameterSetIdentity: Object.freeze([
+        stableParameterSets.sps.payloadSignature,
+        stableParameterSets.pps.payloadSignature
+      ] as const)
     });
   } catch (error) {
     if (isFormatError(error)) {
@@ -337,7 +347,7 @@ function inspectH264AccessUnitStatefully(
   const nalTypes = Object.freeze(nals.map((nal) => nal.type));
   let parsedSps: ParsedSps | undefined;
   let parsedPps: ParsedPps | undefined;
-  let audPrimaryPicType: number | undefined;
+  let audPrimaryPicType: 0 | 1 | undefined;
   const vcl: AnnexBNalUnit[] = [];
   let reachedVcl = false;
 
@@ -373,7 +383,7 @@ function inspectH264AccessUnitStatefully(
           "PPS must appear once after SPS and before VCL",
           nal.offset
         );
-        parsedPps = parsePps(nal, nalPath, parsedSps);
+        parsedPps = parsePps(nal, nalPath);
         requireH264(
           parsedPps.spsId === parsedSps.id,
           nalPath,
@@ -513,7 +523,7 @@ function validateCanonicalH264Subset(
   decodeIndex: number,
   summary: H264AccessUnitDraft,
   parameterSets: H264ParameterSetState,
-  audPrimaryPicType: number | undefined,
+  audPrimaryPicType: 0 | 1 | undefined,
   path: string
 ): void {
   const first = decodeIndex === 0;
@@ -536,49 +546,22 @@ function validateCanonicalH264Subset(
   requireH264(
     first
       ? summary.idr && summary.sliceType === "I" && summary.key
-      : !summary.idr &&
-        (summary.sliceType === "P" || summary.sliceType === "B") &&
-        !summary.key,
+      : !summary.idr && summary.sliceType === "P" && !summary.key,
     path,
-    "unit pictures must be one decode-zero IDR I followed by non-IDR P/B pictures"
+    "unit pictures must be one decode-zero IDR I followed by non-IDR P pictures"
   );
-  const expectedAudPrimaryPicType = summary.sliceType === "I"
-    ? 0
-    : summary.sliceType === "P"
-      ? 1
-      : 2;
+  const expectedAudPrimaryPicType = summary.sliceType === "I" ? 0 : 1;
   requireH264(
     audPrimaryPicType === expectedAudPrimaryPicType,
     `${path}.nals[0]`,
     "AUD primary_pic_type does not match the coded picture"
   );
   const { sps } = parameterSets;
-  if (sps.profile === "constrained-baseline") {
-    const { pps } = parameterSets;
-    requireH264(
-      sps.maxNumRefFrames === 1 &&
-        sps.maxNumReorderFrames === 0 &&
-        pps.numRefIdxL0DefaultActiveMinus1 === 0 &&
-        pps.numRefIdxL1DefaultActiveMinus1 === 0,
-      path,
-      "Constrained Baseline requires one reference and no reordering"
-    );
-    requireH264(
-      !pps.entropyCoding &&
-        !pps.weightedPrediction &&
-        pps.weightedBipredIdc === 0 &&
-        !pps.transform8x8Mode,
-      path,
-      "Constrained Baseline forbids CABAC, weighted prediction, and 8x8 transform"
-    );
-    requireH264(
-      first
-        ? summary.sliceType === "I"
-        : summary.sliceType === "P",
-      path,
-      "Constrained Baseline units must contain one IDR I followed by P pictures"
-    );
-  }
+  requireH264(
+    sps.maxNumRefFrames === 1 && sps.maxNumReorderFrames === 0,
+    path,
+    "Constrained Baseline requires one reference and no reordering"
+  );
   requireH264(
     sps.squareSampleAspect,
     `${path}.sps`,
@@ -596,13 +579,13 @@ function validateCanonicalH264Subset(
   );
 }
 
-function parseAud(nal: AnnexBNalUnit, path: string): number {
+function parseAud(nal: AnnexBNalUnit, path: string): 0 | 1 {
   const reader = new RbspBitReader(nal.rbsp, path, nal.offset + 1);
   const primaryPicType = reader.readBits(3, "primary_pic_type");
   requireH264(
-    primaryPicType === 0 || primaryPicType === 1 || primaryPicType === 2,
+    primaryPicType === 0 || primaryPicType === 1,
     path,
-    "AUD announces SP or SI picture types",
+    "AUD primary_pic_type must identify only I or P pictures",
     nal.offset + 1
   );
   reader.readTrailingBits();
@@ -791,8 +774,7 @@ function calculatePictureOrderCount(
       expected += syntax.offsetForNonRefPic;
     }
     const top = expected + picture.deltaPicOrderCnt0;
-    const bottom =
-      top + syntax.offsetForTopToBottomField + picture.deltaPicOrderCnt1;
+    const bottom = top + syntax.offsetForTopToBottomField;
     return Math.min(top, bottom);
   }
 
@@ -818,77 +800,20 @@ function calculatePictureOrderCount(
     }
   }
   const top = msb + lsb;
-  const bottom = top + picture.deltaPicOrderCntBottom;
   if (picture.referenceIdc !== 0) {
     state.previousPocMsb = msb;
     state.previousPocLsb = lsb;
   }
-  return Math.min(top, bottom);
-}
-
-function deriveH264PresentationOrder(
-  pictures: readonly H264AccessUnitDraft[],
-  maximumReorderFrames: number,
-  path: string
-): readonly number[] {
-  requireH264(pictures.length > 0, path, "unit contains no decoded pictures");
-  const sorted = [...pictures].sort(
-    (left, right) => left.pictureOrderCount - right.pictureOrderCount
-  );
-  requireH264(
-    sorted[0]?.decodeIndex === 0 && sorted[0]?.pictureOrderCount === 0,
-    path,
-    "the unit IDR must be the first presentation picture"
-  );
-  const decodeToPresentation = new Array<number>(pictures.length);
-  let previousPictureOrderCount: number | undefined;
-  for (
-    let presentationIndex = 0;
-    presentationIndex < sorted.length;
-    presentationIndex += 1
-  ) {
-    const picture = sorted[presentationIndex];
-    requireH264(picture !== undefined, path, "presentation picture is missing");
-    requireH264(
-      previousPictureOrderCount === undefined ||
-        picture.pictureOrderCount > previousPictureOrderCount,
-      path,
-      "unit picture-order counts must be unique"
-    );
-    requireH264(
-      picture.decodeIndex >= 0 &&
-        picture.decodeIndex < pictures.length &&
-        decodeToPresentation[picture.decodeIndex] === undefined,
-      path,
-      "unit decode index is duplicated or out of range"
-    );
-    decodeToPresentation[picture.decodeIndex] = presentationIndex;
-    previousPictureOrderCount = picture.pictureOrderCount;
-  }
-  let requiredReorderFrames = 0;
-  for (let decodeIndex = 0; decodeIndex < decodeToPresentation.length; decodeIndex += 1) {
-    const presentationIndex = decodeToPresentation[decodeIndex];
-    requireH264(presentationIndex !== undefined, path, "decode order has a gap");
-    requiredReorderFrames = Math.max(
-      requiredReorderFrames,
-      decodeIndex - presentationIndex
-    );
-  }
-  requireH264(
-    requiredReorderFrames <= maximumReorderFrames,
-    path,
-    "derived presentation reordering exceeds the SPS declaration"
-  );
-  return Object.freeze(decodeToPresentation);
+  return top;
 }
 
 export function createH264ParameterSetSummary(
   sps: ParsedSps
 ): H264ParameterSetSummary {
   return Object.freeze({
-    profile: sps.profile,
+    profile: "constrained-baseline",
     profileIdc: sps.profileIdc,
-    codec: h264CodecForProfileLevel(sps.profile, sps.levelIdc),
+    codec: h264CodecForLevel(sps.levelIdc),
     levelIdc: sps.levelIdc,
     codedWidth: sps.codedWidth,
     codedHeight: sps.codedHeight,

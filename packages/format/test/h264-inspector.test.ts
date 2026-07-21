@@ -13,18 +13,19 @@ import {
   validInspectionInput
 } from "./h264-fixture.js";
 
-describe("H264 profile-aware inspection", () => {
+describe("H264 Constrained Baseline inspection", () => {
   it("returns canonical decoder facts for independently decodable units", () => {
     const inspection = inspectH264AnnexBRendition(validInspectionInput());
 
     expect(inspection.parameterSet).toMatchObject({
-      profileIdc: 100,
-      codec: "avc1.640020",
+      profile: "constrained-baseline",
+      profileIdc: 66,
+      codec: "avc1.42E020",
       bitDepth: 8,
       chromaFormat: "4:2:0",
-      maxNumRefFrames: 4,
-      maxNumReorderFrames: 2,
-      maxDecFrameBuffering: 4
+      maxNumRefFrames: 1,
+      maxNumReorderFrames: 0,
+      maxDecFrameBuffering: 1
     });
     expect(inspection.units.map((unit) => unit.decodeToPresentation))
       .toEqual([[0, 1], [0, 1]]);
@@ -70,56 +71,42 @@ describe("H264 profile-aware inspection", () => {
     ["8x8 transform extension", () => baselineInput({
       pps: { transform8x8: true }
     })],
-    ["B-pictures", baselineBPictureInput],
-    ["non-identity presentation order", nonIdentityBaselineInput]
+    ["B-pictures", baselineBPictureInput]
   ] as const)("rejects Constrained Baseline %s", (_name, input) => {
     expectProfileError(() => inspectH264AnnexBRendition(input()));
   });
 
-  it("derives a bounded decode-to-presentation map for reference and non-reference B pictures", () => {
-    const inspection = inspectH264AnnexBRendition(reorderedInput(2));
-    const unit = inspection.units[0];
+  it("rejects an AUD that admits B pictures", () => {
+    const input = baselineInput();
+    input.units[0]!.accessUnits[1] = makeAccessUnit({
+      idr: false,
+      frameNum: 1,
+      picOrderCntLsb: 2,
+      aud: makeAud(2),
+      entropyCoding: false
+    });
 
-    expect(unit?.decodeToPresentation).toEqual([0, 4, 2, 1, 3]);
-    expect(unit?.accessUnits.map(({ decodeIndex, presentationIndex, pictureOrderCount }) => ({
-      decodeIndex,
-      presentationIndex,
-      pictureOrderCount
-    }))).toEqual([
-      { decodeIndex: 0, presentationIndex: 0, pictureOrderCount: 0 },
-      { decodeIndex: 1, presentationIndex: 4, pictureOrderCount: 8 },
-      { decodeIndex: 2, presentationIndex: 2, pictureOrderCount: 4 },
-      { decodeIndex: 3, presentationIndex: 1, pictureOrderCount: 2 },
-      { decodeIndex: 4, presentationIndex: 3, pictureOrderCount: 6 }
-    ]);
-    expect(unit?.accessUnits.map(({ sliceType }) => sliceType))
-      .toEqual(["I", "P", "B", "B", "B"]);
+    expect(() => inspectH264AnnexBRendition(input)).toThrowError(
+      expect.objectContaining<Partial<FormatError>>({
+        code: "PROFILE_INVALID",
+        message: "AUD primary_pic_type must identify only I or P pictures"
+      })
+    );
   });
 
-  it("rejects reordering beyond the SPS declaration", () => {
-    expectProfileError(() => inspectH264AnnexBRendition(reorderedInput(1)));
+  it("rejects picture-order counts that do not increase with decode order", () => {
+    expect(() => inspectH264AnnexBRendition(nonIdentityBaselineInput()))
+      .toThrowError(expect.objectContaining<Partial<FormatError>>({
+        code: "PROFILE_INVALID",
+        message: "picture-order counts must increase with decode order"
+      }));
   });
 
-  it("rejects duplicate picture-order counts and broken short-term frame numbering", () => {
-    const duplicate = reorderedInput(2);
-    duplicate.units[0]!.accessUnits[4] = makeAccessUnit({
-      idr: false,
-      frameNum: 3,
-      sliceType: "B",
-      reference: false,
-      picOrderCntLsb: 4,
-      aud: makeAud(2)
-    });
-    expectProfileError(() => inspectH264AnnexBRendition(duplicate));
-
-    const numbering = reorderedInput(2);
-    numbering.units[0]!.accessUnits[1] = makeAccessUnit({
-      idr: false,
-      frameNum: 2,
-      picOrderCntLsb: 8,
-      aud: makeAud(1)
-    });
-    expectProfileError(() => inspectH264AnnexBRendition(numbering));
+  it("rejects High-profile SPS input at the inspection boundary", () => {
+    expectProfileError(() => inspectH264AnnexBRendition(validInspectionInput({
+      spsOptions: { profileIdc: 100 },
+      ppsOptions: { profileIdc: 100 }
+    })));
   });
 
   it("rejects noncanonical Baseline flags, start codes, and unit starts without an IDR", () => {
@@ -151,18 +138,6 @@ describe("H264 profile-aware inspection", () => {
     }
   });
 
-  it("rejects B-picture syntax that disagrees with the AUD", () => {
-    const input = reorderedInput(2);
-    input.units[0]!.accessUnits[2] = makeAccessUnit({
-      idr: false,
-      frameNum: 2,
-      sliceType: "B",
-      picOrderCntLsb: 4,
-      aud: makeAud(1)
-    });
-    expectProfileError(() => inspectH264AnnexBRendition(input));
-  });
-
   it("rejects long-term reference assignment while accepting bounded short-term release", () => {
     const accepted = validInspectionInput();
     accepted.units[0]!.accessUnits[1] = makeAccessUnit({
@@ -175,7 +150,8 @@ describe("H264 profile-aware inspection", () => {
         picOrderCountType: 0,
         picOrderCntLsb: 2,
         adaptiveMarking: true,
-        adaptiveMarkingOperation: 1
+        adaptiveMarkingOperation: 1,
+        entropyCoding: false
       })]
     });
     expect(() => inspectH264AnnexBRendition(accepted)).not.toThrow();
@@ -191,50 +167,53 @@ describe("H264 profile-aware inspection", () => {
         picOrderCountType: 0,
         picOrderCntLsb: 2,
         adaptiveMarking: true,
-        adaptiveMarkingOperation: 2
+        adaptiveMarkingOperation: 2,
+        entropyCoding: false
       })]
     });
     expectProfileError(() => inspectH264AnnexBRendition(rejected));
   });
-});
 
-function reorderedInput(maxNumReorderFrames: number) {
-  const sps = makeSps({ maxNumReorderFrames, maxDecFrameBuffering: 4 });
-  const pps = makePps();
-  return {
-    profile: {
-      codedWidth: 64,
-      codedHeight: 64,
-      expectedVisibleRect: [0, 0, 64, 64] as const,
-      frameRate: { numerator: 30, denominator: 1 },
-      requireBt709LimitedRange: true as const
-    },
-    units: [{
-      id: "unit",
-      accessUnits: [
-        makeAccessUnit({ idr: true, frameNum: 0, picOrderCntLsb: 0, sps, pps, aud: makeAud(0) }),
-        makeAccessUnit({ idr: false, frameNum: 1, picOrderCntLsb: 8, aud: makeAud(1) }),
-        makeAccessUnit({ idr: false, frameNum: 2, sliceType: "B", picOrderCntLsb: 4, aud: makeAud(2) }),
-        makeAccessUnit({
-          idr: false,
-          frameNum: 3,
-          sliceType: "B",
-          reference: false,
-          picOrderCntLsb: 2,
-          aud: makeAud(2)
-        }),
-        makeAccessUnit({
-          idr: false,
-          frameNum: 3,
-          sliceType: "B",
-          reference: false,
-          picOrderCntLsb: 6,
-          aud: makeAud(2)
-        })
-      ]
-    }]
-  };
-}
+  it("accepts a one-reference slice override and rejects larger counts", () => {
+    const accepted = baselineInput();
+    accepted.units[0]!.accessUnits[1] = makeAccessUnit({
+      idr: false,
+      frameNum: 1,
+      aud: makeAud(1),
+      slices: [makeSlice({
+        idr: false,
+        frameNum: 1,
+        picOrderCountType: 0,
+        picOrderCntLsb: 2,
+        numRefIdxL0ActiveMinus1: 0,
+        entropyCoding: false
+      })]
+    });
+    expect(() => inspectH264AnnexBRendition(accepted)).not.toThrow();
+
+    const rejected = baselineInput();
+    rejected.units[0]!.accessUnits[1] = makeAccessUnit({
+      idr: false,
+      frameNum: 1,
+      aud: makeAud(1),
+      slices: [makeSlice({
+        idr: false,
+        frameNum: 1,
+        picOrderCountType: 0,
+        picOrderCntLsb: 2,
+        numRefIdxL0ActiveMinus1: 1,
+        entropyCoding: false
+      })]
+    });
+
+    expect(() => inspectH264AnnexBRendition(rejected)).toThrowError(
+      expect.objectContaining<Partial<FormatError>>({
+        code: "PROFILE_INVALID",
+        message: "Constrained Baseline slice reference count must equal one"
+      })
+    );
+  });
+});
 
 function baselineInput(options: {
   readonly sps?: Readonly<SpsFixtureOptions>;

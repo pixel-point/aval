@@ -207,8 +207,6 @@ export interface AvalDiagnostics {
         backingHeight: number;
         effectiveDprX: number;
         effectiveDprY: number;
-        resolutionScale: number;
-        clampReasons: readonly string[];
     }>;
     // (undocumented)
     readonly readiness: RuntimeReadiness;

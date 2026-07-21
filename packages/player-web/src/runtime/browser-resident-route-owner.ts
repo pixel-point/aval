@@ -98,10 +98,6 @@ export class BrowserResidentRouteOwner {
     return this.#stagedEndpoint !== null;
   }
 
-  public get stagedEndpointEdge(): string | null {
-    return this.#stagedEndpoint?.edge ?? null;
-  }
-
   public get stagedEndpointState(): string | null {
     return this.#stagedEndpoint?.state ?? null;
   }

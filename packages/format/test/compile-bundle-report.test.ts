@@ -10,7 +10,7 @@ describe("compile bundle report", () => {
     expect(parsed.assets[0]).toMatchObject({
       codec: "h264",
       path: "h264.avl",
-      codecString: "avc1.64001E"
+      codecString: "avc1.42E01E"
     });
     expect(parsed.encodings[0]).toMatchObject({
       codec: "h264",
@@ -106,8 +106,8 @@ function validReport() {
     path: "h264.avl",
     bytes: 1234,
     sha256: "0".repeat(64),
-    codecString: "avc1.64001E",
-    type: 'application/vnd.aval; codecs="avc1.64001E"',
+    codecString: "avc1.42E01E",
+    type: 'application/vnd.aval; codecs="avc1.42E01E"',
     integrity: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
   };
   return {

@@ -5,7 +5,6 @@ import {
   parseSourceProject,
   validateSourceProject
 } from "../src/source-project-schema.js";
-import { normalizeSourceProject } from "../src/source-project-normalize.js";
 
 function project(): any {
   return {
@@ -88,7 +87,6 @@ describe("source project 1.0 schema", () => {
     expect(Object.isFrozen(parsed)).toBe(true);
     expect(Object.isFrozen(parsed.encodings)).toBe(true);
     expect(Object.isFrozen(parsed.encodings[0]?.renditions)).toBe(true);
-    expect(normalizeSourceProject(parsed).encodings).toBe(parsed.encodings);
   });
 
   it.each(["auto", "opaque", "packed"] as const)(

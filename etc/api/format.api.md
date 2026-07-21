@@ -523,7 +523,7 @@ export interface CompileBundleReportVp9Encoding extends CompileBundleReportEncod
 }
 
 // @public (undocumented)
-export type CompiledManifest = CompiledManifestV1_0 | OpaqueCompiledManifestV1_1 | PackedAlphaCompiledManifestV1_1;
+export type CompiledManifest = OpaqueCompiledManifestV1_1 | PackedAlphaCompiledManifestV1_1;
 
 // @public (undocumented)
 export interface CompiledManifestBase {
@@ -554,22 +554,7 @@ export interface CompiledManifestBase {
 }
 
 // @public (undocumented)
-export type CompiledManifestInput = CompiledManifestInputV1_0 | OpaqueCompiledManifestInputV1_1 | PackedAlphaCompiledManifestInputV1_1;
-
-// @public (undocumented)
-export type CompiledManifestInputV1_0 = Omit<CompiledManifestV1_0, "units"> & {
-    readonly units: readonly UnitInput[];
-};
-
-// @public (undocumented)
-export interface CompiledManifestV1_0 extends CompiledManifestBase {
-    // (undocumented)
-    readonly formatVersion: "1.0";
-    // (undocumented)
-    readonly layout: VideoLayout;
-    // (undocumented)
-    readonly renditions: readonly ProductionRenditionV1_0[];
-}
+export type CompiledManifestInput = OpaqueCompiledManifestInputV1_1 | PackedAlphaCompiledManifestInputV1_1;
 
 // @public
 export function crc32(bytes: Uint8Array): number;
@@ -585,6 +570,9 @@ export function createH265PictureOrderState(): H265PictureOrderState;
 
 // @public (undocumented)
 export function createH265VideoDecoderConfig(sps: ParsedH265Sps): H265VideoDecoderConfig;
+
+// @public
+export function createVideoPayloadValidator(input: Readonly<VideoPayloadValidationProfile>): Readonly<VideoPayloadValidator>;
 
 // @public (undocumented)
 export interface DeclaredLimits {
@@ -611,7 +599,7 @@ export type DecoderColorClassification = Readonly<{
     kind: "exact";
 }> | Readonly<{
     kind: "known-normalization";
-    normalization: "bt709-transfer-as-smpte170m" | "limited-bt709-srgb-transfer";
+    normalization: "bt709-transfer-as-smpte170m" | "limited-bt709-srgb-transfer" | "webkit-bt709-full-range-srgb-transfer";
 }> | Readonly<{
     kind: "incompatible";
     field: "range" | "matrix" | "primaries" | "transfer";
@@ -707,9 +695,6 @@ export const FORMAT_HEADER_LENGTH = 64;
 export const FORMAT_MAGIC: readonly [65, 86, 76, 70, 13, 10, 26, 10];
 
 // @public (undocumented)
-export const FORMAT_SUPPORTED_VERSIONS: readonly ["1.0", "1.1"];
-
-// @public (undocumented)
 export const FORMAT_VERSION_MAJOR = 1;
 
 // @public (undocumented)
@@ -767,7 +752,7 @@ export class FormatError extends Error {
 }
 
 // @public (undocumented)
-export type FormatErrorCode = "INPUT_INVALID" | "BUDGET_EXCEEDED" | "INTEGER_UNSAFE" | "HEADER_INVALID" | "VERSION_UNSUPPORTED" | "FEATURE_UNSUPPORTED" | "JSON_INVALID" | "JSON_DUPLICATE_KEY" | "JSON_DANGEROUS_KEY" | "JSON_NONCANONICAL" | "MANIFEST_INVALID" | "GRAPH_INVALID" | "INDEX_INVALID" | "LAYOUT_INVALID" | "PROFILE_INVALID" | "PNG_ENVELOPE_INVALID" | "PNG_DEFLATE_INVALID" | "PNG_SCANLINE_INVALID" | "WRITER_INVALID" | "WRITER_NONCONVERGENT";
+export type FormatErrorCode = "INPUT_INVALID" | "BUDGET_EXCEEDED" | "INTEGER_UNSAFE" | "HEADER_INVALID" | "VERSION_UNSUPPORTED" | "FEATURE_UNSUPPORTED" | "JSON_INVALID" | "JSON_DUPLICATE_KEY" | "JSON_DANGEROUS_KEY" | "JSON_NONCANONICAL" | "MANIFEST_INVALID" | "GRAPH_INVALID" | "INDEX_INVALID" | "LAYOUT_INVALID" | "PROFILE_INVALID" | "PNG_ENVELOPE_INVALID" | "PNG_DEFLATE_INVALID" | "PNG_SCANLINE_INVALID" | "WRITER_INVALID";
 
 // @public (undocumented)
 export interface FormatErrorDetails {
@@ -778,13 +763,10 @@ export interface FormatErrorDetails {
 }
 
 // @public (undocumented)
-export type FormatHeader = FormatHeaderBase & ({
-    readonly major: 1;
-    readonly minor: 0;
-} | {
+export type FormatHeader = FormatHeaderBase & {
     readonly major: 1;
     readonly minor: 1;
-});
+};
 
 // @public (undocumented)
 export interface FormatHeaderBase {
@@ -811,7 +793,10 @@ export interface FormatOptions {
 }
 
 // @public (undocumented)
-export type FormatVersion = "1.0" | "1.1";
+export type FormatVersion = "1.1";
+
+// @public
+export const H264_CONSTRAINED_BASELINE_CODECS: readonly H264ConstrainedBaselineCodec[];
 
 // @public
 export const H264_DECODER_SURFACE_PADDING = 32;
@@ -841,20 +826,14 @@ export interface H264AccessUnitSummary {
     // (undocumented)
     readonly sliceCount: number;
     // (undocumented)
-    readonly sliceType: "I" | "P" | "B";
+    readonly sliceType: "I" | "P";
 }
 
 // @public (undocumented)
-export type H264Codec = H264ConstrainedBaselineCodec | H264HighCodec;
+export type H264Codec = H264ConstrainedBaselineCodec;
 
 // @public (undocumented)
-export function h264CodecForLevel(levelIdc: number): H264HighCodec;
-
-// @public (undocumented)
-export function h264CodecForProfileLevel(profile: H264CodecProfile, levelIdc: number): H264Codec;
-
-// @public (undocumented)
-export type H264CodecProfile = "constrained-baseline" | "high";
+export function h264CodecForLevel(levelIdc: number): H264ConstrainedBaselineCodec;
 
 // @public (undocumented)
 export interface H264ColorSummary {
@@ -937,14 +916,12 @@ export interface H264FrameRate {
 }
 
 // @public (undocumented)
-export type H264HighCodec = "avc1.64000A" | "avc1.64000B" | "avc1.64000C" | "avc1.64000D" | "avc1.640014" | "avc1.640015" | "avc1.640016" | "avc1.64001E" | "avc1.64001F" | "avc1.640020" | "avc1.640028" | "avc1.640029" | "avc1.64002A" | "avc1.640032" | "avc1.640033" | "avc1.640034" | "avc1.64003C" | "avc1.64003D" | "avc1.64003E";
-
-// @public (undocumented)
 export type H264LevelIdc = 10 | 11 | 12 | 13 | 20 | 21 | 22 | 30 | 31 | 32 | 40 | 41 | 42 | 50 | 51 | 52 | 60 | 61 | 62;
 
 // @public
 export interface H264LevelLimits {
-    readonly codec: H264HighCodec;
+    // (undocumented)
+    readonly codec: H264ConstrainedBaselineCodec;
     // (undocumented)
     readonly levelIdc: H264LevelIdc;
     // (undocumented)
@@ -996,9 +973,9 @@ export interface H264ParameterSetSummary {
     // (undocumented)
     readonly maxNumReorderFrames: number;
     // (undocumented)
-    readonly profile: H264CodecProfile;
+    readonly profile: "constrained-baseline";
     // (undocumented)
-    readonly profileIdc: 66 | 100;
+    readonly profileIdc: 66;
     // (undocumented)
     readonly squareSampleAspect: boolean;
 }
@@ -1553,10 +1530,10 @@ export interface ParsedH264Codec extends Omit<H264LevelLimits, "codec"> {
     // (undocumented)
     readonly codec: H264Codec;
     // (undocumented)
-    readonly profile: H264CodecProfile;
-    readonly profileCompatibility: 0 | 0xe0;
+    readonly profile: "constrained-baseline";
+    readonly profileCompatibility: 0xe0;
     // (undocumented)
-    readonly profileIdc: 66 | 100;
+    readonly profileIdc: 66;
 }
 
 // @public (undocumented)
@@ -1663,12 +1640,22 @@ export interface ParsedH265Vps {
 }
 
 // @public (undocumented)
+export interface ParsedManifestPrefix {
+    // (undocumented)
+    readonly frontIndexRange: ByteRange;
+    // (undocumented)
+    readonly header: FormatHeader;
+    // (undocumented)
+    readonly manifest: CompiledManifest;
+}
+
+// @public (undocumented)
 export type ParsedVideoCodecString = {
     readonly family: "h264";
     readonly bitDepth: 8;
 } | {
     readonly family: "h265";
-    readonly bitDepth: 8 | 10;
+    readonly bitDepth: 8;
 } | {
     readonly family: "vp9";
     readonly bitDepth: 8;
@@ -1700,6 +1687,9 @@ export function parseH265Vps(nal: H265AnnexBNalUnit, path: string): ParsedH265Vp
 
 // @public
 export function parseHeader(bytes: Uint8Array, options?: FormatOptions): Readonly<FormatHeader>;
+
+// @public
+export function parseManifestPrefix(bytesFromFileStart: Uint8Array, options?: FormatOptions): Readonly<ParsedManifestPrefix>;
 
 // @public
 export function parseStrictJson(bytes: Uint8Array, options?: FormatOptions): CanonicalJsonValue;
@@ -1767,7 +1757,7 @@ export interface Port {
 export function prepareH264EncoderRendition(input: H264EncoderRenditionPreparationInput): H264EncoderRenditionPreparation;
 
 // @public (undocumented)
-export type ProductionRendition = ProductionRenditionV1_0 | OpaqueProductionRenditionV1_1 | PackedAlphaProductionRenditionV1_1;
+export type ProductionRendition = OpaqueProductionRenditionV1_1 | PackedAlphaProductionRenditionV1_1;
 
 // @public (undocumented)
 export interface ProductionRenditionBase {
@@ -1783,14 +1773,6 @@ export interface ProductionRenditionBase {
     readonly codedWidth: number;
     // (undocumented)
     readonly id: Id;
-}
-
-// @public
-export interface ProductionRenditionV1_0 extends ProductionRenditionBase {
-    // (undocumented)
-    readonly alphaLayout: AlphaLayout;
-    // (undocumented)
-    readonly outputQualification?: never;
 }
 
 // @public (undocumented)
@@ -1995,6 +1977,47 @@ export type VideoCodec = "h264" | "h265" | "vp9" | "av1";
 
 // @public (undocumented)
 export type VideoLayout = "opaque" | "packed-alpha";
+
+// @public
+export interface VideoPayloadValidationChunk {
+    // (undocumented)
+    readonly bytes: Uint8Array;
+    // (undocumented)
+    readonly displayedFrames: number;
+    // (undocumented)
+    readonly key: boolean;
+    // (undocumented)
+    readonly timestamp: number;
+}
+
+// @public
+export interface VideoPayloadValidationProfile {
+    // (undocumented)
+    readonly averageBitrate: number;
+    // (undocumented)
+    readonly bitDepth: VideoBitDepth;
+    // (undocumented)
+    readonly codec: string;
+    // (undocumented)
+    readonly codedHeight: number;
+    // (undocumented)
+    readonly codedWidth: number;
+    // (undocumented)
+    readonly frameRate: Readonly<{
+        readonly numerator: number;
+        readonly denominator: number;
+    }>;
+    // (undocumented)
+    readonly visibleHeight: number;
+    // (undocumented)
+    readonly visibleWidth: number;
+}
+
+// @public
+export interface VideoPayloadValidator {
+    complete(): void;
+    validate(chunks: readonly Readonly<VideoPayloadValidationChunk>[]): void;
+}
 
 // @public (undocumented)
 export interface VideoRenditionGeometry {

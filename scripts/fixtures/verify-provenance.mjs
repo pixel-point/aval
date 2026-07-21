@@ -89,13 +89,10 @@ async function scanReferences(value, path, provenancePath, errors, verifiedPaths
 
 async function resolveReference(declaredPath, provenancePath) {
   if (declaredPath.includes("\\") || declaredPath.startsWith("/") || declaredPath.split("/").includes("..")) return null;
-  const milestone = relative(repositoryRoot, provenancePath).match(/fixtures\/(?:conformance|compiler)\/(m\d+)/u)?.[1];
   const candidates = [
     resolve(repositoryRoot, declaredPath),
-    resolve(dirname(provenancePath), declaredPath),
-    milestone === undefined ? null : resolve(repositoryRoot, "fixtures", "compiler", milestone, "source", declaredPath),
-    milestone === undefined ? null : resolve(repositoryRoot, "fixtures", "compiler", milestone, declaredPath)
-  ].filter(Boolean);
+    resolve(dirname(provenancePath), declaredPath)
+  ];
   for (const candidate of candidates) {
     const within = relative(repositoryRoot, candidate);
     if (within === ".." || within.startsWith(`..${sep}`)) continue;

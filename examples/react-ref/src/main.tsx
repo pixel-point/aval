@@ -20,7 +20,7 @@ const SOURCES = Object.freeze([
   }),
   Object.freeze({
     src: "/status/h264.avl",
-    type: 'application/vnd.aval; codecs="avc1.64000A"'
+    type: 'application/vnd.aval; codecs="avc1.42E00A"'
   })
 ]);
 

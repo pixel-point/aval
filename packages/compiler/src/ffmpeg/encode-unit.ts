@@ -88,40 +88,6 @@ export interface ExtractRgbaRangeInput {
   readonly timeoutMs?: number;
 }
 
-/** Decode one bounded half-open source range to tightly packed RGBA bytes. */
-export async function extractRgbaRange(
-  input: ExtractRgbaRangeInput
-): Promise<readonly Uint8Array[]> {
-  const frameCount = validateRange(input.startFrame, input.endFrame);
-  const frameBytes = checkedFrameBytes(input.width, input.height);
-  const outputBytes = checkedProduct(frameBytes, frameCount, "RGBA extraction bytes");
-  const invocation = createExtractRgbaRangeInvocation(input);
-  const result = await runBoundedProcess({
-    executable: input.executable ?? "ffmpeg",
-    arguments: invocation.arguments,
-    cwd: invocation.cwd,
-    limits: {
-      ...(input.timeoutMs === undefined
-        ? {}
-        : { timeoutMs: mediaTimeout(input.timeoutMs) }),
-      maxStdoutBytes: outputBytes,
-      maxStderrBytes: MAX_PROCESS_STDERR_BYTES
-    },
-    expectedStdoutBytes: outputBytes,
-    privateWorkingDirectory: true,
-    ...(input.signal === undefined ? {} : { signal: input.signal })
-  });
-  if (result.stdout.byteLength !== outputBytes) {
-    throw new CompilerError(
-      "FFMPEG_FAILED",
-      `RGBA extraction returned ${String(result.stdout.byteLength)} bytes; expected ${String(outputBytes)}`
-    );
-  }
-  return Object.freeze(Array.from({ length: frameCount }, (_, index) =>
-    result.stdout.slice(index * frameBytes, (index + 1) * frameBytes)
-  ));
-}
-
 /** Decode one bounded range to canonical little-endian RGBA16 channels. */
 export async function extractRgba16Range(
   input: ExtractRgbaRangeInput
@@ -162,32 +128,6 @@ export async function extractRgba16Range(
     }
     return channels;
   }));
-}
-
-/** Own the exact ordered RGBA extraction argv. */
-export function createExtractRgbaRangeInvocation(
-  input: ExtractRgbaRangeInput
-): Readonly<FfmpegInvocation> {
-  const frameCount = validateRange(input.startFrame, input.endFrame);
-  checkedFrameBytes(input.width, input.height);
-  return Object.freeze({
-    arguments: Object.freeze([
-      ...decodePrefix(input.source),
-      "-vf",
-      [
-        rangeSelection(input.startFrame, input.endFrame),
-        `scale=${String(input.width)}:${String(input.height)}:flags=lanczos+accurate_rnd+full_chroma_int:in_range=auto:out_range=full:in_color_matrix=auto:out_color_matrix=bt709`,
-        "setsar=1",
-        "format=rgba"
-      ].join(","),
-      "-frames:v", String(frameCount),
-      "-fps_mode", "passthrough",
-      "-f", "rawvideo",
-      "-pix_fmt", "rgba",
-      "pipe:1"
-    ]),
-    cwd: dirname(input.source.path)
-  });
 }
 
 /** Own the exact ordered high-bit-depth RGBA extraction argv. */
@@ -359,25 +299,6 @@ function validateRange(startFrame: number, endFrame: number): number {
     );
   }
   return endFrame - startFrame;
-}
-
-function checkedFrameBytes(width: number, height: number): number {
-  if (
-    !Number.isSafeInteger(width) ||
-    !Number.isSafeInteger(height) ||
-    width < 1 ||
-    height < 1
-  ) {
-    throw new CompilerError(
-      "INPUT_INVALID",
-      "RGBA dimensions must be positive safe integers"
-    );
-  }
-  return checkedProduct(
-    checkedProduct(width, height, "RGBA pixels"),
-    4,
-    "RGBA frame bytes"
-  );
 }
 
 function checkedRgba64FrameBytes(width: number, height: number): number {

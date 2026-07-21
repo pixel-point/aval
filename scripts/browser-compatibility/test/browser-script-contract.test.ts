@@ -36,6 +36,17 @@ describe("permanent-demo browser command contract", () => {
     }
   });
 
+  it("owns a fresh server for every permanent-demo verification run", () => {
+    for (const config of [
+      playground,
+      grassRabbit,
+      grassRabbitCodecs,
+      kineticOrb
+    ]) {
+      expect(config.webServer).toMatchObject({ reuseExistingServer: false });
+    }
+  });
+
   it("keeps the 60-second soak isolated to one Kinetic Chromium project", () => {
     const soak = kineticOrb.projects?.filter(({ name }) => name.includes("soak")) ?? [];
     expect(soak).toHaveLength(1);

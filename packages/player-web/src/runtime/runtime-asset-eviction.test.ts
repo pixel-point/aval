@@ -15,7 +15,7 @@ describe("runtime rendition residency eviction", () => {
       resources: createPlayerRuntimeAssetSessionResources(account)
     });
 
-    await session.ensureAllUnits("opaque");
+    await session.ensureRenditionUnits("opaque");
     const verifiedBytes = session.snapshot().unitBlobs.verifiedBytes;
     expect(session.snapshot().unitBlobs.verified).toBe(2);
     expect(verifiedBytes).toBeGreaterThan(0);

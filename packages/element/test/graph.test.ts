@@ -8,10 +8,10 @@ import {
 import { describe, expect, it } from "vitest";
 
 import type {
+  CompiledManifest as Manifest,
   Edge,
-  Manifest,
   Unit
-} from "../src/asset.js";
+} from "@pixel-point/aval-format";
 import { createGraphEngine } from "../src/graph.js";
 
 type GraphManifest = Pick<

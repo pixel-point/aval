@@ -31,7 +31,7 @@ export interface PathSchedulerResidentRunwayCommit {
   readonly retiredGeneration: number;
   readonly firstPresented: Readonly<
     PathSchedulerResidentRunwayTransaction["media"][number]
-  > | null;
+  >;
 }
 
 export interface PathSchedulerResidentRunwayOwnerOptions {
@@ -114,19 +114,18 @@ export class PathSchedulerResidentRunwayOwner {
 
   public commit(
     transaction: Readonly<PathSchedulerResidentRunwayTransaction>,
-    options: Readonly<CommitResidentRunwayOptions> = {}
+    options: Readonly<CommitResidentRunwayOptions>
   ): Readonly<PathSchedulerResidentRunwayCommit> {
     const staged = this.#current;
     if (staged === null || staged.token !== transaction) {
       throw new RangeError("resident runway transaction is stale");
     }
-    const alreadyPresented = options.alreadyPresented ?? 0;
-    if (alreadyPresented !== 0 && alreadyPresented !== 1) {
-      throw new RangeError("resident runway presented count must be zero or one");
+    if (options.alreadyPresented !== 1) {
+      throw new RangeError("resident runway frame zero must already be presented");
     }
     const committed = this.#generation.commitReplacement(staged.generation);
     this.#reservation.discard();
-    this.#output.replaceResident(transaction.media.slice(alreadyPresented));
+    this.#output.replaceResident(transaction.media.slice(1));
     this.#route.activateResident();
     const build = this.#cursors.replaceSource({
       kind: "resident-runway",
@@ -140,15 +139,11 @@ export class PathSchedulerResidentRunwayOwner {
       targetState: transaction.targetState,
       targetBody: staged.targetBody
     });
-    const firstPresented = alreadyPresented === 0
-      ? null
-      : transaction.media[0] ?? null;
-    if (alreadyPresented === 1) {
-      if (firstPresented === null) {
-        throw new RangeError("resident runway has no presented frame zero");
-      }
-      this.#cursors.recordResidentDisplayed(firstPresented);
+    const firstPresented = transaction.media[0];
+    if (firstPresented === undefined) {
+      throw new RangeError("resident runway has no presented frame zero");
     }
+    this.#cursors.recordResidentDisplayed(firstPresented);
     this.#current = null;
     return Object.freeze({
       activateWorker: committed.activateWorker,

@@ -65,14 +65,6 @@ export class BrowserResourceLedger {
   }
 }
 
-export function countersSettled(
-  baseline: Readonly<Record<string, number>>,
-  terminal: Readonly<Record<string, number>>
-): boolean {
-  const names = new Set([...Object.keys(baseline), ...Object.keys(terminal)]);
-  return [...names].every((name) => (baseline[name] ?? 0) === (terminal[name] ?? 0));
-}
-
 function observationalMemory(): ResourceSnapshot["observations"] {
   const memory = performance as Performance & { readonly memory?: { readonly usedJSHeapSize?: number } };
   const heap = memory.memory?.usedJSHeapSize;

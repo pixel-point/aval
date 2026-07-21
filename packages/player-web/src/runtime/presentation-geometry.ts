@@ -11,16 +11,9 @@ export const PRESENTATION_FIT_MODES = Object.freeze([
   "fill",
   "none"
 ] as const);
-/** Compatibility exports; host/device policies now provide real dimensions. */
-export const MAX_PRESENTATION_BACKING_DIMENSION = Number.MAX_SAFE_INTEGER;
-export const MAX_LOGICAL_CANVAS_DIMENSION = Number.MAX_SAFE_INTEGER;
 const PRESENTATION_PLANE_COUNT = 1;
 
 export type PresentationFit = (typeof PRESENTATION_FIT_MODES)[number];
-export type PresentationClampReason =
-  | "format-dimension"
-  | "device-dimension"
-  | "byte-budget";
 
 export interface PresentationRect {
   readonly x: number;
@@ -95,14 +88,11 @@ export interface PresentationGeometry {
   readonly sourceRect: Readonly<PresentationRect>;
   readonly destinationCssRect: Readonly<PresentationRect>;
   readonly destinationBackingRect: Readonly<PresentationRect>;
-  readonly desiredBacking: Readonly<PresentationSize>;
   readonly backing: Readonly<PresentationSize>;
   readonly effectiveDevicePixelRatio: {
     readonly x: number;
     readonly y: number;
   };
-  readonly resolutionScale: number;
-  readonly clampReasons: readonly PresentationClampReason[];
   readonly byteTerms: {
     readonly bytesPerPlane: number;
     readonly totalBackingBytes: number;
@@ -192,7 +182,6 @@ export function computePresentationGeometry(
     "presentation backing bytes"
   );
   const backing = freezeSize(backingWidth, backingHeight);
-  const desiredBacking = freezeSize(desiredWidth, desiredHeight);
   const destinationBackingRect = freezeRect(
     destinationCssRect.x * backingWidth / input.cssWidth,
     destinationCssRect.y * backingHeight / input.cssHeight,
@@ -211,14 +200,11 @@ export function computePresentationGeometry(
     sourceRect,
     destinationCssRect,
     destinationBackingRect,
-    desiredBacking,
     backing,
     effectiveDevicePixelRatio: Object.freeze({
       x: backingWidth / input.cssWidth,
       y: backingHeight / input.cssHeight
     }),
-    resolutionScale: 1,
-    clampReasons: Object.freeze([]),
     byteTerms: Object.freeze({ bytesPerPlane, totalBackingBytes }),
     planes: Object.freeze({ animated: mapping })
   });

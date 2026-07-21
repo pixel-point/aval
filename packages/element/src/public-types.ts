@@ -620,8 +620,6 @@ export interface AvalDiagnostics {
     backingHeight: number;
     effectiveDprX: number;
     effectiveDprY: number;
-    resolutionScale: number;
-    clampReasons: readonly string[];
   }>;
   readonly elementTrace?: readonly Readonly<AvalTraceRecord>[];
   readonly runtimeTrace?: readonly Readonly<AvalRuntimeTraceRecord>[];

@@ -20,7 +20,7 @@ export default defineConfig({
   webServer: {
     command: `npm run grass-rabbit -- --port ${port} --strictPort`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 30_000
   },
   projects: [

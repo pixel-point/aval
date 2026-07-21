@@ -23,7 +23,7 @@ function expectFormatError(action: () => unknown, code?: FormatError["code"]): F
   throw new Error("expected operation to throw");
 }
 
-describe("canonical 1.0 asset writer", () => {
+describe("canonical 1.1 asset writer", () => {
   it("emits deterministic bytes while normalizing unordered graph/chunk input", () => {
     const input = twoRenditionWriterInput();
     const canonical = writeCanonicalAsset(input);
@@ -137,7 +137,7 @@ describe("canonical 1.0 asset writer", () => {
     }
   });
 
-  it("rejects old root fields and non-1.0 manifests", () => {
+  it("rejects old root fields and non-1.1 manifests", () => {
     const input: any = validWriterInput();
     input.manifest.formatVersion = "0.1";
     expectFormatError(() => writeCanonicalAsset(input), "WRITER_INVALID");

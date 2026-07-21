@@ -12,7 +12,7 @@ import { createBuiltExamplesAssetStore } from "./serve-built-examples.mjs";
 const execFile = promisify(execFileCallback);
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = resolve(SCRIPT_DIRECTORY, "../..");
-const DEFAULT_POLICY_PATH = "scripts/browser-compatibility/certification-policy.json";
+const DEFAULT_POLICY_PATH = "config/release/browser-certification-policy.json";
 const HASH_DOMAIN = Buffer.from("aval-source-tree-attestation-v1", "utf8");
 const MAX_GIT_OUTPUT_BYTES = 512 * 1024 * 1024;
 const MAX_FILE_BYTES = 128 * 1024 * 1024;

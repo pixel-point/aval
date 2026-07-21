@@ -56,12 +56,17 @@ export interface RendererRuntime {
     devicePixelRatio: number,
     fit: string
   ): void;
-  draw(frame: VideoFrame): Promise<void>;
+  draw(frame: VideoFrame, newDecoderRun: boolean): Promise<void>;
   inspectAndPrime(
     frame: VideoFrame,
     inspect: RendererFrameInspector
   ): Promise<void>;
-  store(group: string, index: number, frame: VideoFrame): Promise<void>;
+  store(
+    group: string,
+    index: number,
+    frame: VideoFrame,
+    newDecoderRun: boolean
+  ): Promise<void>;
   drawStored(group: string, index: number): Promise<void>;
   settled(): Promise<void>;
   admit(residentCount: number): Readonly<{

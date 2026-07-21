@@ -50,7 +50,6 @@ type ProjectMediaDefinition = Pick<
 export async function validateProjectMedia(input: {
   readonly project: ProjectMediaDefinition;
   readonly sources: ReadonlyMap<string, Readonly<PreparedProjectSource>>;
-  readonly ffmpeg: string;
   readonly signal?: AbortSignal;
 }): Promise<Readonly<ProjectContinuityResult>> {
   validateRanges(input.project, input.sources);
@@ -163,7 +162,6 @@ export async function validateProjectMedia(input: {
       boundary.to,
       input.project,
       input.sources,
-      input.ffmpeg,
       input.signal
     );
     const needsReview = result.repeatedEndpointPause || !result.passes;
@@ -244,7 +242,6 @@ async function analyzeBoundary(
   to: FramePoint,
   project: ProjectMediaDefinition,
   sources: ReadonlyMap<string, Readonly<PreparedProjectSource>>,
-  ffmpeg: string,
   signal?: AbortSignal
 ) {
   const fromSource = requiredSource(sources, from.unit.source);

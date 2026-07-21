@@ -17,7 +17,7 @@
     "slots"
   ],
   "properties": {
-    "$schema": { "const": "./certification-policy.schema.json" },
+    "$schema": { "const": "./browser-certification-policy.schema.json" },
     "policyVersion": { "const": "1.0" },
     "inventoryResolvedAt": { "$ref": "#/$defs/dateTime" },
     "inventoryState": { "enum": ["resolved", "awaiting-device-browser-identities"] },
@@ -114,11 +114,8 @@
       "required": [
         "demos",
         "playbackModes",
-        "playbackModePurpose",
         "authoredCodecsByMode",
         "minimumSelectedCodecsByPlatform",
-        "interactionProfiles",
-        "evidence",
         "soakSeconds"
       ],
       "properties": {
@@ -129,7 +126,6 @@
               "route": "/playground/",
               "playerSelector": "#favorite-motion",
               "interactionSelector": "#favorite-control",
-              "sourceContract": "multi-source",
               "renditionId": "motion.1x",
               "states": ["idle", "engaged"]
             },
@@ -138,7 +134,6 @@
               "route": "/rabbit/",
               "playerSelector": "#grass-rabbit",
               "interactionSelector": "#grass-rabbit",
-              "sourceContract": "multi-source",
               "renditionId": "video.1x",
               "states": ["idle", "entering", "hover", "exiting"]
             },
@@ -147,7 +142,6 @@
               "route": "/codecs/",
               "playerSelector": "aval-player",
               "interactionSelector": "aval-player",
-              "sourceContract": "multi-source",
               "renditionId": "video.1x",
               "states": ["idle", "entering", "hover", "exiting"]
             },
@@ -156,7 +150,6 @@
               "route": "/orb/",
               "playerSelector": "#kinetic-orb",
               "interactionSelector": "#kinetic-orb",
-              "sourceContract": "multi-source",
               "renditionId": "video.1x",
               "states": ["idle", "entering", "hover", "exiting"]
             }
@@ -164,12 +157,6 @@
         },
         "playbackModes": {
           "const": ["forced-h264", "full-ladder"]
-        },
-        "playbackModePurpose": {
-          "const": {
-            "forced-h264": "fallback-path-validation-only",
-            "full-ladder": "normal-selection-and-support-claim"
-          }
         },
         "authoredCodecsByMode": {
           "type": "object",
@@ -185,78 +172,7 @@
             "ios": ["av1", "vp9", "h265"]
           }
         },
-        "interactionProfiles": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["desktop", "touch", "unsupported"],
-          "properties": {
-            "desktop": {
-              "const": ["pointer", "focus", "overlap-reentry", "all-state-directions"]
-            },
-            "touch": {
-              "const": ["tap", "outside-tap", "overlap-reentry", "all-state-directions"]
-            },
-            "unsupported": {
-              "const": ["deterministic-error", "no-blank-nonterminal", "resource-retirement"]
-            }
-          }
-        },
-        "evidence": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "manifestSchemaVersion",
-            "sessionSchemaVersion",
-            "interactionLedgerSchemaVersion",
-            "diagnosticReportSchemaVersion",
-            "immutableRunRootPattern",
-            "requiredArtifacts",
-            "minimumSoakMilliseconds",
-            "requireNonBlankPixels"
-          ],
-          "properties": {
-            "manifestSchemaVersion": { "const": 1 },
-            "sessionSchemaVersion": { "const": 1 },
-            "interactionLedgerSchemaVersion": { "const": 1 },
-            "diagnosticReportSchemaVersion": { "const": 1 },
-            "immutableRunRootPattern": {
-              "const": "artifacts/browser-compatibility/runs/{commit}/{session}"
-            },
-            "requiredArtifacts": {
-              "const": [
-                "canvas-png",
-                "context-png",
-                "frame-before-png",
-                "diagnostic-json",
-                "interaction-ledger",
-                "session-json"
-              ]
-            },
-            "minimumSoakMilliseconds": { "const": 60000 },
-            "requireNonBlankPixels": { "const": true }
-          }
-        },
         "soakSeconds": { "const": 60 }
-      }
-    },
-    "demo": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "route", "playerSelector", "interactionSelector", "sourceContract", "states"],
-      "properties": {
-        "id": {
-          "enum": ["end-user-playground", "grass-rabbit", "grass-rabbit-codecs", "kinetic-orb"]
-        },
-        "route": { "type": "string", "pattern": "^/[a-z0-9/-]*/$" },
-        "playerSelector": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "interactionSelector": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "sourceContract": { "enum": ["multi-source", "h264-only"] },
-        "states": {
-          "type": "array",
-          "minItems": 2,
-          "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
-        }
       }
     },
     "braveBuild": {

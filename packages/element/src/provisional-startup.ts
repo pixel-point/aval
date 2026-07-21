@@ -5,9 +5,9 @@ import {
   type RetryableCandidateRejection
 } from "./provisional-candidate-outcome.js";
 import type {
-  Manifest,
+  CompiledManifest as Manifest,
   PackedAlphaWitnessV1
-} from "./asset.js";
+} from "@pixel-point/aval-format";
 import { qualifyDecodedPackedAlphaOutput } from
   "./decoded-output-qualifier.js";
 import type { DecoderPoolCandidate } from "./decoder-pool.js";
@@ -36,9 +36,7 @@ export interface ProvisionalOutputQualificationInput {
 }
 
 export class UnsupportedPlaybackProfileError extends Error {
-  public constructor(
-    message = "legacy packed-alpha output is outside the qualified playback profile"
-  ) {
+  public constructor(message: string) {
     super(message);
     this.name = "NotSupportedError";
   }
@@ -186,16 +184,12 @@ function outputWitness(
   manifest: Readonly<Manifest>,
   renditionId: string
 ): Readonly<PackedAlphaWitnessV1> | null {
-  if (manifest.layout === "opaque") {
-    if (!manifest.renditions.some(({ id }) => id === renditionId)) invalidAsset();
-    return null;
-  }
-  if (manifest.formatVersion === "1.0") {
-    if (!manifest.renditions.some(({ id }) => id === renditionId)) invalidAsset();
-    throw new UnsupportedPlaybackProfileError();
-  }
   const rendition = manifest.renditions.find(({ id }) => id === renditionId);
   if (rendition === undefined) return invalidAsset();
+  if (manifest.layout === "opaque") {
+    return null;
+  }
+  if (rendition.outputQualification === undefined) return invalidAsset();
   return rendition.outputQualification;
 }
 

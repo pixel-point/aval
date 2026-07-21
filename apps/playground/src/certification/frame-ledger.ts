@@ -54,11 +54,6 @@ export class BrowserFrameLedger {
     return Object.freeze(this.#entries.map((entry) => Object.freeze({ ...entry })));
   }
 
-  public get exactIdentityAvailable(): boolean {
-    return this.#entries.length > 0 && this.#entries.every(({ identitySource, submittedContentOrdinal, unit, localFrame }) =>
-      identitySource !== "unavailable" && submittedContentOrdinal !== null && unit !== null && localFrame !== null
-    );
-  }
 }
 
 function nonnegativeInteger(value: number, name: string): void {

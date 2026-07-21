@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { loadCertificationSchema } from "../src/schema-loader.js";
 import { validateCandidateManifest, validateReleaseManifest } from "../src/release-manifest.js";
 import { candidateArtifactFixture } from "./candidate-manifest-fixture.js";
+import { loadCertificationSchema } from "./schema-test-support.js";
 
 const candidate = {
   schemaVersion: "1.0", manifestKind: "candidate", releaseVersion: "1.0.0",

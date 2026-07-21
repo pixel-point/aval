@@ -3,7 +3,6 @@ import { RendererFailureError } from "./modules/element/renderer-diagnostics.js"
 
 const MODES = Object.freeze([
   "production",
-  "legacy-desynchronized",
   "browser-defaults"
 ]);
 const CASES = Object.freeze({
@@ -201,7 +200,6 @@ function forwardedForMode(mode, attributes) {
   for (const [key, value] of Object.entries(source)) {
     forwarded[key] = value;
   }
-  if (mode === "legacy-desynchronized") forwarded.desynchronized = true;
   return Object.freeze(forwarded);
 }
 
@@ -314,7 +312,7 @@ function createReport(status, selectedCase, results, failure) {
 function render(report) {
   statusNode.dataset.state = report.status;
   statusNode.textContent = report.status === "running"
-    ? "Running three fresh-canvas production renderer probes…"
+    ? "Running two fresh-canvas renderer probes…"
     : report.status === "complete"
       ? "Renderer probes complete."
       : report.failure?.message ?? "Renderer probes failed.";

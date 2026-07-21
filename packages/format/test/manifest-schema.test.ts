@@ -15,7 +15,7 @@ function configureCodec(manifest: Record<string, any>, codec: VideoCodec, bitDep
   manifest.renditions[0].codec = {
     h264: "avc1.42E020",
     h265: "hvc1.1.6.L93.B0",
-    vp9: "vp09.00.10.08",
+    vp9: "vp09.00.10.08.01.01.01.01.00",
     av1: bitDepth === 10
       ? "av01.0.08M.10.0.110.01.01.01.0"
       : "av01.0.08M.08.0.110.01.01.01.0"
@@ -35,13 +35,13 @@ function expectManifestInvalid(value: unknown, path?: string): FormatError {
   throw new Error("expected manifest validation to fail");
 }
 
-describe("validateCompiledManifest 1.0", () => {
+describe("validateCompiledManifest 1.1", () => {
   it("validates, detaches, and recursively freezes the canonical manifest", () => {
     const source = validManifest();
     const result = validateCompiledManifest(source);
     expect(result).toEqual(source);
     expect(result).not.toBe(source);
-    expect(result.formatVersion).toBe("1.0");
+    expect(result.formatVersion).toBe("1.1");
     expect(result.codec).toBe("h264");
     expect(result.bitstream).toBe("annex-b");
     expect(result.layout).toBe("opaque");
@@ -86,6 +86,12 @@ describe("validateCompiledManifest 1.0", () => {
       type: "stacked",
       colorRect: [0, 0, 2, 2],
       alphaRect: [0, 10, 2, 2]
+    };
+    manifest.renditions[0].outputQualification = {
+      kind: "packed-alpha-v1",
+      unit: "body-a",
+      frame: 0,
+      samples: [{ x: 0, y: 0, expectedRange: [0, 32] }]
     };
     manifest.limits.decodedPixelBytes = 16 * 32 * 4;
     manifest.limits.runtimeWorkingSetBytes = 16 * 32 * 4;

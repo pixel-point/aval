@@ -20,7 +20,7 @@ export interface AssetFixtureOptions {
   readonly generatorSuffix?: string;
 }
 
-/** Build a small canonical 1.0 video asset. */
+/** Build a small canonical 1.1 video asset. */
 export function canonicalAssetFixture(
   options: AssetFixtureOptions = {}
 ): AssetFixture {

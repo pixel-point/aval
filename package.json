@@ -47,7 +47,6 @@
     "fixtures:verify": "npm run build -w @pixel-point/aval-graph && npm run build -w @pixel-point/aval-format && npm run build -w @pixel-point/aval-compiler && node scripts/fixtures/verify-all.mjs",
     "fixtures:regeneration-check": "node scripts/fixtures/regenerate-semantic-check.mjs",
     "docs:check": "node scripts/docs/check-docs.mjs",
-    "benchmark:deterministic": "vitest run packages/certification/test/benchmark-statistics.test.ts packages/certification/test/report-rendering.test.ts",
     "certification:serve": "node scripts/certification/serve-candidate.mjs",
     "certification:validate-runtime": "node scripts/certification/validate-runtime-report.mjs",
     "certification:validate-display": "node scripts/certification/validate-display-report.mjs",

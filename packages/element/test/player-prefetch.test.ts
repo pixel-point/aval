@@ -55,8 +55,8 @@ vi.mock("../src/asset.js", () => {
     { id: "idle-last", kind: "bridge", frameCount: 16, chunks: [span(9, 16)] }
   ];
   const records = units.map((unit, index) => ({
-    offset: 1_000 + index,
-    length: 1,
+    byteOffset: 1_000 + index,
+    byteLength: 1,
     presentationTimestamp: index * 100,
     duration: 1,
     randomAccess: true,
@@ -87,7 +87,7 @@ vi.mock("../src/asset.js", () => {
       frameRate: { numerator: 30, denominator: 1 },
       renditions: [{
         id: "main",
-        codec: "avc1.640020",
+        codec: "avc1.42E020",
         bitDepth: 8,
         codedWidth: 16,
         codedHeight: 16,
@@ -459,7 +459,7 @@ describe("player multi-route prefetch", () => {
     );
 
     expect(player.snapshot(false)).toMatchObject({
-      selectedCodec: "avc1.640020",
+      selectedCodec: "avc1.42E020",
       rendererBackend: "canvas2d"
     });
 
@@ -476,7 +476,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -532,7 +532,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -608,7 +608,7 @@ describe("player multi-route prefetch", () => {
     expect(diagnostic).toMatchObject({
       sourceIndex: 0,
       rendition: "main",
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       unit: "idle-intro",
       lane: intro.lane,
       phase: "decode",
@@ -649,7 +649,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -704,7 +704,7 @@ describe("player multi-route prefetch", () => {
     expect(diagnostic).toMatchObject({
       sourceIndex: 0,
       rendition: "main",
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       unit: "idle-hover",
       lane: candidate.lane,
       logicalRunId: 3,
@@ -738,7 +738,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -770,7 +770,7 @@ describe("player multi-route prefetch", () => {
     expect(rendererDiagnostics[0]).toMatchObject({
       sourceIndex: 0,
       rendition: "main",
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       backend: "webgl2",
       phase: "context-create",
       operation: "construct"
@@ -797,7 +797,7 @@ describe("player multi-route prefetch", () => {
     expect(published).toMatchObject({
       sourceIndex: 0,
       rendition: "main",
-      codec: "avc1.640020",
+      codec: "avc1.42E020",
       backend: "webgl2",
       phase: "rgba-copy",
       operation: "runtime",
@@ -1024,7 +1024,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: controller.signal,
       preparationTimeoutMs: 5_000,
@@ -1092,7 +1092,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1191,7 +1191,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1278,7 +1278,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1356,7 +1356,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1457,7 +1457,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1560,7 +1560,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1748,7 +1748,7 @@ async function createReadyTerminalPlayer(
     platform: testPlatform(),
     initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
     baseUrl: "https://example.test/",
-    sources: [{ src: "motion.avl", codec: "avc1.640020", integrity: "" }],
+    sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
     credentials: "same-origin",
     signal: new AbortController().signal,
     preparationTimeoutMs: 5_000,
