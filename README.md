@@ -180,7 +180,7 @@ reveals alternate application content.
 ## TODO
 
 - React dedicated component and API.  
-- More browser tests.  
+- Compatibility table
 - Render some cool stuff in 3D for the demo instead of that AI-generated loop that I was not able to make look the way I wanted to actually showcase the uninterruptible animation.
 
 ## Documentation
