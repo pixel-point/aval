@@ -209,7 +209,7 @@ function bundle(codec: VideoCodec): Readonly<CompileBundleArtifact> {
         type: `application/vnd.aval; codecs=\"test.${codec}\"`,
         integrity: "sha256-test"
       })]),
-      sourceMarkup: `<source src="${codec}.avl">`
+      sourceMarkup: `<source src="${codec}.avl" data-codec="${codec}">`
     }),
     buildReportBytes: new TextEncoder().encode('{"reportVersion":"1.0"}'),
     provenance: {} as never,

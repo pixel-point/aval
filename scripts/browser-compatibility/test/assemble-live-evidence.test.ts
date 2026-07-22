@@ -390,7 +390,7 @@ async function writeCaseArtifacts({
       authoredSources: codecs.map((codec: keyof typeof CODEC_STRINGS, sourceIndex: number) => ({
         playerId: "player-1",
         index: sourceIndex,
-        codec: CODEC_STRINGS[codec]
+        codec
       })),
       checkpoints: [],
       latest: {

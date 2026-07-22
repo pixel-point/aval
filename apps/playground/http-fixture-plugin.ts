@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   parseCompileBundleReport,
-  parseFrontIndex,
-  VIDEO_CODECS
+  parseFrontIndex
 } from "@pixel-point/aval-format";
+import { SOURCE_CODEC_PRIORITY } from "@pixel-point/aval-element";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, PreviewServer, ViteDevServer } from "vite";
 
@@ -32,7 +32,7 @@ interface RequestRecord {
 
 const FATAL_BOUNDARY_PATH = "/__aval_certification__/fatal-boundary-network.avl";
 const SESSION = /^[A-Za-z0-9_-]{1,64}$/u;
-const CODECS = Object.freeze([...VIDEO_CODECS].reverse());
+const CODECS = SOURCE_CODEC_PRIORITY;
 const QUALIFIED_FIXTURE_ROOT = fileURLToPath(new URL(
   "../../fixtures/certification/v1/",
   import.meta.url

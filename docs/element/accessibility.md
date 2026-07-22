@@ -12,7 +12,7 @@ business action.
   >
     <source
       src="favorite.h264.avl"
-      type='application/vnd.aval; codecs="avc1.42E01E"'
+      data-codec="h264"
     >
   </aval-player>
   <img id="favorite-unavailable" src="favorite.png" alt="" hidden>

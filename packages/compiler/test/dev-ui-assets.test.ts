@@ -5,6 +5,25 @@ import { describe, expect, it } from "vitest";
 import { DEV_CLIENT } from "../src/commands/dev-ui-assets.js";
 
 describe("generated dev client refresh ownership", () => {
+  it("installs codec families without exposing the report MIME type as HTML admission", async () => {
+    const harness = createHarness();
+
+    harness.publish(build(1));
+    harness.resolveReport(1, report(1));
+    await settle();
+
+    expect(harness.motion.children).toHaveLength(1);
+    const source = harness.motion.children[0]!;
+    expect(source.getAttribute("src")).toBe("h264.avl#v=1");
+    expect(source.getAttribute("data-codec")).toBe("h264");
+    expect(source.getAttribute("integrity")).toBe("sha256-test");
+    expect(source.getAttribute("type")).toBeNull();
+
+    harness.motion.readiness = "interactiveReady";
+    harness.resolvePreparation(1);
+    await settle();
+  });
+
   it("keeps report fetch failures separate from playback and the consumer alternate", async () => {
     const harness = createHarness();
     harness.unavailable.hidden = true;

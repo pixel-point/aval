@@ -6,8 +6,9 @@ reversals, and packed transparency.
 
 One logical animation is published as a codec bundle. Each codec gets its own
 AVAL wire 1.1 file—AV1, VP9, H.265/HEVC, or H.264—and the browser selects the
-first ordered `<source>` that decodes and passes pre-readiness output
-qualification. The state graph and authored timing are identical in every
+first candidate in AVAL's fixed AV1 → VP9 → H.265 → H.264 ladder that decodes
+and passes pre-readiness output qualification. DOM source order does not
+change that policy. The state graph and authored timing are identical in every
 file.
 
 ## Required application error handling
@@ -40,7 +41,7 @@ npm run dev
 
 Here `npx avl` resolves the `avl` executable from the compiler package
 installed on the preceding line. The generated starter contains its RGBA
-frames, project 1.0 file, four ordered encoding policies, consumer-owned error
+frames, project 1.0 file, four codec encoding policies, consumer-owned error
 handling, and watch workflow.
 
 For a normal build, the compiler publishes a directory rather than a single
@@ -61,27 +62,28 @@ dist/motion/
 
 ## Browser integration
 
-Use literal direct-child sources in preference order. The exact codec strings
-come from `build.json`; the values below are illustrative.
+Use literal direct-child sources with one required lowercase `data-codec`
+family per file. AVAL derives preference from that attribute, not DOM order;
+the exact WebCodecs configuration remains inside each `.avl` manifest.
 
 ```html
 <div class="motion-shell">
   <aval-player id="motion" width="320" height="320">
     <source
       src="/motion/av1.avl"
-      type='application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"'
+      data-codec="av1"
     >
     <source
       src="/motion/vp9.avl"
-      type='application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"'
+      data-codec="vp9"
     >
     <source
       src="/motion/h265.avl"
-      type='application/vnd.aval; codecs="hvc1.1.6.L93.B0"'
+      data-codec="h265"
     >
     <source
       src="/motion/h264.avl"
-      type='application/vnd.aval; codecs="avc1.42E01E"'
+      data-codec="h264"
     >
   </aval-player>
   <img id="motion-unavailable" src="/motion.png" alt="" hidden>
@@ -125,8 +127,11 @@ try {
 }
 ```
 
-The `<aval-player>` host does not carry `src`; URLs belong to each codec
-candidate. AVAL raises `AvalPlaybackError` when playback cannot run. The
+The `<aval-player>` host does not carry `src`; URLs and codec-family
+declarations belong to each candidate. `data-codec` accepts exactly `av1`,
+`vp9`, `h265`, or `h264`, and a family may appear at most once. Missing,
+unknown, or duplicate declarations are invalid configuration. AVAL raises
+`AvalPlaybackError` when playback cannot run. The
 application decides whether to show its sibling image, another renderer, text,
 or nothing. Applications can select any authored state without media seeking:
 
@@ -137,7 +142,9 @@ await motion?.setState("success");
 
 ## Codec and compression model
 
-A project has an ordered, codec-major `encodings` array. Each codec owns its
+A project has a codec-major `encodings` array. Its order controls compiler and
+report publication only; browser preference is always AV1 → VP9 → H.265 →
+H.264. Each codec owns its
 rendition ladder and constant-quality CRF settings. H.264 and H.265 expose
 compression presets; VP9 exposes `deadline` and `cpuUsed`; AV1 exposes
 `bitDepth`, `cpuUsed`, `tiles`, `rowMt`, and `threads`. Slower modes such as
@@ -177,8 +184,9 @@ npm run build
 npm run test:browser:reference
 ```
 
-Browser animation is qualified in authored source order. A positive WebCodecs
-configuration probe remains provisional; unsupported configurations and
+Browser animation is qualified in the fixed AV1 → VP9 → H.265 → H.264 order,
+independent of authored source order. A positive WebCodecs configuration probe
+remains provisional; unsupported configurations and
 codec-specific startup qualification failures fall through to the next
 `<source>`. Once `interactiveReady` is published, the selected codec never
 hot-switches. When no candidate qualifies, preparation rejects and one fatal

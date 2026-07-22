@@ -3,9 +3,13 @@ import {
   type JSHandle,
   type Page
 } from "@playwright/test";
+import {
+  SOURCE_CODEC_PRIORITY,
+  type AvalSourceCodec
+} from "@pixel-point/aval-element";
 
-export const CODECS = Object.freeze(["av1", "vp9", "h265", "h264"] as const);
-export type Codec = typeof CODECS[number];
+export const CODECS = SOURCE_CODEC_PRIORITY;
+export type Codec = AvalSourceCodec;
 export type SupportState = "supported" | "unsupported" | "unavailable";
 
 export const CODEC_LABELS = Object.freeze({
@@ -409,23 +413,17 @@ export async function expectActiveCodecPlayer(
 }
 
 export async function activePlayerSources(page: Page): Promise<Codec[]> {
-  const codecStrings = await page.evaluate(() => {
+  return page.evaluate(() => {
     const player = window.grassRabbitCodecs.activePlayer;
     if (player === null) return [];
     return [...player.querySelectorAll("source")].map((source) => {
-      const match = /^application\/vnd\.aval; codecs="([^"]+)"$/u.exec(
-        source.type
-      );
-      if (match === null) throw new Error("active player source type is invalid");
-      return match[1]!;
+      const codec = source.getAttribute("data-codec");
+      if (codec !== "av1" && codec !== "vp9" &&
+          codec !== "h265" && codec !== "h264") {
+        throw new Error("active player source codec is invalid");
+      }
+      return codec;
     });
-  });
-  return codecStrings.map((codecString) => {
-    const codec = CODECS.find((candidate) =>
-      CODEC_PATTERNS[candidate].test(codecString)
-    );
-    if (codec === undefined) throw new Error("active player codec is unknown");
-    return codec;
   });
 }
 

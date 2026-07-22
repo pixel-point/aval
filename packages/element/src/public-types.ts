@@ -1,3 +1,5 @@
+import type { VideoCodec } from "@pixel-point/aval-format";
+
 export const AVAL_TAG_NAME = "aval-player" as const;
 export const AVAL_ELEMENT_API_MAJOR = 1 as const;
 
@@ -7,6 +9,7 @@ export type AvalCrossOrigin = "anonymous" | "use-credentials";
 export type AvalFit = "contain" | "cover" | "fill" | "none";
 export type AvalMotion = "auto" | "reduce" | "full";
 export type AvalMode = "animated" | "static" | null;
+export type AvalSourceCodec = VideoCodec;
 
 export type BindingSource =
   | "activate"
@@ -116,13 +119,6 @@ export type RuntimeReadinessResult =
       readonly reason: StaticReason;
       readonly report: Readonly<RuntimeReadinessReport>;
     };
-
-export interface AvalSourceCandidate {
-  readonly src: string;
-  readonly type: `application/vnd.aval; codecs="${string}"`;
-  readonly codec: string;
-  readonly integrity: string;
-}
 
 export interface AvalPrepareOptions {
   readonly signal?: AbortSignal;

@@ -17,7 +17,7 @@ describe("element trust boundary", () => {
       parentElement: null,
       getAttribute: (name: string) => ({
         src: secret,
-        type: "video/mp4",
+        "data-codec": "mpeg2",
         integrity: "sha256-secret"
       })[name] ?? null
     } as unknown as Element;
@@ -29,7 +29,7 @@ describe("element trust boundary", () => {
     } as HTMLElement);
     expect(read.sources).toEqual([]);
     expect(read.failures).toEqual([
-      { sourceIndex: 0, attribute: "type" },
+      { sourceIndex: 0, attribute: "data-codec" },
       { sourceIndex: 0, attribute: "integrity" }
     ]);
     expect(JSON.stringify(read.failures)).not.toContain("SECRET");

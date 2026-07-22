@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { expect, test } from "@playwright/test";
+import { SOURCE_CODEC_PRIORITY } from "@pixel-point/aval-element";
 import { parseFrontIndex } from "@pixel-point/aval-format";
 
 const EXAMPLE_PATH = resolve("examples/kinetic-orb");
@@ -10,7 +11,7 @@ const PROJECT_PATH = resolve(EXAMPLE_PATH, "motion.json");
 const BUNDLE_PATH = resolve(EXAMPLE_PATH, "public/kinetic-orb");
 const BUILD_PATH = resolve(BUNDLE_PATH, "build.json");
 const HTML_PATH = resolve(EXAMPLE_PATH, "index.html");
-const CODECS = ["av1", "vp9", "h265", "h264"] as const;
+const CODECS = SOURCE_CODEC_PRIORITY;
 
 test("preserves the phase-locked graph across the preferred codec ladder", async () => {
   const project = JSON.parse(await readFile(PROJECT_PATH, "utf8")) as {
@@ -108,7 +109,7 @@ test("preserves the phase-locked graph across the preferred codec ladder", async
   );
   expect(report.encodings.map(({ codec }) => codec)).toEqual(CODECS);
   expect(report.sourceMarkup).toBe(report.assets.map((asset) =>
-    `<source src="${asset.path}" type='${asset.type}' integrity="${asset.integrity}">`
+    `<source src="${asset.path}" data-codec="${asset.codec}" integrity="${asset.integrity}">`
   ).join("\n"));
 
   let previousSourceIndex = -1;
@@ -117,7 +118,7 @@ test("preserves the phase-locked graph across the preferred codec ladder", async
     const digest = createHash("sha256").update(bytes).digest();
     const front = parseFrontIndex(bytes);
     const sourceElement = `<source src="%BASE_URL%kinetic-orb/${asset.path}" ` +
-      `type='${asset.type}' integrity="${asset.integrity}">`;
+      `data-codec="${asset.codec}" integrity="${asset.integrity}">`;
     const sourceIndex = html.indexOf(sourceElement);
 
     expect(bytes.subarray(0, 4)).toEqual(Buffer.from("AVLF"));

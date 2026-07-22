@@ -70,8 +70,9 @@ limited-range BT.709 color configuration. Each result is one of:
 - `unsupported`: the panel shows `This codec is not supported in your browser.`;
 - `unavailable`: the panel shows `Codec support could not be checked in your browser.`.
 
-The default player always receives all four sources in authored order (AV1,
-VP9, H.265, H.264), independent of those preflight results. AVAL's typed startup
+The default player always receives all four family-declared sources,
+independent of those preflight results or DOM order. AVAL's fixed AV1 → VP9 →
+H.265 → H.264 policy and typed startup
 qualification therefore owns the authoritative fallback decision and can
 advance through the complete ladder before publishing a winner. The selected
 tab then tracks the codec that actually reached `interactiveReady`. If none can
@@ -100,9 +101,9 @@ override.
 Tabs use the ARIA tab/tabpanel pattern. Arrow keys, Home, and End move focus;
 Enter, Space, or a pointer click activates the focused tab. On explicit
 activation the page awaits disposal of the prior player before removing it,
-then mounts one new player containing exactly one `<source>`. Its URL, `type`,
-and `integrity` all come from `build.json`. Repeated rapid activations are
-latest-wins.
+then mounts one new player containing exactly one `<source>`. Its URL,
+`data-codec`, and `integrity` all come from `build.json`. Repeated rapid
+activations are latest-wins.
 
 For browser tests and local inspection, the page exposes:
 

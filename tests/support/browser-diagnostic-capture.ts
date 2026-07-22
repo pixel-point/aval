@@ -17,13 +17,13 @@ import {
 } from "node:path";
 import { performance as monotonicPerformance } from "node:perf_hooks";
 
-import { H264_CONSTRAINED_BASELINE_CODECS } from "@pixel-point/aval-format";
 import {
   expect,
   type Locator,
   type Page,
   type TestInfo
 } from "@playwright/test";
+import { SOURCE_CODEC_PRIORITY } from "@pixel-point/aval-element";
 
 export const BROWSER_DIAGNOSTIC_PRODUCER_LIMITS = Object.freeze({
   authoredSources: 128,
@@ -88,6 +88,7 @@ const PLAYBACK_LANE_COUNTER_KEYS = Object.freeze([
 ] as const);
 const EVIDENCE_SOAK_MILLISECONDS = 60_000;
 const EVIDENCE_EVENT_LIMIT = 4_096;
+const SOURCE_CODEC_FAMILIES = SOURCE_CODEC_PRIORITY;
 
 export type BrowserDiagnosticEvidenceDemoId =
   typeof EVIDENCE_DEMO_IDS[number];
@@ -263,8 +264,7 @@ export interface BrowserDiagnosticReport {
     readonly playerId: string;
     readonly context: unknown;
     readonly index: number;
-    readonly mimeType: string;
-    readonly codec: string | null;
+    readonly codec: string;
   }>[];
   readonly checkpoints: readonly Readonly<BrowserDiagnosticCheckpoint>[];
   readonly latest: Readonly<{
@@ -844,7 +844,7 @@ export async function prepareDeterministicUnsupportedBrowserPlayer(
     player.style.cssText = "display:block;width:640px;height:360px";
     const source = document.createElement("source");
     source.src = new URL(`grass-rabbit/${asset.path}`, location.href).href;
-    source.type = asset.type;
+    source.setAttribute("data-codec", "h264");
     source.setAttribute("integrity", asset.integrity);
     player.append(source);
     document.body.append(player);
@@ -1025,14 +1025,9 @@ export async function openWithDiagnostics(
 }
 
 async function installForcedH264SourcePolicy(page: Page): Promise<void> {
-  await page.addInitScript((canonicalH264Codecs) => {
-    const h264 = new Set<string>(canonicalH264Codecs);
-    const prefix = 'application/vnd.aval; codecs="';
-    const isH264 = (source: HTMLSourceElement): boolean => {
-      const type = source.getAttribute("type");
-      return typeof type === "string" && type.startsWith(prefix) &&
-        type.endsWith('"') && h264.has(type.slice(prefix.length, -1));
-    };
+  await page.addInitScript(() => {
+    const isH264 = (source: HTMLSourceElement): boolean =>
+      source.getAttribute("data-codec") === "h264";
     const prune = (root: Node) => {
       if (!(root instanceof Element || root instanceof Document)) return;
       if (
@@ -1052,7 +1047,7 @@ async function installForcedH264SourcePolicy(page: Page): Promise<void> {
       }
       prune(document);
     }).observe(document, { childList: true, subtree: true });
-  }, H264_CONSTRAINED_BASELINE_CODECS);
+  });
 }
 
 export async function checkpoint(
@@ -1448,8 +1443,7 @@ interface DiagnosticActivePlayerBinding {
   readonly elementId: string | null;
   readonly authoredSources: readonly Readonly<{
     readonly index: number;
-    readonly mimeType: string;
-    readonly codec: string | null;
+    readonly codec: string;
   }>[];
 }
 
@@ -1486,8 +1480,7 @@ function diagnosticActivePlayerBinding(
     authoredSources.length === 0 ||
     authoredSources.some((source, index) =>
       source.index !== index ||
-      source.mimeType.length === 0 ||
-      (source.codec !== null && source.codec.length === 0)
+      !isSourceCodecFamily(source.codec)
     )
   ) throw activePlayerBindingError();
   return Object.freeze({
@@ -1496,7 +1489,6 @@ function diagnosticActivePlayerBinding(
     authoredSources: Object.freeze(authoredSources.map((source) =>
       Object.freeze({
         index: source.index,
-        mimeType: source.mimeType,
         codec: source.codec
       })
     ))
@@ -1515,31 +1507,18 @@ async function playerMatchesAuthoredSources(
   const sources = player.locator(":scope > source");
   if (await sources.count() !== expected.length) return false;
   for (let index = 0; index < expected.length; index += 1) {
-    const actual = parseAuthoredSourceType(
-      await sources.nth(index).getAttribute("type")
-    );
+    const actual = await sources.nth(index).getAttribute("data-codec");
     const wanted = expected[index]!;
-    if (
-      actual === null ||
-      actual.mimeType !== wanted.mimeType ||
-      actual.codec !== wanted.codec
-    ) return false;
+    if (actual !== wanted.codec) return false;
   }
   return true;
 }
 
-function parseAuthoredSourceType(value: string | null): Readonly<{
-  mimeType: string;
-  codec: string | null;
-}> | null {
-  if (value === null) return null;
-  const mimeType = value.split(";", 1)[0]?.trim() ?? "";
-  if (mimeType.length === 0) return null;
-  const match = /(?:^|;)\s*codecs\s*=\s*["']?([^;"']+)/iu.exec(value);
-  return Object.freeze({
-    mimeType,
-    codec: match?.[1]?.trim() ?? null
-  });
+function isSourceCodecFamily(
+  value: unknown
+): value is (typeof SOURCE_CODEC_FAMILIES)[number] {
+  return typeof value === "string" &&
+    (SOURCE_CODEC_FAMILIES as readonly string[]).includes(value);
 }
 
 async function visibleAnimatedCanvas(

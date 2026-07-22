@@ -195,7 +195,10 @@ async function focusOverlapReentry(motion: Locator): Promise<void> {
 }
 
 async function settledAs(motion: Locator, state: "idle" | "hover"): Promise<void> {
-  await expect.poll(() => readOrbState(motion), { timeout: 8_000 }).toEqual({
+  await expect.poll(() => readOrbState(motion), {
+    timeout: 8_000,
+    intervals: [25, 50, 100]
+  }).toEqual({
     requestedState: state,
     visualState: state,
     isTransitioning: false

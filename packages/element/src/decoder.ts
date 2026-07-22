@@ -10,6 +10,7 @@ import {
   type DecoderRunEvent
 } from "./decoder-protocol.js";
 import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
+import { DECODER_PROGRESS_TIMEOUT_MS } from "./decoder-timing-policy.js";
 import { sameAspectRatio } from "./media-geometry.js";
 import {
   createDecoderOutputFailure,
@@ -86,6 +87,10 @@ export interface DecoderSnapshot {
 export type DecoderLocalFailure =
   | Readonly<{ kind: "unsupported-config" }>
   | Readonly<{
+      kind: "progress-timeout";
+      phase: "probe" | "decode" | "flush";
+    }>
+  | Readonly<{
       kind: "operation-rejected";
       phase: "configure" | "decode" | "flush";
       errorName: "NotSupportedError" | "EncodingError";
@@ -102,7 +107,6 @@ export class DecoderLocalFailureError extends Error {
   }
 }
 
-const PROGRESS_MS = 2_000;
 const MAX_BYTES = Number.MAX_SAFE_INTEGER;
 type DecoderLane =
   | Readonly<{ phase: "idle"; generationFloor: number }>
@@ -138,6 +142,7 @@ export class Decoder {
   #nativeDecoderCloses = 0;
   #nativeCreateGenerationFloor = 0;
   #nativeCloseGenerationFloor = 0;
+  #supportTimer: number | undefined;
 
   public constructor(
     config: Readonly<VideoDecoderConfig>,
@@ -193,6 +198,7 @@ export class Decoder {
         reason
       ));
     });
+    this.#armSupportWatchdog();
     try {
       this.#post({ t: "configure", config: { ...config } });
     } catch (reason) {
@@ -305,6 +311,7 @@ export class Decoder {
   public dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#clearSupportWatchdog();
     this.#lane = { phase: "terminal" };
     const run = this.#run;
     run?.close();
@@ -330,6 +337,7 @@ export class Decoder {
       return;
     }
     if (value.t === "configured") {
+      this.#clearSupportWatchdog();
       if (this.#configured) {
         const reason = new Error("AVAL decoder was configured more than once");
         this.#fail(reason, this.#localDiagnostic(
@@ -611,6 +619,31 @@ export class Decoder {
     this.#nativeDecoderCloses = saturatingIncrement(this.#nativeDecoderCloses);
   }
 
+  #armSupportWatchdog(): void {
+    if (
+      this.#supportTimer !== undefined ||
+      this.#configured ||
+      this.#disposed ||
+      this.#error !== undefined
+    ) return;
+    this.#supportTimer = this.#setTimeout(() => {
+      this.#supportTimer = undefined;
+      const error = decodeTimeout();
+      this.#fail(error, this.#localDiagnostic(
+        "probe",
+        "watchdog-timeout",
+        error
+      ));
+    }, DECODER_PROGRESS_TIMEOUT_MS);
+  }
+
+  #clearSupportWatchdog(): void {
+    if (this.#supportTimer !== undefined) {
+      this.#clearTimeout(this.#supportTimer);
+    }
+    this.#supportTimer = undefined;
+  }
+
   #localDiagnostic(
     phase: DecoderDiagnosticPhase,
     code: DecoderDiagnosticCode,
@@ -658,6 +691,7 @@ export class Decoder {
     )
   ): void {
     if (this.#disposed || this.#error !== undefined) return;
+    this.#clearSupportWatchdog();
     const reported = decoderReportedError(error, diagnostic);
     this.#error = reported;
     this.#diagnostic = diagnostic;
@@ -671,7 +705,8 @@ export class Decoder {
   }
 }
 
-function decoderReportedError(
+/** @internal Canonical classification boundary for decoder diagnostics. */
+export function decoderReportedError(
   error: Error,
   diagnostic: Readonly<DecoderFailureDiagnostic>
 ): Error {
@@ -684,6 +719,12 @@ function decoderLocalFailure(
   diagnostic: Readonly<DecoderFailureDiagnostic>
 ): Readonly<DecoderLocalFailure> | null {
   if (diagnostic.phase === "probe") {
+    if (diagnostic.code === "watchdog-timeout") {
+      return Object.freeze({
+        kind: "progress-timeout",
+        phase: "probe"
+      });
+    }
     if (diagnostic.code === "unsupported-config" ||
       diagnostic.code === "decoder-operation" &&
       retryableDecoderErrorName(diagnostic.exception?.name)) {
@@ -697,6 +738,15 @@ function decoderLocalFailure(
     diagnostic.outputFailure !== null
   ) {
     return Object.freeze({ kind: "decoded-metadata-incompatible" });
+  }
+  if (
+    (diagnostic.phase === "decode" || diagnostic.phase === "flush") &&
+    diagnostic.code === "watchdog-timeout"
+  ) {
+    return Object.freeze({
+      kind: "progress-timeout",
+      phase: diagnostic.phase
+    });
   }
   if (
     (diagnostic.phase === "configure" ||
@@ -1297,7 +1347,7 @@ export class DecodeRun {
         error,
         this.#nextOutputOrdinal()
       ));
-    }, PROGRESS_MS);
+    }, DECODER_PROGRESS_TIMEOUT_MS);
   }
 
   #clearProgressWatchdog(): void {

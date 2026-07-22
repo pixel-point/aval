@@ -11,10 +11,13 @@ import {
   parseCompileBundleReport,
   parseFrontIndex
 } from "../../packages/format/dist/index.js";
+import {
+  SOURCE_CODEC_PRIORITY
+} from "@pixel-point/aval-element";
 
 const DEFAULT_REPOSITORY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const COMPILER_INSPECTOR = "packages/compiler/dist/cli.js";
-const FOUR_CODEC_ORDER = Object.freeze(["av1", "vp9", "h265", "h264"]);
+const FOUR_CODEC_ORDER = SOURCE_CODEC_PRIORITY;
 
 const RABBIT_UNITS = units([
   ["hover-in", "body", 67],
@@ -471,8 +474,8 @@ async function validateDynamicCodecChooser(root, bundle) {
   );
   expectMatch(
     controller,
-    /source\.type\s*=\s*asset\.type\s*;/u,
-    `${contract.id} dynamic source MIME type`
+    /source\.setAttribute\(\s*["']data-codec["']\s*,\s*codec\s*\)\s*;/u,
+    `${contract.id} dynamic source codec family`
   );
   expectMatch(
     controller,
@@ -497,12 +500,12 @@ function extractSourceElements(markup, label) {
     }
     expectEqual(
       Object.keys(attributes).sort().join(","),
-      "integrity,src,type",
+      "data-codec,integrity,src",
       `${label} source ${String(index)} attributes`
     );
     return Object.freeze({
       src: attributes.src,
-      type: attributes.type,
+      codec: attributes["data-codec"],
       integrity: attributes.integrity
     });
   });

@@ -65,6 +65,40 @@ describe("provisional startup orchestration", () => {
     expect(index).toBe(2);
   });
 
+  it("retires a progress-stalled AV1 candidate before qualifying VP9", async () => {
+    const operations: string[] = [];
+    const candidates = ["av1", "vp9"];
+    let index = 0;
+
+    const selected = await orchestrateProvisionalCandidates({
+      next: async () => candidates[index++]!,
+      qualify: async (candidate) => {
+        operations.push(`qualify:${candidate}`);
+        if (candidate === "av1") throw decoderProgressTimeout("decode");
+      },
+      localFailure: () => undefined,
+      retire: async (candidate) => {
+        operations.push(`retire:${candidate}`);
+        return { retryAllowed: true };
+      },
+      cancelled: () => false,
+      selected: (candidate) => operations.push(`selected:${candidate}`),
+      rejected: (candidate, rejection) => {
+        operations.push(`rejected:${candidate}:${rejection.cause}`);
+      }
+    });
+
+    expect(selected).toBe("vp9");
+    expect(operations).toEqual([
+      "qualify:av1",
+      "retire:av1",
+      "rejected:av1:decode-progress-timeout",
+      "qualify:vp9",
+      "selected:vp9"
+    ]);
+    expect(index).toBe(2);
+  });
+
   it.each([
     ["terminal local failure", new Error("renderer failed"), true],
     ["cleanup refusal", decoderFailure("decode", "EncodingError"), false]
@@ -95,13 +129,15 @@ describe("provisional startup orchestration", () => {
       { stage: "configure", cause: "configure-not-supported" },
       { stage: "decode", cause: "decode-not-supported" },
       { stage: "decode", cause: "decode-encoding-rejected" },
+      { stage: "decode", cause: "decode-progress-timeout" },
       { stage: "decode", cause: "decoded-metadata-incompatible" },
       { stage: "flush", cause: "flush-not-supported" },
       { stage: "flush", cause: "flush-encoding-rejected" },
+      { stage: "flush", cause: "flush-progress-timeout" },
       { stage: "output", cause: "decoded-output-incompatible" }
     ] as const satisfies readonly RetryableCandidateRejection[];
 
-    expect(retryable).toHaveLength(8);
+    expect(retryable).toHaveLength(10);
     const renderer: RetryableCandidateRejection = {
       stage: "output",
       // @ts-expect-error renderer failures cannot inhabit the retryable union.
@@ -131,6 +167,13 @@ describe("provisional startup orchestration", () => {
     expect(retryableCandidateOutcome(
       decoderFailure("configure", "EncodingError")
     )).toBeNull();
+    expect(retryableCandidateOutcome(decoderProgressTimeout("flush"))).toEqual({
+      kind: "retryable-rejection",
+      rejection: {
+        stage: "flush",
+        cause: "flush-progress-timeout"
+      }
+    });
     expect(retryableCandidateOutcome(new Error("transport failure"))).toBeNull();
   });
 });
@@ -394,5 +437,15 @@ function decoderFailure(
     kind: "operation-rejected",
     phase,
     errorName
+  }), reason);
+}
+
+function decoderProgressTimeout(
+  phase: "decode" | "flush"
+): DecoderLocalFailureError {
+  const reason = new DOMException("AVAL decoder made no progress", "TimeoutError");
+  return new DecoderLocalFailureError(Object.freeze({
+    kind: "progress-timeout",
+    phase
   }), reason);
 }

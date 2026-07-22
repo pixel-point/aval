@@ -289,7 +289,7 @@ function artifact(marker = 4): Readonly<CompileBundleArtifact> {
     buildReport: Object.freeze({
       reportVersion: "1.0" as const,
       assets: Object.freeze([reportedAsset]),
-      sourceMarkup: `<source src="h264.avl" type='${type}' integrity="${integrity}">`
+      sourceMarkup: `<source src="h264.avl" data-codec="h264" integrity="${integrity}">`
     }),
     buildReportBytes: new TextEncoder().encode(
       JSON.stringify({ marker, reportVersion: "1.0" })

@@ -7,6 +7,7 @@ import type {
   NormalizedVideoEncoding,
   SourceProject
 } from "@pixel-point/aval-compiler";
+import { SOURCE_CODEC_PRIORITY } from "@pixel-point/aval-element";
 import {
   parseFrontIndex,
   parseVideoCodecString,
@@ -34,7 +35,7 @@ const SOURCE_BYTES = 7_321_326;
 const SOURCE_SHA256 =
   "546acee64cc36c13f8765e215a0a20fb5742026c57364c59560fa86bb68988b1";
 const TOTAL_SOURCE_FRAMES = 311;
-const CODECS = ["av1", "vp9", "h265", "h264"] as const satisfies readonly VideoCodec[];
+const CODECS = SOURCE_CODEC_PRIORITY satisfies readonly VideoCodec[];
 const BITSTREAMS = Object.freeze({
   av1: "low-overhead",
   vp9: "frame",
@@ -506,7 +507,7 @@ function sha256Integrity(bytes: Uint8Array): string {
 function sourceElement(
   asset: Readonly<CompileBundleReport["assets"][number]>
 ): string {
-  return `<source src="${asset.path}" type='${asset.type}' integrity="${asset.integrity}">`;
+  return `<source src="${asset.path}" data-codec="${asset.codec}" integrity="${asset.integrity}">`;
 }
 
 function byId(left: { readonly id: string }, right: { readonly id: string }): number {

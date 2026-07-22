@@ -1,7 +1,7 @@
 # @pixel-point/aval-compiler
 
 The AVAL 1.0 authoring API and `avl` CLI. A project defines one logical motion
-graph and an ordered codec-major encoding set. Compilation publishes a bundle
+graph and a codec-major encoding set. Compilation publishes a bundle
 directory containing one `.avl` per requested codec and a canonical
 `build.json` report.
 
@@ -33,8 +33,9 @@ dist/motion/
 replaces that directory as one unit.
 
 The project schema and build report are exact 1.0 contracts. Every `.avl` file
-uses wire format 1.1. The ordered `encodings` array is also the browser
-preference order.
+uses wire format 1.1. The `encodings` array order is retained in compiler and
+report output; browser preference is independently fixed at AV1 → VP9 → H.265
+→ H.264.
 This encoding fragment omits the required canvas, source, and graph fields:
 
 ```json
@@ -144,11 +145,12 @@ project file rather than by repeating direct CLI flags.
 
 ## Browser sources and integrity
 
-`build.json.assets` contains, in preference order, each codec filename, exact
-WebCodecs MIME type, SHA-256 digest, and ready-to-use SRI value. Its
+`build.json.assets` contains each codec filename, exact WebCodecs MIME type,
+SHA-256 digest, and ready-to-use SRI value in encoding/report order. Its
 `sourceMarkup` field contains the canonical direct-child `<source>` lines.
-Copy those values exactly; integrity belongs to each codec file, not to the
-`<aval-player>` host.
+Those lines use the required lowercase `data-codec` family and no HTML `type`
+attribute. Copy them exactly; integrity belongs to each codec file, not to the
+`<aval-player>` host. The exact codec profile remains in the `.avl` manifest.
 
 The compiler uses caller-installed FFmpeg and FFprobe. The requested encodings
 require the corresponding `libx264`, `libx265`, `libvpx-vp9`, and

@@ -21,7 +21,12 @@ import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { parseVideoCodecString } from "@pixel-point/aval-format";
+import {
+  parseVideoCodecString
+} from "@pixel-point/aval-format";
+import {
+  SOURCE_CODEC_PRIORITY
+} from "@pixel-point/aval-element";
 
 import {
   DIAGNOSTIC_REPORT_SCHEMA,
@@ -46,7 +51,7 @@ const SESSION_PATTERN =
   /^[0-9]{8}T[0-9]{6}Z(?:-[a-z0-9][a-z0-9-]{0,47})?$/u;
 const IDENTIFIER_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const MODES = Object.freeze(["forced-h264", "full-ladder"]);
-const CODECS = Object.freeze(["av1", "vp9", "h265", "h264"]);
+const CODECS = SOURCE_CODEC_PRIORITY;
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
 const MAX_ARTIFACT_BYTES = 32 * 1024 * 1024;
 const BRAVE_PROVENANCE_PATTERN =
@@ -59,6 +64,10 @@ function codecFamily(value) {
   return typeof value === "string"
     ? parseVideoCodecString(value)?.family ?? null
     : null;
+}
+
+function sourceCodecFamily(value) {
+  return typeof value === "string" && CODECS.includes(value) ? value : null;
 }
 
 export async function assembleLiveEvidenceManifest({
@@ -494,9 +503,11 @@ async function assembleCheckpoint({
     .filter((source) => source?.playerId === playerId)
     .sort((left, right) => left.index - right.index);
   if (sources.length === 0 || sources.some((source, index) =>
-    source.index !== index || codecFamily(source.codec) === null
+    source.index !== index || sourceCodecFamily(source.codec) === null
   )) throw new Error(`live-assembly-report-active-sources-invalid:${caseId}`);
-  const authoredCodecs = Object.freeze(sources.map(({ codec }) => codecFamily(codec)));
+  const authoredCodecs = Object.freeze(
+    sources.map(({ codec }) => sourceCodecFamily(codec))
+  );
   const rawSelected = report?.latest?.element?.diagnostics?.runtime?.selectedCodec;
   const selectedCodec = rawSelected === null ? null : codecFamily(rawSelected);
   if (rawSelected !== null && selectedCodec === null) {

@@ -126,7 +126,7 @@ function validReport() {
     warnings: [] as string[],
     toolchain: validToolchain(),
     sourceMarkup:
-      `<source src="${asset.path}" type='${asset.type}' integrity="${asset.integrity}">`
+      `<source src="${asset.path}" data-codec="${asset.codec}" integrity="${asset.integrity}">`
   };
 }
 

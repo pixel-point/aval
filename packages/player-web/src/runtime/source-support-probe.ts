@@ -88,9 +88,8 @@ export function createSourceSupportProbe(
 }
 
 /**
- * Without a decoder worker there is no qualified animated source. Returning
- * false lets source selection exhaust authored candidates and publish its
- * normal terminal error; alternate presentation remains consumer-owned.
+ * Without a decoder worker this advisory probe cannot qualify the source.
+ * The caller owns how unsupported results affect presentation or fallback.
  */
 const UNAVAILABLE_WORKER_SUPPORT_CLIENT: SourceSupportProbeClient = Object.freeze({
   async probeConfig(): Promise<boolean> { return false; },

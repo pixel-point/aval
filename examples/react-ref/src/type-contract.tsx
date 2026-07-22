@@ -17,7 +17,7 @@ void (
   >
     <source
       src="/status/h264.avl"
-      type='application/vnd.aval; codecs="avc1.42E00A"'
+      data-codec="h264"
     />
   </aval-player>
 );

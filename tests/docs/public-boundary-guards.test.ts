@@ -41,7 +41,7 @@ describe("public documentation boundary guards", () => {
       '<aval-player\n  aria-hidden="true"\n  src = {motionUrl}\n/>'
     )).toBe(true);
     expect(hasAvalHostSrc(
-      '<aval-player><source src="motion.avl"></aval-player>'
+      '<aval-player><source src="motion.avl" data-codec="h264"></aval-player>'
     )).toBe(false);
     expect(hasAvalHostSrc(
       '<aval-player-source src="motion.avl"></aval-player-source>'

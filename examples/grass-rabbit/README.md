@@ -12,8 +12,8 @@ half-open frame ranges:
 
 The authored canvas remains 1280×720, while each encoded rendition is 640×360.
 The page presents the selected rendition at exactly 640×360, centered in a
-pure-black viewport. The browser tries the sources in authored order: AV1,
-VP9, H.265, then H.264. Hover or focus the animation to enter the `hover` state;
+pure-black viewport. AVAL evaluates the declared families in its fixed AV1,
+VP9, H.265, then H.264 order regardless of DOM order. Hover or focus the animation to enter the `hover` state;
 leave or blur it to return to `idle`.
 
 The `intro` is an initial one-shot attached to the `idle` state. It plays once

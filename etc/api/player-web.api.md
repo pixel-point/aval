@@ -43,18 +43,6 @@ import type { VideoCodec } from '@pixel-point/aval-format';
 import type { VideoRenditionGeometry } from '@pixel-point/aval-format';
 
 // @public (undocumented)
-export interface AcceptedVideoSource<TCandidate extends VideoSourceDescriptor, TSession extends VideoSourceSession> {
-    // (undocumented)
-    readonly attempts: readonly Readonly<VideoSourceSelectionAttempt>[];
-    // (undocumented)
-    readonly candidate: Readonly<TCandidate>;
-    // (undocumented)
-    readonly rendition: Readonly<CertifiedVideoRendition>;
-    // (undocumented)
-    readonly session: TSession;
-}
-
-// @public (undocumented)
 export type ActualMotionMode = "unprepared" | "animated" | "static" | "disposed";
 
 // @public (undocumented)
@@ -4861,9 +4849,6 @@ export interface RuntimeVisibilitySnapshot {
 // @public (undocumented)
 export type RuntimeVisibilityState = "visible" | "hidden";
 
-// @public
-export function selectVideoSource<TCandidate extends VideoSourceDescriptor, TSession extends VideoSourceSession>(input: Readonly<VideoSourceSelectionInput<TCandidate, TSession>>): Promise<Readonly<AcceptedVideoSource<TCandidate, TSession>>>;
-
 // @public (undocumented)
 export interface SourceBodyCursor {
     // (undocumented)
@@ -5256,59 +5241,6 @@ export interface VideoCandidateWorkerSetup {
     readonly configure: Readonly<DecoderWorkerConfigureOptions>;
     // (undocumented)
     readonly limits: Readonly<DecoderWorkerLimits>;
-}
-
-// @public (undocumented)
-export type VideoSourceAttemptOutcome = "invalid-codec-hint" | "all-renditions-unsupported" | "selected";
-
-// @public (undocumented)
-export interface VideoSourceDescriptor {
-    readonly authoredIndex: number;
-    readonly codec: string;
-}
-
-// @public (undocumented)
-export interface VideoSourceSelectionAttempt {
-    // (undocumented)
-    readonly authoredIndex: number;
-    // (undocumented)
-    readonly outcome: VideoSourceAttemptOutcome;
-    // Warning: (ae-forgotten-export) The symbol "VideoRenditionSelectionAttempt" needs to be exported by the entry point index.d.ts
-    //
-    // (undocumented)
-    readonly renditionAttempts: readonly Readonly<VideoRenditionSelectionAttempt>[];
-}
-
-// @public
-export class VideoSourceSelectionError extends Error {
-    constructor(attempts: readonly Readonly<VideoSourceSelectionAttempt>[]);
-    // (undocumented)
-    readonly attempts: readonly Readonly<VideoSourceSelectionAttempt>[];
-}
-
-// @public (undocumented)
-export interface VideoSourceSelectionInput<TCandidate extends VideoSourceDescriptor, TSession extends VideoSourceSession> {
-    // (undocumented)
-    readonly candidates: readonly Readonly<TCandidate>[];
-    // (undocumented)
-    createProbe(candidate: Readonly<TCandidate>): SourceSupportProbe;
-    // (undocumented)
-    isResourceEligible(rendition: Readonly<CertifiedVideoRendition>, candidate: Readonly<TCandidate>, session: TSession): boolean;
-    // (undocumented)
-    open(candidate: Readonly<TCandidate>, signal: AbortSignal): Promise<TSession>;
-    // (undocumented)
-    readonly signal: AbortSignal;
-}
-
-// @public (undocumented)
-export interface VideoSourceSession {
-    // (undocumented)
-    readonly catalog: Readonly<{
-        readonly manifest: Readonly<CompiledManifest>;
-        readonly videoRenditions: readonly Readonly<CertifiedVideoRendition>[];
-    }>;
-    // (undocumented)
-    dispose(): void | PromiseLike<void>;
 }
 
 // @public (undocumented)

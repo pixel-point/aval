@@ -149,7 +149,7 @@ async function verifyCertificationBundle(formatModule) {
     });
   }
   const markup = report.assets.map((asset) =>
-    `<source src="${asset.path}" type='${asset.type}' integrity="${asset.integrity}">`
+    `<source src="${asset.path}" data-codec="${asset.codec}" integrity="${asset.integrity}">`
   ).join("\n");
   if (report.sourceMarkup !== markup) throw new Error("ordered source markup drifted");
   await requireByteEqual(

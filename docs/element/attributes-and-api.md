@@ -12,26 +12,33 @@ URLs and integrity belong only to direct-child `<source>` elements.
 | `fit` | `contain`, `cover`, `fill`, `none` | asset fit |
 | `bindings` | `auto`, `none` | `auto` |
 
-Each direct child requires nonempty `src` and an exact
-`application/vnd.aval; codecs="..."` type; its `integrity` is optional.
-`crossorigin` is shared by the host. Child order is author preference. A
+Each direct child requires nonempty `src` and `data-codec` set to exactly
+`av1`, `vp9`, `h265`, or `h264`; its `integrity` is optional. Each family may
+appear once, and the declared family must match the codec family in that
+source's `.avl` manifest; a mismatch is an invalid asset. `crossorigin` is
+shared by the host. Child order has no priority meaning: AVAL evaluates AV1,
+VP9, H.265, then H.264. A
 positive `VideoDecoder.isConfigSupported()` result is provisional: an animated
 candidate wins only after the production path decodes, transfers, validates,
-and presents its initial frame. With sources authored as AV1, VP9, HEVC, then
-H.264, that order is the startup ladder; AVAL does not impose a codec order of
-its own. Same-task source mutations coalesce. A new source snapshot first
-completely disposes the old generation; only the newest pending snapshot may
-start. Policy, fit, input, state, and size changes do not replace the asset.
+and presents its initial frame. Same-task source mutations coalesce. A new
+source snapshot first completely disposes the old generation; only the newest
+pending snapshot may start. Policy, fit, input, state, and size changes do not
+replace the asset.
+Code that needs to present or validate the same family order can import the
+frozen `SOURCE_CODEC_PRIORITY` tuple from `@pixel-point/aval-element` rather
+than repeating the policy.
 
-An unsupported configuration advances to the next authored rendition or
-source. Before `interactiveReady`, a decoder startup failure advances only
+An unsupported configuration advances to the next authored rendition or codec
+family. Before `interactiveReady`, a decoder startup failure advances only
 when bounded diagnostics identify codec qualification evidence such as
 unsupported configuration, invalid output, or `EncodingError`/
-`NotSupportedError` during configure, decode, flush, or output validation.
-Network, CORS/CSP, integrity, malformed-asset, resource, worker transport,
-renderer/context, cleanup, abort, and watchdog failures are terminal for that
-generation. Once a candidate reaches `interactiveReady`, every later fatal
-failure is terminal and the active codec never hot-switches.
+`NotSupportedError` during configure, decode, flush, or output validation, or a
+decoder-local codec support-probe, decode, or flush progress timeout. Network,
+CORS/CSP, integrity, malformed-asset, resource, worker transport,
+renderer/context, cleanup, abort, and non-decoder watchdog failures are terminal
+for that generation. Once a candidate reaches `interactiveReady`, every later
+fatal failure—including a decoder progress timeout—is terminal and the active
+codec never hot-switches.
 
 Properties validate synchronously and never mutate on invalid input. Invalid
 HTML attribute text falls back to the documented default and emits a nonfatal,

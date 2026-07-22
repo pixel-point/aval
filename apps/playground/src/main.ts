@@ -1,14 +1,16 @@
 import "./style.css";
 import {
+  SOURCE_CODEC_PRIORITY,
+  type AvalSourceCodec
+} from "@pixel-point/aval-element";
+import {
   parseCompileBundleReport,
-  parseVideoCodecString,
-  VIDEO_CODECS,
-  type VideoCodec
+  parseVideoCodecString
 } from "@pixel-point/aval-format";
 
 import { QUALIFIED_FIXTURE_PREFIX } from "../fixture-routes.js";
 
-type Codec = VideoCodec;
+type Codec = AvalSourceCodec;
 
 interface SourcePlaygroundApi {
   readonly ready: Promise<void>;
@@ -16,7 +18,6 @@ interface SourcePlaygroundApi {
   sourceSnapshot(): readonly Readonly<{
     codec: string | null;
     src: string | null;
-    type: string | null;
     integrity: string | null;
   }>[];
 }
@@ -34,13 +35,18 @@ type PlaygroundPlayer = HTMLElement & {
   getDiagnostics?(): Readonly<PlayerDiagnostics>;
 };
 
+interface SourceDefinition {
+  readonly src: string;
+  readonly integrity: string | null;
+}
+
 declare global {
   interface Window {
     readonly avalSourcePlayground: SourcePlaygroundApi;
   }
 }
 
-const CODEC_ORDER = Object.freeze([...VIDEO_CODECS].reverse());
+const CODEC_ORDER = SOURCE_CODEC_PRIORITY;
 const player = requireElement<HTMLElement>("#motion");
 const alternate = requireElement<HTMLElement>(".fallback");
 const status = requireElement<HTMLElement>("#status");
@@ -52,7 +58,8 @@ const codecButtons = new Map<Codec, HTMLButtonElement>(CODEC_ORDER.map((codec) =
 const query = new URLSearchParams(location.search);
 const session = boundedSession(query.get("session") ?? "playground");
 const includeIntegrity = query.get("integrity") !== "0";
-let requestedCodec: Codec = "av1";
+const sourceDefinitions = new Map<Codec, Readonly<SourceDefinition>>();
+let isolatedCodec: Codec | null = null;
 let switching = false;
 
 const ready = initialize();
@@ -62,9 +69,8 @@ const api: SourcePlaygroundApi = Object.freeze({
   sourceSnapshot: () => Object.freeze(
     [...player.querySelectorAll<HTMLSourceElement>(":scope > source")].map((source) =>
       Object.freeze({
-        codec: source.dataset.avalCodec ?? null,
+        codec: source.dataset.codec ?? null,
         src: source.getAttribute("src"),
-        type: source.getAttribute("type"),
         integrity: source.getAttribute("integrity")
       })
     )
@@ -89,7 +95,7 @@ async function initialize(): Promise<void> {
     const assets = new Map(report.assets.map((asset) => [asset.codec, asset]));
     for (const codec of CODEC_ORDER) {
       const source = player.querySelector<HTMLSourceElement>(
-        `:scope > source[data-aval-codec="${codec}"]`
+        `:scope > source[data-codec="${codec}"]`
       );
       const asset = assets.get(codec);
       if (source === null || asset === undefined) {
@@ -97,10 +103,12 @@ async function initialize(): Promise<void> {
       }
       const url = new URL(`${QUALIFIED_FIXTURE_PREFIX}${asset.path}`, location.href);
       url.searchParams.set("session", session);
-      source.src = url.href;
-      source.type = asset.type;
-      if (includeIntegrity) source.setAttribute("integrity", asset.integrity);
+      sourceDefinitions.set(codec, Object.freeze({
+        src: url.href,
+        integrity: includeIntegrity ? asset.integrity : null
+      }));
     }
+    installCodecSources(CODEC_ORDER);
     const motion = player as PlaygroundPlayer;
     bindCodecControls(motion);
     player.addEventListener("readinesschange", () => {
@@ -134,22 +142,22 @@ async function initialize(): Promise<void> {
 function bindCodecControls(motion: PlaygroundPlayer): void {
   for (const [codec, button] of codecButtons) {
     button.addEventListener("click", () => {
-      void switchPreferredCodec(motion, codec);
+      void switchIsolatedCodec(motion, codec);
     });
   }
 }
 
-async function switchPreferredCodec(
+async function switchIsolatedCodec(
   motion: PlaygroundPlayer,
   codec: Codec
 ): Promise<void> {
   if (switching) return;
-  requestedCodec = codec;
+  isolatedCodec = codec;
   switching = true;
   setControlsDisabled(true);
   publishControlState(null);
   codecList.setAttribute("aria-busy", "true");
-  status.textContent = `Trying ${codecLabel(codec)} first…`;
+  status.textContent = `Testing ${codecLabel(codec)} by itself…`;
   status.dataset.state = "switching";
   let prepared = false;
   try {
@@ -157,13 +165,13 @@ async function switchPreferredCodec(
     // effectively visible avoids turning consumer presentation into a runtime
     // visibility suspension that can block a replacement generation.
     alternate.hidden = false;
-    reorderSources(codec);
+    installCodecSources([codec]);
     await motion.prepare?.({ timeoutMs: 30_000 });
     prepared = true;
   } catch (error) {
     status.textContent = error instanceof Error
-      ? `Could not try ${codecLabel(codec)}: ${error.message}`
-      : `Could not try ${codecLabel(codec)}.`;
+      ? `Could not play ${codecLabel(codec)} by itself: ${error.message}`
+      : `Could not play ${codecLabel(codec)} by itself.`;
     status.dataset.state = "error";
   } finally {
     switching = false;
@@ -173,20 +181,18 @@ async function switchPreferredCodec(
   }
 }
 
-function reorderSources(codec: Codec): void {
-  const sources = new Map<Codec, HTMLSourceElement>();
-  for (const source of player.querySelectorAll<HTMLSourceElement>(":scope > source")) {
-    const family = source.dataset.avalCodec as Codec | undefined;
-    if (family !== undefined && CODEC_ORDER.includes(family)) sources.set(family, source);
-  }
-  if (sources.size !== CODEC_ORDER.length) {
-    throw new Error("the player does not contain all four codec sources");
-  }
-  const fragment = document.createDocumentFragment();
-  for (const family of [codec, ...CODEC_ORDER.filter((entry) => entry !== codec)]) {
-    fragment.append(requireMapValue(sources, family));
-  }
-  player.append(fragment);
+function installCodecSources(codecs: readonly Codec[]): void {
+  const sources = codecs.map((codec) => {
+    const definition = requireMapValue(sourceDefinitions, codec);
+    const source = document.createElement("source");
+    source.src = definition.src;
+    source.setAttribute("data-codec", codec);
+    if (definition.integrity !== null) {
+      source.setAttribute("integrity", definition.integrity);
+    }
+    return source;
+  });
+  player.replaceChildren(...sources);
 }
 
 function publishRuntimeStatus(motion: PlaygroundPlayer): void {
@@ -194,7 +200,9 @@ function publishRuntimeStatus(motion: PlaygroundPlayer): void {
   const codec = motion.getDiagnostics?.().runtime.selectedCodec ?? null;
   const family = codec === null ? null : familyForCodec(codec);
   if (switching) {
-    status.textContent = `Trying ${codecLabel(requestedCodec)} first… Runtime readiness: ${readiness}`;
+    status.textContent = isolatedCodec === null
+      ? `Preparing the automatic codec ladder… Runtime readiness: ${readiness}`
+      : `Testing ${codecLabel(isolatedCodec)} by itself… Runtime readiness: ${readiness}`;
     status.dataset.state = "switching";
     return;
   }
@@ -209,17 +217,17 @@ function runtimeStatusText(
   family: Codec | null
 ): string {
   if (family === null || codec === null) {
-    return `Requested ${codecLabel(requestedCodec)} first · Runtime readiness: ${readiness} · no animated codec selected`;
+    return isolatedCodec === null
+      ? `Automatic codec ladder · Runtime readiness: ${readiness} · no animated codec selected`
+      : `Testing ${codecLabel(isolatedCodec)} only · Runtime readiness: ${readiness} · no animated codec selected`;
   }
-  if (family !== requestedCodec) {
-    return `Requested ${codecLabel(requestedCodec)} first · browser selected ${codecLabel(family)} (${codec}) · Runtime readiness: ${readiness}`;
-  }
-  return `Runtime readiness: ${readiness} · selected ${codecLabel(family)} (${codec})`;
+  const scope = isolatedCodec === null ? "Automatic ladder" : "Single-codec test";
+  return `${scope} · Runtime readiness: ${readiness} · selected ${codecLabel(family)} (${codec})`;
 }
 
 function publishControlState(active: Codec | null): void {
   for (const [codec, button] of codecButtons) {
-    button.setAttribute("aria-pressed", codec === requestedCodec ? "true" : "false");
+    button.setAttribute("aria-pressed", codec === isolatedCodec ? "true" : "false");
     button.dataset.active = codec === active ? "true" : "false";
     if (codec === active) button.setAttribute("aria-current", "true");
     else button.removeAttribute("aria-current");

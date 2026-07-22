@@ -144,13 +144,8 @@ test("captures kinetic orb readiness and interaction diagnostics", async ({
   expect(timedOut.outcome).toBe("timeout");
   expect(report.authoredSources.map(({ codec }) => codec)).toEqual(
     certificationMode === "forced-h264"
-      ? ["avc1.42E01E"]
-      : [
-          "av01.0.01M.08.0.110.01.01.01.0",
-          "vp09.00.30.08.01.01.01.01.00",
-          "hvc1.1.6.L90.90",
-          "avc1.42E01E"
-        ]
+      ? ["h264"]
+      : ["av1", "vp9", "h265", "h264"]
   );
   expect(report.checkpoints.map(({ label }) => label)).toEqual(
     expect.arrayContaining([

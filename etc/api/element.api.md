@@ -4,6 +4,8 @@
 
 ```ts
 
+import type { VideoCodec } from '@pixel-point/aval-format';
+
 // @public (undocumented)
 export const AVAL_ELEMENT_API_MAJOR: 1;
 
@@ -633,16 +635,7 @@ export interface AvalRuntimeTraceRecord {
 }
 
 // @public (undocumented)
-export interface AvalSourceCandidate {
-    // (undocumented)
-    readonly codec: string;
-    // (undocumented)
-    readonly integrity: string;
-    // (undocumented)
-    readonly src: string;
-    // (undocumented)
-    readonly type: `application/vnd.aval; codecs="${string}"`;
-}
+export type AvalSourceCodec = VideoCodec;
 
 // @public (undocumented)
 export interface AvalTransitionDetail {
@@ -715,12 +708,15 @@ export type RuntimeReadinessResult = {
     readonly report: Readonly<RuntimeReadinessReport>;
 };
 
+// @public
+export const SOURCE_CODEC_PRIORITY: readonly ["av1", "vp9", "h265", "h264"];
+
 // @public (undocumented)
 export type StaticReason = "reduced-motion" | "visibility-suspended" | "decoder-queued";
 
 // Warnings were encountered during analysis:
 //
-// dist/public-types.d.ts:66:5 - (ae-forgotten-export) The symbol "RuntimeReadinessReport" needs to be exported by the entry point index.d.ts
+// dist/public-types.d.ts:68:5 - (ae-forgotten-export) The symbol "RuntimeReadinessReport" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

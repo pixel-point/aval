@@ -127,16 +127,6 @@ export {
   type SourceSupportProbeCreationOptions
 } from "./runtime/source-support-probe.js";
 export {
-  VideoSourceSelectionError,
-  selectVideoSource,
-  type AcceptedVideoSource,
-  type VideoSourceAttemptOutcome,
-  type VideoSourceDescriptor,
-  type VideoSourceSelectionAttempt,
-  type VideoSourceSelectionInput,
-  type VideoSourceSession
-} from "./runtime/video-source-selection.js";
-export {
   WorkerSampleFactory,
   type CreateWorkerSampleBatchInput,
   type DecoderWorkerSampleBatch,

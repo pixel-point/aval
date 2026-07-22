@@ -4,7 +4,6 @@ import {
   parseFrontIndex as parseCanonicalFrontIndex,
   parseHeader as parseCanonicalHeader,
   parseManifestPrefix as parseCanonicalManifestPrefix,
-  parseVideoCodecString,
   validateCompleteAsset,
   type CompiledManifest,
   type EncodedChunkRecord,
@@ -14,7 +13,12 @@ import {
   type UnitBlobRange,
   type VideoCodec
 } from "@pixel-point/aval-format";
+import {
+  ASSET_BODY_PROGRESS_TIMEOUT_MS,
+  ASSET_REQUEST_TIMEOUT_MS
+} from "./asset-timing-policy.js";
 import type { Source } from "./player-contract.js";
+import { sourceCodec } from "./source-codec-policy.js";
 
 export interface AssetPlatform {
   readonly fetch: typeof globalThis.fetch;
@@ -77,8 +81,6 @@ type BodyWaiter = {
 const MAX = Number.MAX_SAFE_INTEGER;
 const EMPTY = new Uint8Array(0);
 const RESPONSE_WATCHDOGS = new WeakMap<Response, Watchdog>();
-const OVERALL_MS = 5_000;
-const BODY_MS = 2_000;
 
 type Watchdog = {
   readonly controller: AbortController;
@@ -149,19 +151,18 @@ function sourceInput(source: Readonly<Source>, documentBase: string): {
   family: VideoCodec;
 } {
   let src: unknown;
-  let sourceCodec: unknown;
+  let declaredCodec: unknown;
   let integrity: unknown;
   try {
     src = source.src;
-    sourceCodec = source.codec;
+    declaredCodec = source.codec;
     integrity = source.integrity;
   } catch {
     return bad();
   }
   if (typeof src !== "string" || src.length < 1 || src.length > 4096 || /[\u0000-\u001f\u007f]/.test(src)) bad();
-  if (typeof sourceCodec !== "string") bad();
-  const parsedCodec = parseVideoCodecString(sourceCodec);
-  if (parsedCodec === undefined) bad();
+  const family = sourceCodec(declaredCodec);
+  if (family === undefined) bad();
   if (typeof integrity !== "string") bad();
   if (integrity !== "") {
     const match = /^sha256-([A-Za-z0-9+/]{43})=$/.exec(integrity);
@@ -173,7 +174,7 @@ function sourceInput(source: Readonly<Source>, documentBase: string): {
   let url: URL;
   try { url = new URL(src, documentBase); } catch { return bad(); }
   if (url.protocol !== "http:" && url.protocol !== "https:") bad();
-  return { url: url.href, integrity, family: parsedCodec.family };
+  return { url: url.href, integrity, family };
 }
 
 function strong(value: string | null): string | null {
@@ -410,7 +411,10 @@ function createWatchdog(
     signal.addEventListener("abort", abort, { once: true });
   }
   if (!controller.signal.aborted) {
-    watchdog.overall = schedule(() => timeoutWatchdog(watchdog), OVERALL_MS);
+    watchdog.overall = schedule(
+      () => timeoutWatchdog(watchdog),
+      ASSET_REQUEST_TIMEOUT_MS
+    );
   }
   return watchdog;
 }
@@ -438,7 +442,10 @@ function watched<T>(watchdog: Watchdog, operation: Promise<T>): Promise<T> {
 function armBody(watchdog: Watchdog): void {
   if (watchdog.controller.signal.aborted) return;
   if (watchdog.body !== undefined) watchdog.clearTimeout(watchdog.body);
-  watchdog.body = watchdog.setTimeout(() => timeoutWatchdog(watchdog), BODY_MS);
+  watchdog.body = watchdog.setTimeout(
+    () => timeoutWatchdog(watchdog),
+    ASSET_BODY_PROGRESS_TIMEOUT_MS
+  );
 }
 
 function timeoutWatchdog(watchdog: Watchdog): void {
@@ -706,7 +713,10 @@ export class Asset {
       const cancel = this.#platform.clearTimeout ?? (
         (handle: number) => globalThis.clearTimeout(handle)
       );
-      const timer = schedule(() => controller.abort(timeoutError()), OVERALL_MS);
+      const timer = schedule(
+        () => controller.abort(timeoutError()),
+        ASSET_REQUEST_TIMEOUT_MS
+      );
       let owned!: Load;
       const promise = Promise.resolve().then(() => this.#load(blob, controller.signal)).then(async (value) => {
         if (!await verify(value, blob.sha256, this.#platform.crypto)) bad();

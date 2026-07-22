@@ -308,22 +308,15 @@ function captureAuthoredSources(player, playerId, context, destination) {
       child = next;
       continue;
     }
-    const type = boundedDiagnosticText(child.getAttribute("type") ?? "");
     destination.append(Object.freeze({
       playerId,
       context,
       index: sourceIndex,
-      mimeType: type.split(";", 1)[0]?.trim() ?? "",
-      codec: parseCodec(type)
+      codec: boundedDiagnosticText(child.getAttribute("data-codec") ?? "")
     }));
     sourceIndex += 1;
     child = next;
   }
-}
-
-function parseCodec(type) {
-  const match = /(?:^|;)\s*codecs\s*=\s*["']?([^;"']+)/iu.exec(type);
-  return match?.[1]?.trim() ?? null;
 }
 
 function captureElementSnapshot(player, serialize) {

@@ -9,12 +9,13 @@ import type {
   AvalPlaybackLifecycleCounters,
   AvalReadinessChangeDetail,
   AvalRendererDiagnostic,
-  AvalSourceCandidate,
+  AvalSourceCodec,
   StaticReason
 } from "@pixel-point/aval-element";
 import {
   AvalPlaybackError,
-  ELEMENT_DECODER_CAPACITY
+  ELEMENT_DECODER_CAPACITY,
+  SOURCE_CODEC_PRIORITY
 } from "@pixel-point/aval-element";
 
 declare const element: AvalElement;
@@ -27,6 +28,8 @@ declare const rendererDiagnostic: Readonly<AvalRendererDiagnostic>;
 
 const decoderWorkers: 2 = ELEMENT_DECODER_CAPACITY.workerCount;
 void decoderWorkers;
+const preferredCodec: AvalSourceCodec = SOURCE_CODEC_PRIORITY[0]!;
+void preferredCodec;
 
 element.motion = "auto";
 element.autoplay = "manual";
@@ -63,14 +66,6 @@ const attributes: AvalElementAttributes = {
   width: 128
 };
 void attributes;
-const sourceCandidate: AvalSourceCandidate = {
-  src: "/motion.av1.avl",
-  type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"',
-  codec: "av01.0.08M.10.0.110.01.01.01.0",
-  integrity: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-};
-void sourceCandidate;
-
 // @ts-expect-error source children are the sole source authority
 element.src = "/motion.avl";
 // @ts-expect-error integrity belongs to each direct source child

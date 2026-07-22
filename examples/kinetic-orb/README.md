@@ -7,8 +7,9 @@ returns it to idle without reversing or resetting the rotation.
 
 The 512×512 authoring source is opaque H.264 at 24 fps. Compilation publishes
 equivalent AV1, VP9, H.265/HEVC, and H.264 `.avl` renditions in that preferred
-order. The browser qualifies each source in order and uses H.264 only when none
-of the three more modern codecs works. Conservative constant-quality settings
+set. AVAL qualifies them in the fixed AV1 → VP9 → H.265 → H.264 family order,
+regardless of DOM order, and uses H.264 only when none of the three more modern
+codecs works. Conservative constant-quality settings
 keep independently encoded state boundaries visually quiet:
 
 - AV1 8-bit, CRF 24

@@ -13,10 +13,18 @@ test("survives five full document reloads", async ({ page }) => {
   test.setTimeout(RELOAD_COUNT * 30_000);
   const failures = captureBrowserFailures(page);
   await page.goto("/");
+  const motion = page.locator("#kinetic-orb");
+
+  await expect.poll(() => readReloadHealth(motion), {
+    message: "kinetic orb did not become animated before the reload sequence"
+  }).toMatchObject({
+    readiness: "interactiveReady",
+    mode: "animated",
+    lastFailure: null
+  });
 
   for (let reload = 1; reload <= RELOAD_COUNT; reload += 1) {
     await page.reload({ waitUntil: "domcontentloaded" });
-    const motion = page.locator("#kinetic-orb");
 
     await expect.poll(() => readReloadHealth(motion), {
       message: `kinetic orb did not become animated after reload ${String(reload)}`

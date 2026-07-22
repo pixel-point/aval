@@ -55,16 +55,17 @@ describe("AVAL 1.0 multi-codec idle-hover starter", () => {
     const html = await readFile(join(result.directory, "index.html"), "utf8");
     expect(html).toContain("<button id=\"favorite\"");
     expect(html).toContain("interaction-for=\"favorite\"");
-    expect(html).toContain('<source data-aval-codec="av1">');
-    expect(html).toContain('<source data-aval-codec="vp9">');
-    expect(html).toContain('<source data-aval-codec="h265">');
-    expect(html).toContain('<source data-aval-codec="h264">');
+    expect(html).toContain('<source data-codec="av1">');
+    expect(html).toContain('<source data-codec="vp9">');
+    expect(html).toContain('<source data-codec="h265">');
+    expect(html).toContain('<source data-codec="h264">');
     expect(html).toContain('href="./style.css"');
     expect(html).toContain('src="./main.js"');
     expect(html).not.toMatch(/<aval-player[^>]+\s(?:src|integrity)=/u);
     const main = await readFile(join(result.directory, "main.js"), "utf8");
     expect(main).toContain('fetch("./motion/build.json")');
-    expect(main).toContain('source.setAttribute("type", asset.type)');
+    expect(main).toContain('querySelectorAll(":scope > source[data-codec]")');
+    expect(main).not.toContain('source.setAttribute("type"');
     expect(main).toContain('source.setAttribute("integrity", asset.integrity)');
     expect(main).toContain(`player.addEventListener("error", (event) => {
   const diagnostics = player.getDiagnostics();

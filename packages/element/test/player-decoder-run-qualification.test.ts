@@ -273,7 +273,7 @@ describe("player decoder-run qualification", () => {
       platform: platform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,

@@ -68,7 +68,7 @@ export function StatusMotion({
       <aval-player ref={attach} state={state}>
         <source
           src="/status.h264.avl"
-          type='application/vnd.aval; codecs="avc1.42E01E"'
+          data-codec="h264"
         />
       </aval-player>
       {failed && <span aria-hidden="true">{state}</span>}

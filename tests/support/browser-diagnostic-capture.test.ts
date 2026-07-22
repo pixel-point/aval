@@ -277,7 +277,7 @@ describe("browser diagnostic active-canvas evidence", () => {
   it("fails closed instead of capturing an unrelated visible player", async () => {
     const unrelated = fakePlayer({
       id: "unrelated-player",
-      sourceTypes: ['application/vnd.aval; codecs="avc1.42E00B"'],
+      sourceCodecs: ["h264"],
       screenshots: [Uint8Array.from([1, 2, 3])],
       samples: [{ sampledAtMilliseconds: 1, drawsCompleted: 1 }]
     });
@@ -295,7 +295,7 @@ describe("browser diagnostic active-canvas evidence", () => {
     const after = Uint8Array.from([137, 80, 78, 71, 2]);
     const active = fakePlayer({
       id: "active-player",
-      sourceTypes: ['application/vnd.aval; codecs="avc1.42E00B"'],
+      sourceCodecs: ["h264"],
       screenshots: [before, after],
       samples: [
         { sampledAtMilliseconds: 10, drawsCompleted: 4 },
@@ -326,7 +326,7 @@ describe("browser diagnostic active-canvas evidence", () => {
     const unchanged = Uint8Array.from([137, 80, 78, 71, 9]);
     const active = fakePlayer({
       id: "active-player",
-      sourceTypes: ['application/vnd.aval; codecs="avc1.42E00B"'],
+      sourceCodecs: ["h264"],
       screenshots: [unchanged, unchanged, unchanged],
       samples: [
         { sampledAtMilliseconds: 10, drawsCompleted: 4 },
@@ -356,13 +356,13 @@ describe("browser diagnostic active-canvas evidence", () => {
   it("binds an id-less active player only by a unique authored-source signature", async () => {
     const unrelated = fakePlayer({
       id: "",
-      sourceTypes: ['application/vnd.aval; codecs="vp09.00.30.08.01.01.01.01.00"'],
+      sourceCodecs: ["vp9"],
       screenshots: [Uint8Array.from([1])],
       samples: [{ sampledAtMilliseconds: 1, drawsCompleted: 1 }]
     });
     const active = fakePlayer({
       id: "",
-      sourceTypes: ['application/vnd.aval; codecs="avc1.42E00B"'],
+      sourceCodecs: ["h264"],
       screenshots: [Uint8Array.from([2])],
       samples: [{ sampledAtMilliseconds: 1, drawsCompleted: 1 }]
     });
@@ -381,7 +381,7 @@ describe("browser diagnostic active-canvas evidence", () => {
   it("rejects a state label that changes after the canvas sample", async () => {
     const active = fakePlayer({
       id: "active-player",
-      sourceTypes: ['application/vnd.aval; codecs="avc1.42E00B"'],
+      sourceCodecs: ["h264"],
       screenshots: [Uint8Array.from([2])],
       samples: [{ sampledAtMilliseconds: 1, drawsCompleted: 1 }]
     });
@@ -584,7 +584,7 @@ function diagnosticReport(visualState: string): BrowserDiagnosticReport {
 
 interface FakePlayer {
   readonly id: string;
-  readonly sourceTypes: readonly string[];
+  readonly sourceCodecs: readonly string[];
   readonly screenshots: Uint8Array[];
   readonly samples: Array<Readonly<{
     sampledAtMilliseconds: number;
@@ -597,7 +597,7 @@ interface FakePlayer {
 
 function fakePlayer(input: Readonly<{
   id: string;
-  sourceTypes: readonly string[];
+  sourceCodecs: readonly string[];
   screenshots: readonly Uint8Array[];
   samples: readonly Readonly<{
     sampledAtMilliseconds: number;
@@ -608,7 +608,7 @@ function fakePlayer(input: Readonly<{
 }>): FakePlayer {
   return {
     id: input.id,
-    sourceTypes: [...input.sourceTypes],
+    sourceCodecs: [...input.sourceCodecs],
     screenshots: input.screenshots.map((bytes) => Uint8Array.from(bytes)),
     samples: [...input.samples],
     visible: input.visible ?? true,
@@ -648,10 +648,10 @@ function fakePage(
     locator: (selector: string) => {
       if (selector === ":scope > source") {
         return {
-          count: async () => player.sourceTypes.length,
+          count: async () => player.sourceCodecs.length,
           nth: (index: number) => ({
-            getAttribute: async (name: string) => name === "type"
-              ? player.sourceTypes[index] ?? null
+            getAttribute: async (name: string) => name === "data-codec"
+              ? player.sourceCodecs[index] ?? null
               : null
           })
         };
@@ -714,8 +714,7 @@ function activeDiagnosticReport(input: Readonly<{
       playerId,
       context: null,
       index: 0,
-      mimeType: "application/vnd.aval",
-      codec: "avc1.42E00B"
+      codec: "h264"
     }],
     latest: {
       checkpointSequence: 1,

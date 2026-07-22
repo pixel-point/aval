@@ -51,8 +51,9 @@ from one unit to another.
 
 ## Complete project
 
-This compact two-state example publishes AV1, VP9, H.265, and H.264 alternatives
-in author preference order:
+This compact two-state example publishes AV1, VP9, H.265, and H.264
+alternatives. Browser selection uses AVAL's fixed family priority, independent
+of the encoding array's report order:
 
 ```json
 {
@@ -202,16 +203,16 @@ does not.
 
 ## Browser integration
 
-Copy `build.json.sourceMarkup`, preserving order and exact type/integrity
-values. If the page is outside the bundle directory, prefix each reported
-relative `src` with the bundle URL.
+Copy `build.json.sourceMarkup`, preserving each `data-codec` and optional
+`integrity` value. DOM order does not set preference. If the page is outside
+the bundle directory, prefix each reported relative `src` with the bundle URL.
 
 ```html
 <aval-player state="idle">
-  <source src="/motion/av1.avl" type='application/vnd.aval; codecs="av01..."'>
-  <source src="/motion/vp9.avl" type='application/vnd.aval; codecs="vp09..."'>
-  <source src="/motion/h265.avl" type='application/vnd.aval; codecs="hvc1..."'>
-  <source src="/motion/h264.avl" type='application/vnd.aval; codecs="avc1..."'>
+  <source src="/motion/av1.avl" data-codec="av1">
+  <source src="/motion/vp9.avl" data-codec="vp9">
+  <source src="/motion/h265.avl" data-codec="h265">
+  <source src="/motion/h264.avl" data-codec="h264">
 </aval-player>
 <img id="motion-unavailable" src="/motion.png" alt="" hidden>
 ```

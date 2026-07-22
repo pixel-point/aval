@@ -254,17 +254,15 @@ export function createCodecDemoController({
       const asset = requireMapValue(report.assets, codec);
       const source = document.createElement("source");
       source.src = new URL(`grass-rabbit/${asset.path}`, publicBaseUrl).href;
-      source.type = asset.type;
+      source.setAttribute("data-codec", codec);
       source.setAttribute("integrity", asset.integrity);
       player.append(source);
     }
     diagnostics?.attach(player, {
       example: "grass-rabbit-codecs",
       codec: codecs.length === 1 ? primaryCodec : "automatic-ladder",
-      sourceType: requireMapValue(report.assets, primaryCodec).type,
-      sourceTypes: codecs.map(
-        (codec) => requireMapValue(report.assets, codec).type
-      )
+      sourceCodec: primaryCodec,
+      sourceCodecs: codecs
     });
     return player;
   }

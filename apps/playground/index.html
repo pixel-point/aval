@@ -11,9 +11,9 @@
       <p class="eyebrow">AVAL 1.0 browser harness</p>
       <h1>One motion, four codec sources</h1>
       <p class="lede">
-        The player evaluates these direct-child sources in author order and
-        keeps the first one that decodes, validates, and presents an initial
-        frame.
+        The player evaluates direct-child sources using its fixed AV1, VP9,
+        H.265, then H.264 priority and keeps the first one that decodes,
+        validates, and presents an initial frame.
       </p>
       <section class="stage" aria-labelledby="source-order">
         <div class="motion-frame">
@@ -25,22 +25,22 @@
             height="360"
             aria-label="Multi-codec AVAL motion"
           >
-            <source data-aval-codec="av1">
-            <source data-aval-codec="vp9">
-            <source data-aval-codec="h265">
-            <source data-aval-codec="h264">
+            <source data-codec="av1">
+            <source data-codec="vp9">
+            <source data-codec="h265">
+            <source data-codec="h264">
           </aval-player>
           <span class="fallback" hidden>Motion unavailable</span>
         </div>
         <div class="codec-panel">
-          <h2 id="source-order">Try this codec first</h2>
+          <h2 id="source-order">Test one codec in isolation</h2>
           <p class="codec-help">
-            Choose a source. Unsupported configurations and codec-specific
-            startup failures fall through to the next authored file.
+            Choosing a codec temporarily replaces the automatic ladder with
+            that one source. Reload the page to restore automatic selection.
           </p>
-          <ol id="codec-list" aria-label="Preferred codec">
+          <ol id="codec-list" aria-label="Codec isolation">
             <li>
-              <button class="codec-choice" type="button" data-codec="av1" aria-pressed="true" disabled>
+              <button class="codec-choice" type="button" data-codec="av1" aria-pressed="false" disabled>
                 <span>AV1</span><span class="codec-state" aria-hidden="true"></span>
               </button>
             </li>

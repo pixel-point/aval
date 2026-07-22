@@ -41,7 +41,8 @@ test("keeps a modern codec and interactive pixels when WebGL2 is unavailable", a
   expect(idle.uniqueColors).toBeGreaterThan(2);
 
   await page.locator("#toggle-state").click();
-  await expect.poll(() => visualState(motion)).toBe("engaged");
+  await expect.poll(() => visualState(motion), { timeout: 20_000 })
+    .toBe("engaged");
   await expect.poll(async () => (await canvasPixels(motion)).signature)
     .not.toBe(idle.signature);
 

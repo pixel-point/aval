@@ -15,8 +15,8 @@
   },
   "buildReport": {
     "path": "fixtures/certification/v1/build.json",
-    "bytes": 26131,
-    "sha256": "12905824be2cc8f231a7762ff3f67f316c140140115b4d8d3963f31380e83188"
+    "bytes": 25961,
+    "sha256": "5552009dc34124106c02468978b7df479f6c969d679ea20fb29977de23bac144"
   },
   "outputs": [
     {

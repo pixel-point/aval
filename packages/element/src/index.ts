@@ -24,7 +24,7 @@ export {
   type AvalRequestedStateChangeDetail,
   type AvalRuntimeMediaCursor,
   type AvalRuntimeTraceRecord,
-  type AvalSourceCandidate,
+  type AvalSourceCodec,
   type AvalTransitionDetail,
   type AvalUnderflowDetail,
   type AvalVisualStateChangeDetail,
@@ -39,3 +39,4 @@ export {
   AvalPlaybackError
 } from "./errors.js";
 export { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
+export { SOURCE_CODEC_PRIORITY } from "./source-codec-policy.js";

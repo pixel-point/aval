@@ -681,7 +681,7 @@ function diagnosticReport(
     authoredSources: codecs.map((codec, index) => ({
       playerId: "player-1",
       index,
-      codec: codecStrings[codec]
+      codec
     })),
     checkpoints: [],
     latest: {
@@ -860,7 +860,7 @@ function startupCodecDiagnostic(source: any, rendition: string, input: any) {
     sourceGeneration: 1,
     sourceIndex: source.index,
     rendition,
-    codec: source.codec,
+    codec: exactCodecString(source.codec),
     code: input.code,
     phase: input.phase,
     exception: input.exception ?? null,
@@ -873,7 +873,7 @@ function startupRendererDiagnostic(source: any, rendition: string) {
     sourceGeneration: 1,
     sourceIndex: source.index,
     rendition,
-    codec: source.codec,
+    codec: exactCodecString(source.codec),
     phase: "rgba-copy",
     operation: "runtime",
     exception: { name: "NotSupportedError", message: "unsupported" },
@@ -881,6 +881,15 @@ function startupRendererDiagnostic(source: any, rendition: string) {
     contextLost: false,
     uploadPath: "rgba-copy"
   };
+}
+
+function exactCodecString(codec: string): string | undefined {
+  return ({
+    av1: "av01.0.08M.08.0.110.01.01.01.0",
+    vp9: "vp09.00.10.08.01.01.01.01.00",
+    h265: "hvc1.1.6.L93.B0",
+    h264: "avc1.42E020"
+  } as Record<string, string>)[codec];
 }
 
 function counters(value: number) {

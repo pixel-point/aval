@@ -1,6 +1,5 @@
 import {
-  IDENTIFIER_PATTERN,
-  parseVideoCodecString
+  IDENTIFIER_PATTERN
 } from "@pixel-point/aval-format";
 
 import { ElementAttributeReflection } from "./element-attribute-reflection.js";
@@ -63,9 +62,16 @@ import {
   emptyPlaybackLifecycleCounters,
   retainPlaybackLifecycleCounters
 } from "./playback-lifecycle.js";
+import {
+  compareSourceCodec,
+  sourceCodec
+} from "./source-codec-policy.js";
+import {
+  ELEMENT_SETUP_TIMEOUT_MS,
+  preparationBudgetMs
+} from "./preparation-budget.js";
 
 let runtimeModule: Promise<typeof import("./player.js")> | null = null;
-const PREPARATION_MS = 5_000;
 const MAX_RETAINED_DECODER_SOURCES = 128;
 type IntersectionGate = {
   readonly promise: Promise<void>;
@@ -116,6 +122,7 @@ export function createAvalElementClass(
     #intersectionKnown = false;
     #intersectionGate: IntersectionGate | null = null;
     #media: MediaQueryList | null = null;
+    #observedMediaReduced: boolean | null = null;
     #installedRoot: Node | null = null;
     #installedDocument: Document | null = null;
     #installedView: Window | null = null;
@@ -815,7 +822,9 @@ export function createAvalElementClass(
       }
       const clock = view.performance;
       const timing = createElementTiming(view);
-      const deadline = clock.now() + PREPARATION_MS;
+      const startedAt = clock.now();
+      const setupDeadline = startedAt + ELEMENT_SETUP_TIMEOUT_MS;
+      const preparationDeadline = startedAt + preparationBudgetMs(sources.length);
       try {
         if (needsIntersectionSample(
           this.#intersectionKnown,
@@ -824,7 +833,7 @@ export function createAvalElementClass(
           await withLimits(
             this.#ensureIntersectionGate().promise,
             this.#controller.signal,
-            remainingPreparationMs(deadline, clock, timing),
+            remainingElementPreparationMs(setupDeadline, clock, timing),
             (delta) => { this.#timerCount += delta; },
             timing
           );
@@ -833,11 +842,15 @@ export function createAvalElementClass(
         const module = await withLimits(
           runtimeModule,
           this.#controller.signal,
-          remainingPreparationMs(deadline, clock, timing),
+          remainingElementPreparationMs(setupDeadline, clock, timing),
           (delta) => { this.#timerCount += delta; },
           timing
         );
-        const preparationTimeoutMs = remainingPreparationMs(deadline, clock, timing);
+        const preparationTimeoutMs = remainingElementPreparationMs(
+          preparationDeadline,
+          clock,
+          timing
+        );
         const initialRect = this.getBoundingClientRect();
         const selectedMotion = this.motion;
         const selectedReduced = this.#motionReduced(selectedMotion);
@@ -925,6 +938,7 @@ export function createAvalElementClass(
           },
           onDraw: () => {
             if (!this.#publicationCurrent(generation, token)) return;
+            this.#reconcileMediaPreference();
             this.#layers.markAnimatedDrawn(generation);
             this.#layers.revealAnimated(generation);
           },
@@ -1313,7 +1327,7 @@ export function createAvalElementClass(
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ["src", "type", "integrity"]
+          attributeFilter: ["src", "data-codec", "integrity"]
         });
         if (typeof view?.ResizeObserver === "function") {
           const observer = new view.ResizeObserver(() => {
@@ -1348,10 +1362,10 @@ export function createAvalElementClass(
         document.addEventListener("visibilitychange", this.#documentListener);
         this.#media = typeof view?.matchMedia === "function"
           ? view.matchMedia("(prefers-reduced-motion: reduce)") : null;
+        this.#observedMediaReduced = this.#media?.matches ?? null;
         this.#mediaListener = () => {
           if (epoch !== this.#observerEpoch) return;
-          this.#motionGeneration += 1;
-          this.#applyMotion();
+          this.#reconcileMediaPreference();
         };
         this.#media?.addEventListener("change", this.#mediaListener);
         this.#windowListener = () => {
@@ -1429,6 +1443,7 @@ export function createAvalElementClass(
       const pageShowListener = this.#pageShowListener;
       const media = this.#media;
       const mediaListener = this.#mediaListener;
+      this.#observedMediaReduced = null;
       this.#installedRoot = null;
       this.#installedDocument = null;
       this.#installedView = null;
@@ -1564,6 +1579,7 @@ export function createAvalElementClass(
     #applyMotion(): void {
       const player = this.#player;
       if (player === null) return;
+      this.#observedMediaReduced = this.#media?.matches ?? null;
       const generation = this.#sourceGeneration;
       const reduced = this.#motionReduced(this.motion);
       if (reduced) this.#cancelDecoderTicket();
@@ -1574,6 +1590,15 @@ export function createAvalElementClass(
           this.#publishFailure("readiness-failure", "motion", false, generation);
         }
       });
+    }
+
+    #reconcileMediaPreference(): void {
+      const reduced = this.#media?.matches;
+      if (reduced === undefined || reduced === this.#observedMediaReduced) return;
+      this.#observedMediaReduced = reduced;
+      if (this.motion !== "auto") return;
+      this.#motionGeneration += 1;
+      this.#applyMotion();
     }
 
     async #reconcileSelectionMotion(
@@ -2444,15 +2469,19 @@ export interface SourceRead {
   readonly sources: readonly Readonly<Source>[];
   readonly failures: readonly Readonly<{
     sourceIndex: number;
-    attribute: "src" | "type" | "integrity";
+    attribute: "src" | "data-codec" | "integrity";
   }>[];
 }
 
 export function readSources(host: HTMLElement): Readonly<SourceRead> {
   const sources: Readonly<Source>[] = [];
+  const codecDeclarations: Array<Readonly<{
+    codec: Source["codec"];
+    sourceIndex: number;
+  }>> = [];
   const failures: Array<Readonly<{
     sourceIndex: number;
-    attribute: "src" | "type" | "integrity";
+    attribute: "src" | "data-codec" | "integrity";
   }>> = [];
   const children = host.children;
   let sourceIndex = 0;
@@ -2461,7 +2490,7 @@ export function readSources(host: HTMLElement): Readonly<SourceRead> {
     if (element?.localName !== "source" ||
       element.namespaceURI !== "http://www.w3.org/1999/xhtml") continue;
     let src = "";
-    let codec = "";
+    let codec: Source["codec"] | undefined;
     let integrity = "";
     let valid = true;
     try { src = normalizeSource(element.getAttribute("src") ?? ""); }
@@ -2470,17 +2499,12 @@ export function readSources(host: HTMLElement): Readonly<SourceRead> {
       failures.push(Object.freeze({ sourceIndex, attribute: "src" }));
     }
     try {
-      const type = element.getAttribute("type");
-      const prefix = 'application/vnd.aval; codecs="';
-      if (typeof type !== "string" || type.length > 256 || !type.startsWith(prefix) ||
-        !type.endsWith('"')) throw new TypeError();
-      codec = type.slice(prefix.length, -1);
-      if (codec.length < 1 || codec.length > 128 || !sourceCodec(codec)) {
-        throw new TypeError();
-      }
+      codec = sourceCodec(element.getAttribute("data-codec"));
+      if (codec === undefined) throw new TypeError();
+      codecDeclarations.push(Object.freeze({ codec, sourceIndex }));
     } catch {
       valid = false;
-      failures.push(Object.freeze({ sourceIndex, attribute: "type" }));
+      failures.push(Object.freeze({ sourceIndex, attribute: "data-codec" }));
     }
     try {
       const value = element.getAttribute("integrity");
@@ -2489,19 +2513,37 @@ export function readSources(host: HTMLElement): Readonly<SourceRead> {
       valid = false;
       failures.push(Object.freeze({ sourceIndex, attribute: "integrity" }));
     }
-    if (valid) {
+    if (valid && codec !== undefined) {
       sources.push(Object.freeze({ src, codec, integrity, sourceIndex }));
     }
     sourceIndex += 1;
   }
+  const counts = new Map<Source["codec"], number>();
+  for (const declaration of codecDeclarations) {
+    counts.set(
+      declaration.codec,
+      (counts.get(declaration.codec) ?? 0) + 1
+    );
+  }
+  const duplicateCodecs = new Set(
+    [...counts].filter(([, count]) => count > 1).map(([codec]) => codec)
+  );
+  for (const declaration of codecDeclarations) {
+    if (duplicateCodecs.has(declaration.codec)) {
+      failures.push(Object.freeze({
+        sourceIndex: declaration.sourceIndex,
+        attribute: "data-codec"
+      }));
+    }
+  }
+  failures.sort((left, right) => left.sourceIndex - right.sourceIndex);
+  const prioritized = sources
+    .filter((source) => !duplicateCodecs.has(source.codec))
+    .sort((left, right) => compareSourceCodec(left.codec, right.codec));
   return Object.freeze({
-    sources: Object.freeze(sources),
+    sources: Object.freeze(prioritized),
     failures: Object.freeze(failures)
   });
-}
-
-function sourceCodec(value: string): boolean {
-  return parseVideoCodecString(value) !== undefined;
 }
 
 export function sourceMutation(
@@ -2854,7 +2896,7 @@ function emptyRuntime(): PlayerSnapshot {
   });
 }
 
-function remainingPreparationMs(
+function remainingElementPreparationMs(
   deadline: number,
   clock: Performance,
   timing: ElementTiming

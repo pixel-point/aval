@@ -1,5 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ASSET_ADMISSION_TIMEOUT_MS } from
+  "../src/asset-timing-policy.js";
+import type {
+  DecoderDiagnosticCode,
+  DecoderDiagnosticPhase,
+  DecoderFailureDiagnostic
+} from "../src/decoder-diagnostics.js";
 import type { RendererFailureDiagnostic } from "../src/renderer-diagnostics.js";
+import { DECODER_PROGRESS_TIMEOUT_MS } from
+  "../src/decoder-timing-policy.js";
+import {
+  CANDIDATE_INSTALLATION_TIMEOUT_MS,
+  CANDIDATE_PREPARATION_TIMEOUT_MS,
+  playerPreparationBudgetMs
+} from "../src/preparation-budget.js";
 import {
   CODECS,
   FAMILIES,
@@ -35,10 +49,14 @@ type StartupOutcome =
   | "probe-arbitrary-error"
   | "probe-supported-then-transport"
   | "probe-unsupported-false"
+  | "probe-progress-timeout"
+  | "decode-progress-timeout"
   | "pending";
 
 const startup = vi.hoisted(() => ({
   outcomes: new Map<string, StartupOutcome>(),
+  assetOpenDelayMs: 0,
+  renditionCounts: new Map<CodecFamily, number>(),
   probeOutcomes: new Map<string, readonly [StartupOutcome, StartupOutcome]>(),
   actualDecoderFamilies: new Set<string>(),
   opens: [] as string[],
@@ -59,7 +77,11 @@ const startup = vi.hoisted(() => ({
   decoders: [] as Array<{
     codec: string;
     disposed: boolean;
-    fail: (reason?: Error, phase?: string, code?: string) => void;
+    fail: (
+      reason?: Error,
+      phase?: DecoderDiagnosticPhase,
+      code?: DecoderDiagnosticCode
+    ) => void;
   }>
 }));
 
@@ -69,7 +91,17 @@ vi.mock("../src/asset.js", () => ({
       const family = codecFamily(source.codec);
       startup.opens.push(family);
       startup.operations.push(`asset-open:${family}`);
-      return new SyntheticAsset(startup, family, source.codec);
+      if (startup.assetOpenDelayMs > 0) {
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(resolve, startup.assetOpenDelayMs);
+        });
+      }
+      return new SyntheticAsset(
+        startup,
+        family,
+        CODECS[family],
+        startup.renditionCounts.get(family) ?? 1
+      );
     }
   }
 }));
@@ -85,6 +117,9 @@ vi.mock("../src/decoder.js", async () => {
   const actual = await vi.importActual<typeof import("../src/decoder.js")>(
     "../src/decoder.js"
   );
+  const diagnostics = await vi.importActual<
+    typeof import("../src/decoder-diagnostics.js")
+  >("../src/decoder-diagnostics.js");
   return {
     DecoderLocalFailureError: actual.DecoderLocalFailureError,
     Decoder: class SyntheticDecoder {
@@ -94,7 +129,11 @@ vi.mock("../src/decoder.js", async () => {
     readonly #control!: {
       codec: string;
       disposed: boolean;
-      fail: (reason?: Error, phase?: string, code?: string) => void;
+      fail: (
+        reason?: Error,
+        phase?: DecoderDiagnosticPhase,
+        code?: DecoderDiagnosticCode
+      ) => void;
     };
     readonly #lane: 0 | 1;
     #rejectFailure!: (reason: unknown) => void;
@@ -102,7 +141,7 @@ vi.mock("../src/decoder.js", async () => {
     #terminalError: Error | null = null;
     #disposed = false;
     #generation = 0;
-    #diagnostic: Readonly<Record<string, unknown>> | null = null;
+    #diagnostic: Readonly<DecoderFailureDiagnostic> | null = null;
     #rejectRunReady: ((reason: unknown) => void) | null = null;
     #runReadySettled = false;
 
@@ -182,6 +221,17 @@ vi.mock("../src/decoder.js", async () => {
         const error = new Error(`synthetic arbitrary probe failure for ${this.#codec}`);
         throw this.#fail(error, "probe", "decoder-operation");
       }
+      if (outcome === "probe-progress-timeout") {
+        return new Promise<boolean>((_resolve, reject) => {
+          globalThis.setTimeout(() => {
+            const error = new DOMException(
+              `synthetic probe progress timeout for ${this.#codec}`,
+              "TimeoutError"
+            );
+            reject(this.#fail(error, "probe", "watchdog-timeout"));
+          }, DECODER_PROGRESS_TIMEOUT_MS);
+        });
+      }
       return true;
     }
 
@@ -251,6 +301,15 @@ vi.mock("../src/decoder.js", async () => {
           "frame-transfer",
           "transport"
         ));
+      } else if (outcome === "decode-progress-timeout") {
+        globalThis.setTimeout(() => this.#fail(
+          new DOMException(
+            `synthetic decode progress timeout for ${this.#codec}`,
+            "TimeoutError"
+          ),
+          "decode",
+          "watchdog-timeout"
+        ), DECODER_PROGRESS_TIMEOUT_MS);
       }
       let closed = false;
       let rejectPendingTake: ((reason: unknown) => void) | null = null;
@@ -338,19 +397,18 @@ vi.mock("../src/decoder.js", async () => {
 
     #fail(
       reason: Error,
-      phase = "output-validation",
-      code = "invalid-output"
+      phase: DecoderDiagnosticPhase = "output-validation",
+      code: DecoderDiagnosticCode = "invalid-output"
     ): Error {
       if (this.#failureSettled || this.#disposed) return reason;
       this.#failureSettled = true;
-      this.#diagnostic = Object.freeze({
+      const diagnostic = diagnostics.createDecoderFailureDiagnostic({
         phase,
         code,
         run: this.#generation === 0 ? null : this.#generation,
         decodeOrdinal: this.#generation === 0 ? null : 0,
-        exception: Object.freeze({ name: reason.name, message: reason.message }),
+        reason,
         firstFrame: null,
-        lastGoodFrame: null,
         outputFailure: code === "invalid-output"
           ? Object.freeze({
               kind: "unknown-output",
@@ -361,28 +419,8 @@ vi.mock("../src/decoder.js", async () => {
             })
           : null
       });
-      const localFailure = phase === "probe" && (
-        code === "unsupported-config" ||
-        code === "decoder-operation" &&
-        (reason.name === "NotSupportedError" || reason.name === "EncodingError")
-      )
-        ? Object.freeze({ kind: "unsupported-config" } as const)
-        : phase === "output-validation" && code === "invalid-output"
-          ? Object.freeze({ kind: "decoded-metadata-incompatible" } as const)
-          : (phase === "configure" || phase === "decode" || phase === "flush") &&
-            (reason.name === "NotSupportedError" || reason.name === "EncodingError" ||
-              phase === "configure" && code === "unsupported-config")
-            ? Object.freeze({
-                kind: "operation-rejected" as const,
-                phase,
-                errorName: code === "unsupported-config"
-                  ? "NotSupportedError" as const
-                  : reason.name as "NotSupportedError" | "EncodingError"
-              })
-            : null;
-      const reported = localFailure === null
-        ? reason
-        : new actual.DecoderLocalFailureError(localFailure, reason);
+      this.#diagnostic = diagnostic;
+      const reported = actual.decoderReportedError(reason, diagnostic);
       this.#terminalError = reported;
       if (!this.#runReadySettled) {
         this.#runReadySettled = true;
@@ -544,6 +582,8 @@ function requireWitnesses(
 
 beforeEach(() => {
   startup.outcomes.clear();
+  startup.assetOpenDelayMs = 0;
+  startup.renditionCounts.clear();
   startup.probeOutcomes.clear();
   startup.actualDecoderFamilies.clear();
   startup.opens.length = 0;
@@ -570,6 +610,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -618,6 +659,126 @@ describe("player startup source fallback", () => {
     )).toBe(false);
     expect(player.snapshot(false).playbackLifecycle.candidateCommits).toBe(0);
     await player.dispose();
+  });
+
+  it("does not arm qualification during reentrant candidate installation", async () => {
+    vi.useFakeTimers();
+    requireWitnesses(["av1"]);
+    const harness = createHarness(["av1"]);
+    let reentrantPreparation: Promise<unknown> | null = null;
+    let reentrantResume: Promise<void> | null = null;
+    let installationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      installationStarted = resolve;
+    });
+    const attempt = createPlayer({
+      ...harness.input,
+      preparationTimeoutMs: playerPreparationBudgetMs(1),
+      onCandidate: async (candidate) => {
+        reentrantPreparation = candidate.prepare();
+        reentrantResume = candidate.resume();
+        installationStarted();
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(resolve, 3_000);
+        });
+      }
+    });
+    await started;
+
+    await vi.advanceTimersByTimeAsync(CANDIDATE_PREPARATION_TIMEOUT_MS);
+    expect(startup.operations.some((operation) =>
+      operation.startsWith("inspect:av1:")
+    )).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(
+      3_000 - CANDIDATE_PREPARATION_TIMEOUT_MS
+    );
+    const player = await attempt;
+    if (reentrantPreparation === null || reentrantResume === null) {
+      throw new Error("candidate installation did not reenter preparation");
+    }
+    await Promise.all([reentrantPreparation, reentrantResume]);
+    expect(startup.operations.filter((operation) =>
+      operation.startsWith("inspect:av1:")
+    )).toEqual(["inspect:av1:17"]);
+    await player.dispose();
+  });
+
+  it("lets candidate installation await resume without entering qualification", async () => {
+    requireWitnesses(["av1"]);
+    const harness = createHarness(["av1"]);
+    let installationFinished = false;
+    const player = await createPlayer({
+      ...harness.input,
+      onCandidate: async (candidate) => {
+        await candidate.resume();
+        expect(startup.operations.some((operation) =>
+          operation.startsWith("inspect:av1:")
+        )).toBe(false);
+        installationFinished = true;
+      }
+    });
+
+    expect(installationFinished).toBe(true);
+    expect(startup.operations.filter((operation) =>
+      operation.startsWith("inspect:av1:")
+    )).toEqual(["inspect:av1:17"]);
+    await player.dispose();
+  });
+
+  it("grants each provisional candidate a fresh installation window", async () => {
+    vi.useFakeTimers();
+    startup.outcomes.set("av1", "decode-progress-timeout");
+    const families = ["av1", "vp9"] as const;
+    const harness = createHarness(families);
+    const installations: string[] = [];
+    const attempt = prepareAttempt({
+      ...harness.input,
+      preparationTimeoutMs: playerPreparationBudgetMs(families.length),
+      onCandidate: async (candidate) => {
+        installations.push(candidate.snapshot(false).selectedCodec ?? "none");
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(
+            resolve,
+            CANDIDATE_INSTALLATION_TIMEOUT_MS - 1
+          );
+        });
+      }
+    });
+
+    await vi.advanceTimersByTimeAsync(
+      2 * (CANDIDATE_INSTALLATION_TIMEOUT_MS - 1) +
+      DECODER_PROGRESS_TIMEOUT_MS
+    );
+    const outcome = await attempt;
+
+    const player = requirePrepared(outcome);
+    expect(installations).toHaveLength(2);
+    expect(player.snapshot(false).selectedCodec).toBe(CODECS.vp9);
+    expect(harness.publications.playbackFailures).toEqual([]);
+    await player.dispose();
+  });
+
+  it("keeps candidate installation timeout terminal and out of codec fallback", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness(["av1", "vp9"]);
+    const attempt = prepareAttempt({
+      ...harness.input,
+      preparationTimeoutMs: playerPreparationBudgetMs(2),
+      onCandidate: async () => new Promise<void>(() => undefined)
+    });
+
+    await vi.advanceTimersByTimeAsync(CANDIDATE_INSTALLATION_TIMEOUT_MS - 1);
+    expect(startup.opens).toEqual(["av1"]);
+    await vi.advanceTimersByTimeAsync(1);
+    const outcome = await attempt;
+
+    expect(outcome.status).toBe("rejected");
+    expect(startup.opens).toEqual(["av1"]);
+    expect(startup.disposals).toEqual(["av1"]);
+    expect(harness.publications.playbackFailures).toEqual([
+      "watchdog-timeout:prepare"
+    ]);
   });
 
   it("uses H264 only after witnessed AV1, VP9, and HEVC mismatches", async () => {
@@ -890,6 +1051,49 @@ describe("player startup source fallback", () => {
     await player.dispose();
   });
 
+  it("advances after a silent AV1 support probe times out", async () => {
+    vi.useFakeTimers();
+    startup.outcomes.set("av1", "probe-progress-timeout");
+    const families = ["av1", "vp9"] as const;
+    const harness = createHarness(families);
+    const attempt = prepareAttempt({
+      ...harness.input,
+      preparationTimeoutMs: playerPreparationBudgetMs(families.length)
+    });
+
+    await vi.advanceTimersByTimeAsync(DECODER_PROGRESS_TIMEOUT_MS - 1);
+    expect(startup.opens).toEqual(["av1"]);
+    expect(startup.disposals).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    const outcome = await attempt;
+
+    const player = requirePrepared(outcome);
+    if (outcome.status !== "fulfilled") throw outcome.error;
+    expect(startup.opens).toEqual(["av1", "vp9"]);
+    expect(startup.disposals).toEqual(["av1"]);
+    expect(player.snapshot(false).selectedCodec).toBe(CODECS.vp9);
+    expect(player.snapshot(false).decoderDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceIndex: 0,
+          codec: CODECS.av1,
+          phase: "probe",
+          code: "watchdog-timeout"
+        })
+      ])
+    );
+    expect(outcome.result.report.candidates.map((candidate) => ({
+      rank: candidate.rank,
+      outcome: candidate.outcome,
+      code: candidate.failure?.code ?? null
+    }))).toEqual([
+      { rank: 0, outcome: "rejected", code: "unsupported-profile" },
+      { rank: 1, outcome: "selected", code: null }
+    ]);
+    expect(harness.publications.playbackFailures).toEqual([]);
+    await player.dispose();
+  });
+
   it.each([
     ["transport", "probe-transport-error"],
     ["arbitrary", "probe-arbitrary-error"]
@@ -1110,6 +1314,168 @@ describe("player startup source fallback", () => {
       { rank: 2, outcome: "rejected", code: "worker-decode-failure" },
       { rank: 3, outcome: "selected", code: null }
     ]);
+    await player.dispose();
+  });
+
+  it("reaches H264 after three retryable decoder progress timeouts", async () => {
+    vi.useFakeTimers();
+    startup.outcomes.set("av1", "decode-progress-timeout");
+    startup.outcomes.set("vp9", "decode-progress-timeout");
+    startup.outcomes.set("h265", "decode-progress-timeout");
+    const harness = createHarness(FAMILIES);
+    const attempt = prepareAttempt({
+      ...harness.input,
+      preparationTimeoutMs: playerPreparationBudgetMs(FAMILIES.length)
+    });
+
+    await vi.advanceTimersByTimeAsync(3 * DECODER_PROGRESS_TIMEOUT_MS);
+    const outcome = await attempt;
+
+    const player = requirePrepared(outcome);
+    expect(startup.opens).toEqual(FAMILIES);
+    expect(startup.disposals).toEqual(FAMILIES.slice(0, 3));
+    expect(player.snapshot(false).selectedCodec).toBe(CODECS.h264);
+    expect(outcome.status === "fulfilled" &&
+      outcome.result.report.candidates.map((candidate) =>
+        candidate.failure?.code ?? null
+      )).toEqual([
+      "worker-decode-failure",
+      "worker-decode-failure",
+      "worker-decode-failure",
+      null
+    ]);
+    expect(harness.publications.playbackFailures).toEqual([]);
+    await player.dispose();
+  });
+
+  it("starts each qualification timeout after asynchronous candidate setup", async () => {
+    vi.useFakeTimers();
+    startup.outcomes.set("av1", "decode-progress-timeout");
+    const families = ["av1", "vp9"] as const;
+    const harness = createHarness(families);
+    let candidateOrdinal = 0;
+    const attempt = prepareAttempt({
+      ...harness.input,
+      preparationTimeoutMs: playerPreparationBudgetMs(families.length),
+      onCandidate: async () => {
+        if (candidateOrdinal++ !== 0) return;
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(resolve, 3_000);
+        });
+      }
+    });
+
+    await vi.advanceTimersByTimeAsync(3_000 + DECODER_PROGRESS_TIMEOUT_MS);
+    const outcome = await attempt;
+
+    const player = requirePrepared(outcome);
+    expect(startup.opens).toEqual(["av1", "vp9"]);
+    expect(startup.disposals).toEqual(["av1"]);
+    expect(player.snapshot(false).selectedCodec).toBe(CODECS.vp9);
+    expect(harness.publications.playbackFailures).toEqual([]);
+    await player.dispose();
+  });
+
+  it("keeps parent cancellation live while qualification timing is deferred", async () => {
+    const controller = new AbortController();
+    const harness = createHarness(["av1", "vp9"], controller);
+    let releaseSetup!: () => void;
+    const setupBlocked = new Promise<void>((resolve) => {
+      releaseSetup = resolve;
+    });
+    let reportSetupStarted!: () => void;
+    const setupStarted = new Promise<void>((resolve) => {
+      reportSetupStarted = resolve;
+    });
+    const attempt = prepareAttempt({
+      ...harness.input,
+      onCandidate: async () => {
+        reportSetupStarted();
+        await setupBlocked;
+      }
+    });
+    await setupStarted;
+    const reason = new DOMException("source generation replaced", "AbortError");
+
+    controller.abort(reason);
+    releaseSetup();
+    const outcome = await attempt;
+
+    expect(outcome).toEqual({ status: "rejected", error: reason });
+    expect(startup.opens).toEqual(["av1"]);
+    expect(startup.disposals).toEqual(["av1"]);
+    expect(harness.publications.playbackFailures).toEqual([]);
+  });
+
+  it("reaches a lower-family winner after every upper-family rendition stalls", async () => {
+    vi.useFakeTimers();
+    startup.renditionCounts.set("av1", 4);
+    startup.outcomes.set("av1", "decode-progress-timeout");
+    const families = ["av1", "vp9"] as const;
+    const harness = createHarness(families);
+    const attempt = prepareAttempt({
+      ...harness.input,
+      preparationTimeoutMs: playerPreparationBudgetMs(families.length)
+    });
+
+    await vi.advanceTimersByTimeAsync(4 * DECODER_PROGRESS_TIMEOUT_MS);
+    const outcome = await attempt;
+
+    const player = requirePrepared(outcome);
+    expect(startup.opens).toEqual(["av1", "av1", "av1", "av1", "vp9"]);
+    expect(startup.disposals).toEqual(["av1", "av1", "av1", "av1"]);
+    expect(player.snapshot(false).selectedCodec).toBe(CODECS.vp9);
+    expect(outcome.status === "fulfilled" &&
+      outcome.result.report.candidates.map((candidate) =>
+        candidate.failure?.code ?? null
+      )).toEqual([
+      "worker-decode-failure",
+      "worker-decode-failure",
+      "worker-decode-failure",
+      "worker-decode-failure",
+      null
+    ]);
+    expect(harness.publications.playbackFailures).toEqual([]);
+    await player.dispose();
+  });
+
+  it("keeps the global deadline alive across repeated slow asset admissions", async () => {
+    vi.useFakeTimers();
+    startup.assetOpenDelayMs = ASSET_ADMISSION_TIMEOUT_MS - 1;
+    for (const family of FAMILIES.slice(0, 3)) {
+      startup.renditionCounts.set(family, 4);
+      startup.outcomes.set(family, "decode-progress-timeout");
+    }
+    const harness = createHarness(FAMILIES);
+    let settled = false;
+    const attempt = prepareAttempt({
+      ...harness.input,
+      preparationTimeoutMs: playerPreparationBudgetMs(FAMILIES.length)
+    }).finally(() => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(74_500);
+    expect(settled).toBe(false);
+    expect(harness.publications.playbackFailures).toEqual([]);
+
+    const rejectedCandidates = 3 * 4;
+    const expectedElapsed =
+      (rejectedCandidates + 1) * startup.assetOpenDelayMs +
+      rejectedCandidates * DECODER_PROGRESS_TIMEOUT_MS;
+    await vi.advanceTimersByTimeAsync(expectedElapsed - 74_500);
+    const outcome = await attempt;
+
+    const player = requirePrepared(outcome);
+    expect(startup.opens).toEqual([
+      ...Array.from({ length: 4 }, () => "av1"),
+      ...Array.from({ length: 4 }, () => "vp9"),
+      ...Array.from({ length: 4 }, () => "h265"),
+      "h264"
+    ]);
+    expect(startup.disposals).toEqual(FAMILIES.slice(0, 3).flatMap(
+      (family) => Array.from({ length: 4 }, () => family)
+    ));
+    expect(player.snapshot(false).selectedCodec).toBe(CODECS.h264);
+    expect(harness.publications.playbackFailures).toEqual([]);
     await player.dispose();
   });
 

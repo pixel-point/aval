@@ -350,7 +350,7 @@ The state names (\`idle\` and \`engaged\`) and event names
 (\`control.engage\` and \`control.release\`) are ordinary author data. The
 runtime does not contain a special hover state.
 
-Build the ordered AV1, VP9, H.265, and H.264 bundle, then open the starter page:
+Build the four-codec AV1, VP9, H.265, and H.264 bundle, then open the starter page:
 
 \`\`\`sh
 npm install
@@ -360,9 +360,10 @@ npm run preview
 \`\`\`
 
 The compiler writes one asset per codec plus \`motion/build.json\`. Before the
-element is defined, \`main.js\` copies each exact MIME type and integrity digest
-from that report onto the literal, ordered \`<source>\` children. The player has
-no host \`src\` or host \`integrity\` attribute.
+element is defined, \`main.js\` copies each asset path and integrity digest from
+that report onto the literal \`<source>\` children. Each child keeps its required
+\`data-codec\` family declaration. The player has no host \`src\` or host
+\`integrity\` attribute.
 
 \`npm run dev\` runs the compiler's watch/browser workflow. The included
 \`index.html\` is the package-aware Vite entry used by \`npm run preview\`. It
@@ -384,10 +385,10 @@ const HTML_EXAMPLE = `<!doctype html>
 <body>
   <button id="favorite" type="button">
     <aval-player id="motion" interaction-for="favorite" aria-hidden="true">
-      <source data-aval-codec="av1">
-      <source data-aval-codec="vp9">
-      <source data-aval-codec="h265">
-      <source data-aval-codec="h264">
+      <source data-codec="av1">
+      <source data-codec="vp9">
+      <source data-codec="h265">
+      <source data-codec="h264">
     </aval-player>
     <img id="motion-unavailable" src="./frames/frame-0000.png" alt="" width="48" height="48" hidden>
     <span>Favorite</span>
@@ -444,20 +445,18 @@ try {
     throw new Error("motion/build.json is not an AVAL build report 1.0");
   }
   const assets = new Map(report.assets.map((asset) => [asset.codec, asset]));
-  const sources = player.querySelectorAll(":scope > source[data-aval-codec]");
+  const sources = player.querySelectorAll(":scope > source[data-codec]");
   for (const source of sources) {
-    const codec = source.getAttribute("data-aval-codec");
+    const codec = source.getAttribute("data-codec");
     const asset = assets.get(codec);
     if (
       !asset || asset.path !== \`\${codec}.avl\` ||
-      typeof asset.type !== "string" || typeof asset.integrity !== "string"
+      typeof asset.integrity !== "string"
     ) {
       throw new Error(\`motion/build.json is missing the \${codec} source\`);
     }
     source.setAttribute("src", \`./motion/\${asset.path}\`);
-    source.setAttribute("type", asset.type);
     source.setAttribute("integrity", asset.integrity);
-    source.removeAttribute("data-aval-codec");
   }
 } catch (error) {
   unavailable.hidden = false;

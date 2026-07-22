@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { SOURCE_CODEC_PRIORITY } from "@pixel-point/aval-element";
 
 import { QUALIFIED_FIXTURE_PREFIX } from
   "../../apps/playground/fixture-routes.js";
 
-const CODEC_ORDER = ["av1", "vp9", "h265", "h264"] as const;
+const CODEC_ORDER = SOURCE_CODEC_PRIORITY;
 
 interface BrowserOutcome {
   readonly readiness: string;
@@ -39,52 +40,7 @@ interface StartupFailoverProbe {
   readonly animatedReveals: number;
 }
 
-test("publishes four ordered direct-child sources and no host source authority", async ({ page }) => {
-  const session = uniqueSession("markup");
-  await page.goto(`/?session=${session}&integrity=0`);
-
-  await expect.poll(() => page.evaluate(() => {
-    const api = (window as unknown as {
-      avalSourcePlayground?: {
-        sourceSnapshot(): readonly Readonly<{ src: string | null }>[];
-      };
-    }).avalSourcePlayground;
-    return api?.sourceSnapshot().every(({ src }) => src !== null) ?? false;
-  })).toBe(true);
-
-  const snapshot = await page.evaluate(() => {
-    const api = (window as unknown as {
-      avalSourcePlayground: {
-        readonly player: HTMLElement;
-        sourceSnapshot(): readonly Readonly<{
-          codec: string | null;
-          src: string | null;
-          type: string | null;
-          integrity: string | null;
-        }>[];
-      };
-    }).avalSourcePlayground;
-    return {
-      hostSrc: api.player.getAttribute("src"),
-      hostIntegrity: api.player.getAttribute("integrity"),
-      sources: api.sourceSnapshot()
-    };
-  });
-
-  expect(snapshot.hostSrc).toBeNull();
-  expect(snapshot.hostIntegrity).toBeNull();
-  expect(snapshot.sources.map(({ codec }) => codec)).toEqual(CODEC_ORDER);
-  for (const [index, source] of snapshot.sources.entries()) {
-    const codec = CODEC_ORDER[index]!;
-    expect(new URL(source.src!).pathname).toBe(
-      `${QUALIFIED_FIXTURE_PREFIX}${codec}.avl`
-    );
-    expect(source.type).toMatch(/^application\/vnd\.aval; codecs="[A-Za-z0-9.]+"$/u);
-    expect(source.integrity).toBeNull();
-  }
-});
-
-test("uses the first exact supported source and never probes a later file", async ({
+test("uses the highest-priority supported source and never probes a lower-priority file", async ({
   browserName,
   page,
   request
@@ -299,7 +255,7 @@ test("retires a positively configured AV1 startup failure before selecting VP9",
   expect(requestedAssets).toEqual(["av1.avl", "vp9.avl"]);
 });
 
-test("lets the user move a codec to the front of the source list", async ({
+test("recovers a failed ladder by explicitly isolating another codec", async ({
   browserName,
   page
 }) => {
@@ -334,7 +290,7 @@ test("lets the user move a codec to the front of the source list", async ({
       };
     }).avalSourcePlayground.player;
     const source = player.querySelector<HTMLSourceElement>(
-      ':scope > source[data-aval-codec="av1"]'
+      ':scope > source[data-codec="av1"]'
     );
     if (source === null) throw new Error("AV1 source is unavailable");
     source.src = `${qualifiedPrefix}missing.avl?failure=${String(Date.now())}`;
@@ -371,6 +327,7 @@ test("lets the user move a codec to the front of the source list", async ({
     const diagnostics = api.player.getDiagnostics?.();
     return {
       firstSource: api.sourceSnapshot()[0]?.codec ?? null,
+      sourceCount: api.sourceSnapshot().length,
       readiness: api.player.readiness ?? "unavailable",
       selectedCodec: diagnostics?.runtime.selectedCodec ?? null,
       sourceGeneration: diagnostics?.sourceGeneration ?? 0,
@@ -379,6 +336,7 @@ test("lets the user move a codec to the front of the source list", async ({
     };
   }), { timeout: 30_000 }).toMatchObject({
     firstSource: "vp9",
+    sourceCount: 1,
     ...(browserName === "chromium"
       ? {
           readiness: "interactiveReady",
@@ -489,26 +447,29 @@ test("switches every codec control and reports the browser's actual selection", 
     presentation.frameIndex === 5
   )).toBeGreaterThan(0);
 
-  generation = await selectCodec(
-    page,
-    "H.265 / HEVC",
-    "h265",
-    /^(?:hvc1|av01)\./u,
-    generation
-  );
-  await expect(page.getByRole("button", { name: "H.265 / HEVC", exact: true }))
-    .toHaveAttribute("aria-pressed", "true");
-  const selectedH265 = await selectedCodec(page);
-  if (selectedH265.startsWith("hvc1.")) {
-    await expect(page.getByRole("button", { name: "H.265 / HEVC", exact: true }))
-      .toHaveAttribute("aria-current", "true");
+  const h265 = page.getByRole("button", { name: "H.265 / HEVC", exact: true });
+  await h265.click();
+  const expectedH265Generation = generation + 1;
+  await expect.poll(() => isolatedCodecState(page), { timeout: 30_000 })
+    .toMatchObject({
+      codecs: ["h265"],
+      generation: expectedH265Generation,
+      readiness: expect.stringMatching(/^(?:interactiveReady|error)$/u)
+    });
+  await expect(h265).toHaveAttribute("aria-pressed", "true");
+  const h265Outcome = await isolatedCodecState(page);
+  if (h265Outcome.readiness === "interactiveReady") {
+    expect(h265Outcome.selectedCodec).toMatch(/^hvc1\./u);
+    await expect(h265).toHaveAttribute("aria-current", "true");
     await expect(page.locator("#status")).toContainText("selected H.265 / HEVC");
   } else {
-    await expect(page.getByRole("button", { name: "AV1", exact: true }))
-      .toHaveAttribute("aria-current", "true");
-    await expect(page.locator("#status"))
-      .toContainText("Requested H.265 / HEVC first · browser selected AV1");
+    expect(h265Outcome.selectedCodec).toBeNull();
+    await expect(page.locator(".fallback")).toBeVisible();
+    await expect(page.locator("#status")).toContainText(
+      "Could not play H.265 / HEVC by itself"
+    );
   }
+  generation = expectedH265Generation;
 
   await selectCodec(page, "AV1", "av1", /^av01\./u, generation);
 });
@@ -874,19 +835,34 @@ async function contentPresentationTrace(
   });
 }
 
-async function selectedCodec(page: import("@playwright/test").Page): Promise<string> {
+async function isolatedCodecState(
+  page: import("@playwright/test").Page
+): Promise<{
+  readonly codecs: readonly (string | null)[];
+  readonly generation: number;
+  readonly readiness: string;
+  readonly selectedCodec: string | null;
+}> {
   return page.evaluate(() => {
-    const codec = (window as unknown as {
+    const api = (window as unknown as {
       avalSourcePlayground: {
         readonly player: HTMLElement & {
+          readonly readiness?: string;
           getDiagnostics?(): Readonly<{
+            sourceGeneration: number;
             runtime: Readonly<{ selectedCodec: string | null }>;
           }>;
         };
+        sourceSnapshot(): readonly Readonly<{ codec: string | null }>[];
       };
-    }).avalSourcePlayground.player.getDiagnostics?.().runtime.selectedCodec;
-    if (codec === null || codec === undefined) throw new Error("no selected codec");
-    return codec;
+    }).avalSourcePlayground;
+    const diagnostics = api.player.getDiagnostics?.();
+    return {
+      codecs: api.sourceSnapshot().map(({ codec }) => codec),
+      generation: diagnostics?.sourceGeneration ?? 0,
+      readiness: api.player.readiness ?? "unavailable",
+      selectedCodec: diagnostics?.runtime.selectedCodec ?? null
+    };
   });
 }
 
@@ -926,6 +902,7 @@ async function selectCodec(
     const diagnostics = api.player.getDiagnostics?.();
     return {
       firstSource: api.sourceSnapshot()[0]?.codec ?? null,
+      sourceCount: api.sourceSnapshot().length,
       generation: diagnostics?.sourceGeneration ?? 0,
       readiness: api.player.readiness ?? "unavailable",
       selectedCodec: diagnostics?.runtime.selectedCodec ?? null,
@@ -933,6 +910,7 @@ async function selectCodec(
     };
   }), { timeout: 30_000 }).toMatchObject({
     firstSource: family,
+    sourceCount: 1,
     generation: expectedGeneration,
     readiness: "interactiveReady",
     selectedCodec: expect.stringMatching(selectedCodec),

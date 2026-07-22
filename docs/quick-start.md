@@ -38,22 +38,19 @@ than parsing the message.
 <script type="module" src="/motion.js"></script>
 
 <aval-player id="motion" width="320" height="320">
-  <source src="/my-motion/av1.avl"
-    type='application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"'>
-  <source src="/my-motion/vp9.avl"
-    type='application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"'>
-  <source src="/my-motion/h265.avl"
-    type='application/vnd.aval; codecs="hvc1.1.6.L30.90"'>
-  <source src="/my-motion/h264.avl"
-    type='application/vnd.aval; codecs="avc1.42E00B"'>
+  <source src="/my-motion/av1.avl" data-codec="av1">
+  <source src="/my-motion/vp9.avl" data-codec="vp9">
+  <source src="/my-motion/h265.avl" data-codec="h265">
+  <source src="/my-motion/h264.avl" data-codec="h264">
 </aval-player>
 <img id="motion-unavailable" src="/my-motion.png" alt="" hidden>
 ```
 
-Use the exact `sourceMarkup` emitted in your bundle's `build.json`; codec levels
-depend on the compiled rendition. Candidate selection follows markup order, so
-H.264 is attempted only after AV1, VP9, and HEVC are unavailable or fail a
-closed provisional codec/output check.
+Use the exact `sourceMarkup` emitted in your bundle's `build.json`.
+`data-codec` is a family declaration; exact codec levels remain inside each
+asset manifest. Candidate selection ignores markup order and always attempts
+AV1, VP9, H.265, then H.264. H.264 is therefore used only after all present
+modern families are unavailable or fail closed provisional codec/output checks.
 
 ```js
 // motion.js, resolved by your package-aware web build

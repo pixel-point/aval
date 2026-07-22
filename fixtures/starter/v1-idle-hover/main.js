@@ -26,20 +26,18 @@ try {
     throw new Error("motion/build.json is not an AVAL build report 1.0");
   }
   const assets = new Map(report.assets.map((asset) => [asset.codec, asset]));
-  const sources = player.querySelectorAll(":scope > source[data-aval-codec]");
+  const sources = player.querySelectorAll(":scope > source[data-codec]");
   for (const source of sources) {
-    const codec = source.getAttribute("data-aval-codec");
+    const codec = source.getAttribute("data-codec");
     const asset = assets.get(codec);
     if (
       !asset || asset.path !== `${codec}.avl` ||
-      typeof asset.type !== "string" || typeof asset.integrity !== "string"
+      typeof asset.integrity !== "string"
     ) {
       throw new Error(`motion/build.json is missing the ${codec} source`);
     }
     source.setAttribute("src", `./motion/${asset.path}`);
-    source.setAttribute("type", asset.type);
     source.setAttribute("integrity", asset.integrity);
-    source.removeAttribute("data-aval-codec");
   }
 } catch (error) {
   unavailable.hidden = false;

@@ -2,8 +2,9 @@
 
 This permanent example exercises the public `@pixel-point/aval-element` API
 with real checked-in AV1, VP9, H.265, and H.264 renditions of one two-state
-asset. The browser selects the first supported source. From the repository
-root, run:
+asset. The browser selects the first qualifying family in the fixed AV1 → VP9
+→ H.265 → H.264 ladder, independent of DOM order. From the repository root,
+run:
 
 ```sh
 npm install

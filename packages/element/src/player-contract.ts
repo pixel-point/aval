@@ -9,10 +9,11 @@ import type { AvalPlaybackError } from "./errors.js";
 import type { DecoderFailureDiagnostic } from "./decoder-diagnostics.js";
 import type { DecoderPoolLaneId } from "./decoder-pool.js";
 import type { RendererFailureDiagnostic } from "./renderer-diagnostics.js";
+import type { AvalSourceCodec } from "./public-types.js";
 
 export interface Source {
   readonly src: string;
-  readonly codec: string;
+  readonly codec: AvalSourceCodec;
   readonly integrity: string;
   /** Original direct-child source position before invalid candidates are filtered. */
   readonly sourceIndex?: number;

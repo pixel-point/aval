@@ -51,12 +51,14 @@ pending; manual Live screenshots are never assigned invented session ids or
 reported as machine-verifiable captures.
 
 Repository-local evidence commands import the built canonical codec authority.
-After a clean `npm ci --ignore-scripts`, build `@pixel-point/aval-graph` and then
-`@pixel-point/aval-format` before running the Brave matrix, evidence assembler,
-or evidence validator directly.
+After a clean `npm ci --ignore-scripts`, build `@pixel-point/aval-graph`,
+`@pixel-point/aval-format`, and `@pixel-point/aval-element` before running the
+Brave matrix, evidence assembler, or evidence validator directly.
 
-The player evaluates direct-child sources in author order. It validates each
-required codec hint and probes every otherwise-eligible authored rendition
+The player evaluates direct-child sources in the fixed AV1 → VP9 → H.265 →
+H.264 family order declared by required `data-codec` attributes; DOM order is
+irrelevant. It validates each family declaration and probes every
+otherwise-eligible authored rendition
 with `VideoDecoder.isConfigSupported()` inside the same module-worker
 environment used for decoding. A positive configuration probe is only
 preflight; production qualification must also decode, transfer, validate, and
@@ -64,9 +66,10 @@ present a real initial frame. It does not sniff the user agent or call media
 element `canPlayType()`.
 
 A deterministically unsupported codec/configuration advances to the next
-authored rendition or source. During provisional startup, only the closed typed
-decoder cases—unsupported configuration and explicit `NotSupportedError` or
-`EncodingError` from configure, decode, or flush—plus decoded metadata mismatch
+authored rendition or codec family. During provisional startup, only the closed
+typed decoder cases—unsupported configuration and explicit `NotSupportedError`
+or `EncodingError` from configure, decode, or flush, or a decoder-local codec
+support-probe, decode, or flush progress timeout—plus decoded metadata mismatch
 and a wire-1.1 packed-alpha witness mismatch may advance. Diagnostics retain
 evidence but are never parsed to reconstruct this policy.
 
@@ -74,7 +77,7 @@ Renderer and RGBA-materializer failures are terminal, including an unsupported
 `VideoFrame.copyTo({ format: "RGBA" })` followed by an unavailable or failed
 Canvas2D readback. Network, CORS/CSP, integrity, malformed assets, unsupported
 wire versions, worker transport, resources, contexts, cleanup, abort, and
-watchdog failures are also terminal. They reject `prepare()` with
+non-decoder watchdog failures are also terminal. They reject `prepare()` with
 `AvalPlaybackError` and raise one fatal `error` event; the application decides
 how to respond. Within a file, renditions remain in authored quality order.
 After `interactiveReady`, a fatal decoder failure is terminal and never
@@ -83,12 +86,11 @@ frame rate, or active codec.
 
 H.264 8-bit 4:2:0 is the mandatory last-resort rendition and should use the
 minimum practical profile and level for the asset. The supported reference
-contract and bundled examples publish the exact order AV1 → VP9 → H.265/HEVC →
-H.264. H.264 is selected only after every earlier authored candidate is
+contract and bundled examples use the exact priority AV1 → VP9 → H.265/HEVC →
+H.264. H.264 is selected only after every earlier present candidate is
 deterministically unsupported or fails the narrow startup qualification above;
 certification rejects an H.264 selection without candidate-scoped proof for
-each skipped modern codec. Source order remains the public preference contract,
-so custom markup that places H.264 first explicitly opts out of this ladder.
+each skipped modern codec. Reordering markup cannot opt out of this ladder.
 Normal iPhone certification requires HEVC or a higher-ranked selected codec;
 an H.264 result is a failing HEVC-path investigation, not a support claim.
 Ten-bit AV1 is not a baseline requirement.

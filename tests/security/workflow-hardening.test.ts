@@ -27,7 +27,7 @@ describe("workflow hardening", () => {
       expect(source).toContain('from "@pixel-point/aval-format"');
       expect(source).not.toContain("canonical-codec.mjs");
     }
-    expect(matrix).toContain("H264_CONSTRAINED_BASELINE_CODECS");
+    expect(matrix).toContain("parseVideoCodecString");
   });
 
   it("pins scheduled native-tool tests to the root Vitest configuration", async () => {

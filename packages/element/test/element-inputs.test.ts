@@ -32,20 +32,23 @@ describe("element inputs", () => {
   it("skips malformed source candidates without discarding valid siblings", () => {
     const host = {
       children: collection([
-        source({ src: "/bad.avl", type: "video/mp4" }),
+        source({ src: "/bad.avl", "data-codec": "mpeg2" }),
         source({
           src: "/valid.avl",
-          type: 'application/vnd.aval; codecs="avc1.42E01E"'
+          "data-codec": "h264"
         }),
         element("div")
       ])
     } as unknown as HTMLElement;
 
     const read = readSources(host);
-    expect(read.failures).toEqual([{ sourceIndex: 0, attribute: "type" }]);
+    expect(read.failures).toEqual([{
+      sourceIndex: 0,
+      attribute: "data-codec"
+    }]);
     expect(read.sources).toEqual([{
       src: "/valid.avl",
-      codec: "avc1.42E01E",
+      codec: "h264",
       integrity: "",
       sourceIndex: 1
     }]);
@@ -54,53 +57,44 @@ describe("element inputs", () => {
     expect(Object.isFrozen(read.failures)).toBe(true);
   });
 
-  it("reports exact attributes for control URLs, codecs, and noncanonical SRI", () => {
+  it("reports exact attributes for control URLs, codec families, and noncanonical SRI", () => {
     const host = {
       children: collection([
         source({
           src: "/bad\navl",
-          type: 'application/vnd.aval; codecs="avc1.42E01E"'
+          "data-codec": "h264"
         }),
         source({
           src: "/bad-codec.avl",
-          type: 'application/vnd.aval; codecs="avc1.42C01E"'
+          "data-codec": "H264"
         }),
         source({
           src: "/bad-sri.avl",
-          type: 'application/vnd.aval; codecs="avc1.42E01E"',
+          "data-codec": "vp9",
           integrity: `sha256-${"A".repeat(42)}B=`
         })
       ])
     } as unknown as HTMLElement;
     expect(readSources(host).failures).toEqual([
       { sourceIndex: 0, attribute: "src" },
-      { sourceIndex: 1, attribute: "type" },
+      { sourceIndex: 1, attribute: "data-codec" },
       { sourceIndex: 2, attribute: "integrity" }
     ]);
   });
 
-  it("accepts only the supported canonical codec grammar", () => {
+  it("accepts only the four supported lowercase codec families", () => {
     const codecs = [
-      ["avc1.64000A", false], ["avc1.64001E", false], ["avc1.64003E", false],
-      ["hvc1.1.2.L1.90", true], ["hvc1.1.6.L93.B0", true],
-      ["hvc1.1.FFFFFFFF.H255.90", true], ["vp09.00.10.08", false],
-      ["vp09.00.62.08.01.01.01.01.00", true], ["av01.0.00M.08", false],
-      ["av01.0.00M.08.0.110.01.01.01.0", true],
-      ["av01.0.31H.10.0.113.01.01.01.0", true],
-      ["avc1.42E00A", true], ["avc1.42E01E", true],
-      ["avc1.42E03E", true], ["avc1.42C01E", false],
-      ["avc1.64000a", false],
-      ["hvc1.1.0.L93.B0", false], ["hvc1.1.100000000.L93.B0", false],
-      ["hvc1.1.2.L0.90", false], ["hvc1.1.2.L1.D0", false],
-      ["hvc1.1.2.L1.90.00", false], ["vp09.00.10.10", false],
-      ["vp09.01.10.08", false], ["av01.1.00M.08", false],
-      ["av01.0.32M.08", false], ["av01.0.00M.12", false]
+      ["av1", true], ["vp9", true], ["h265", true], ["h264", true],
+      ["", false], ["AV1", false], ["hevc", false], ["avc", false],
+      ["av01.0.00M.08.0.110.01.01.01.0", false],
+      ["vp09.00.62.08.01.01.01.01.00", false],
+      ["hvc1.1.6.L93.B0", false], ["avc1.42E01E", false]
     ] as const;
     for (const [codec, valid] of codecs) {
       const host = {
         children: collection([source({
           src: "/motion.avl",
-          type: `application/vnd.aval; codecs="${codec}"`
+          "data-codec": codec
         })])
       } as unknown as HTMLElement;
       expect(readSources(host), codec).toEqual(valid
@@ -110,47 +104,136 @@ describe("element inputs", () => {
           }
         : {
             sources: [],
-            failures: [{ sourceIndex: 0, attribute: "type" }]
+            failures: [{ sourceIndex: 0, attribute: "data-codec" }]
           });
     }
   });
 
-  it("preserves duplicate direct sources while ignoring nested and foreign elements", () => {
-    const first = source({
-      src: "/motion.avl",
-      type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"'
+  it("does not admit the legacy MIME codec declaration", () => {
+    const legacyOnly = readSources({
+      children: collection([source({
+        src: "/legacy.avl",
+        type: 'application/vnd.aval; codecs="avc1.42E01E"'
+      })])
+    } as unknown as HTMLElement);
+    expect(legacyOnly).toEqual({
+      sources: [],
+      failures: [{ sourceIndex: 0, attribute: "data-codec" }]
     });
-    const duplicate = source({
-      src: "/motion.avl",
-      type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"'
+
+    const familyOwned = readSources({
+      children: collection([source({
+        src: "/motion.avl",
+        "data-codec": "vp9",
+        type: 'application/vnd.aval; codecs="avc1.42E01E"'
+      })])
+    } as unknown as HTMLElement);
+    expect(familyOwned).toEqual({
+      sources: [{
+        src: "/motion.avl",
+        codec: "vp9",
+        integrity: "",
+        sourceIndex: 0
+      }],
+      failures: []
     });
+  });
+
+  it("sorts direct sources by policy while preserving diagnostic indexes", () => {
+    const first = source({ src: "/h264.avl", "data-codec": "h264" });
+    const second = source({ src: "/av1.avl", "data-codec": "av1" });
+    const third = source({ src: "/h265.avl", "data-codec": "h265" });
+    const fourth = source({ src: "/vp9.avl", "data-codec": "vp9" });
     const container = element("div");
     source({
       src: "/nested.avl",
-      type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"'
+      "data-codec": "av1"
     }, container as unknown as HTMLElement);
     const foreign = source({
       src: "/foreign.avl",
-      type: 'application/vnd.aval; codecs="av01.0.08M.10.0.110.01.01.01.0"'
+      "data-codec": "av1"
     }, null, "http://www.w3.org/2000/svg");
     const read = readSources({
-      children: collection([first, container, duplicate, foreign])
+      children: collection([first, container, second, third, fourth, foreign])
     } as unknown as HTMLElement);
     expect(read.sources).toEqual([
       {
-        src: "/motion.avl",
-        codec: "av01.0.08M.10.0.110.01.01.01.0",
-        integrity: "",
-        sourceIndex: 0
-      },
-      {
-        src: "/motion.avl",
-        codec: "av01.0.08M.10.0.110.01.01.01.0",
+        src: "/av1.avl",
+        codec: "av1",
         integrity: "",
         sourceIndex: 1
+      },
+      {
+        src: "/vp9.avl",
+        codec: "vp9",
+        integrity: "",
+        sourceIndex: 3
+      },
+      {
+        src: "/h265.avl",
+        codec: "h265",
+        integrity: "",
+        sourceIndex: 2
+      },
+      {
+        src: "/h264.avl",
+        codec: "h264",
+        integrity: "",
+        sourceIndex: 0
       }
     ]);
     expect(read.failures).toEqual([]);
+  });
+
+  it("removes every source in a duplicate codec family as ambiguous", () => {
+    const read = readSources({
+      children: collection([
+        source({ src: "/first.avl", "data-codec": "vp9" }),
+        source({ src: "/h264.avl", "data-codec": "h264" }),
+        source({ src: "/second.avl", "data-codec": "vp9" })
+      ])
+    } as unknown as HTMLElement);
+    expect(read.sources).toEqual([{
+      src: "/h264.avl",
+      codec: "h264",
+      integrity: "",
+      sourceIndex: 1
+    }]);
+    expect(read.failures).toEqual([
+      { sourceIndex: 0, attribute: "data-codec" },
+      { sourceIndex: 2, attribute: "data-codec" }
+    ]);
+  });
+
+  it("rejects duplicate families even when one declaration has another invalid attribute", () => {
+    const read = readSources({
+      children: collection([
+        source({ src: "/healthy.avl", "data-codec": "av1" }),
+        source({ src: "/bad\navl", "data-codec": "av1" }),
+        source({
+          src: "/bad-integrity.avl",
+          "data-codec": "vp9",
+          integrity: `sha256-${"A".repeat(42)}B=`
+        }),
+        source({ src: "/healthy-vp9.avl", "data-codec": "vp9" }),
+        source({ src: "/healthy-h264.avl", "data-codec": "h264" })
+      ])
+    } as unknown as HTMLElement);
+
+    expect(read.sources).toEqual([{
+      src: "/healthy-h264.avl",
+      codec: "h264",
+      integrity: "",
+      sourceIndex: 4
+    }]);
+    expect(read.failures).toEqual([
+      { sourceIndex: 0, attribute: "data-codec" },
+      { sourceIndex: 1, attribute: "src" },
+      { sourceIndex: 1, attribute: "data-codec" },
+      { sourceIndex: 2, attribute: "integrity" },
+      { sourceIndex: 2, attribute: "data-codec" },
+      { sourceIndex: 3, attribute: "data-codec" }
+    ]);
   });
 
   it("reloads only for direct-child source membership or attributes", () => {

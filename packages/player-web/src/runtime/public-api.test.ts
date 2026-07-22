@@ -12,7 +12,6 @@ const PUBLIC_RUNTIME_EXPORTS = Object.freeze([
   "RuntimeSessionLifecycle",
   "SourceSupportProbe",
   "VideoCandidateFactory",
-  "VideoSourceSelectionError",
   "VisibilityPolicyCoordinator",
   "createBrowserVideoCandidateComposition",
   "createPlayerRuntimeAssetSessionResources",
@@ -20,8 +19,7 @@ const PUBLIC_RUNTIME_EXPORTS = Object.freeze([
   "createRuntimePageResourcePolicy",
   "createSourceSupportProbe",
   "openRuntimeAsset",
-  "openRuntimeAssetBytes",
-  "selectVideoSource"
+  "openRuntimeAssetBytes"
 ] as const);
 
 const PRIVATE_RESOURCE_EXPORTS = Object.freeze([

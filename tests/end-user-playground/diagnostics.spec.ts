@@ -160,13 +160,8 @@ test("captures bounded query-only browser diagnostics", async ({
   expect(timedOut.outcome).toBe("timeout");
   expect(report.authoredSources.map(({ codec }) => codec)).toEqual(
     certificationMode === "forced-h264"
-      ? ["avc1.42E00B"]
-      : [
-          "av01.0.00M.10.0.110.01.01.01.0",
-          "vp09.00.10.08.01.01.01.01.00",
-          "hvc1.1.6.L30.90",
-          "avc1.42E00B"
-        ]
+      ? ["h264"]
+      : ["av1", "vp9", "h265", "h264"]
   );
   expect(report.checkpoints.map(({ label }) => label)).toEqual(
     expect.arrayContaining([
@@ -363,9 +358,12 @@ test("captures bounded query-only browser diagnostics", async ({
         : `bounds-probe-${String(playerIndex)}`;
       for (let sourceIndex = 0; sourceIndex < 4; sourceIndex += 1) {
         const source = document.createElement("source");
-        source.type = playerIndex === 39 && sourceIndex === 0
-          ? `video/mp4; codecs="${"c".repeat(5_000)}"`
-          : `video/mp4; codecs="avc1.42E0${String(sourceIndex)}"`;
+        source.setAttribute(
+          "data-codec",
+          playerIndex === 39 && sourceIndex === 0
+            ? "c".repeat(5_000)
+            : ["av1", "vp9", "h265", "h264"][sourceIndex]!
+        );
         probe.append(source);
       }
       probe.getDiagnostics = () => ({ playerIndex });
@@ -415,9 +413,6 @@ test("captures bounded query-only browser diagnostics", async ({
   );
   expect(bounded.players.at(-1)?.elementId).toEqual(expect.any(String));
   expect(String(bounded.players.at(-1)?.elementId).length).toBeLessThanOrEqual(
-    BROWSER_DIAGNOSTIC_LIMITS.stringLength
-  );
-  expect(bounded.authoredSources.at(-4)?.mimeType.length).toBeLessThanOrEqual(
     BROWSER_DIAGNOSTIC_LIMITS.stringLength
   );
   expect(String(bounded.authoredSources.at(-4)?.codec).length)
@@ -610,7 +605,7 @@ test("bounds diagnostics while ingesting and traversing hostile values", async (
     sourceBoundProbe.id = "source-bound-probe";
     for (let index = 0; index <= limits.authoredSources; index += 1) {
       const source = document.createElement("source");
-      source.type = `video/mp4; codecs="avc1.${String(index)}"`;
+      source.setAttribute("data-codec", "h264");
       if (index === limits.authoredSources) {
         Object.defineProperty(source, "getAttribute", {
           value: () => {

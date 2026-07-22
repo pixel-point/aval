@@ -1,3 +1,7 @@
+import {
+  SOURCE_CODEC_PRIORITY
+} from "@pixel-point/aval-element";
+
 export const SHA256_PATTERN = "^[a-f0-9]{64}$";
 export const COMMIT_PATTERN = "^[a-f0-9]{40}$";
 export const SESSION_ID_PATTERN =
@@ -6,7 +10,7 @@ export const SESSION_ID_PATTERN =
 const IDENTIFIER_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const RELATIVE_PATH_PATTERN =
   "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$";
-const CODECS = ["av1", "vp9", "h265", "h264"];
+const CODECS = SOURCE_CODEC_PRIORITY;
 const STATES = ["idle", "engaged", "entering", "hover", "exiting"];
 
 const sha256 = Object.freeze({ type: "string", pattern: SHA256_PATTERN });
@@ -572,7 +576,7 @@ export const DIAGNOSTIC_REPORT_SCHEMA = Object.freeze({
         properties: {
           playerId: { type: "string", minLength: 1, maxLength: 64 },
           index: safeInteger,
-          codec: { type: "string", minLength: 1, maxLength: 128 }
+          codec: { enum: CODECS }
         }
       }
     },

@@ -519,7 +519,7 @@ export function createCompileBundleSourceMarkup(
   assets: readonly Readonly<CompileBundleReportAsset>[]
 ): string {
   return assets.map((asset) =>
-    `<source src="${asset.path}" type='${asset.type}' integrity="${asset.integrity}">`
+    `<source src="${asset.path}" data-codec="${asset.codec}" integrity="${asset.integrity}">`
   ).join("\n");
 }
 

@@ -47,14 +47,21 @@ describe("permanent-demo browser command contract", () => {
     }
   });
 
-  it("keeps the 60-second soak isolated to one Kinetic Chromium project", () => {
+  it("keeps the 60-second soak isolated to Kinetic Chromium and Firefox projects", () => {
     const soak = kineticOrb.projects?.filter(({ name }) => name.includes("soak")) ?? [];
-    expect(soak).toHaveLength(1);
-    expect(soak[0]).toMatchObject({
-      name: "chromium-soak",
-      testMatch: "**/soak.spec.ts",
-      timeout: 95_000
-    });
+    expect(soak).toHaveLength(2);
+    expect(soak).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "chromium-soak",
+        testMatch: "**/soak.spec.ts",
+        timeout: 95_000
+      }),
+      expect.objectContaining({
+        name: "firefox-soak",
+        testMatch: "**/soak.spec.ts",
+        timeout: 95_000
+      })
+    ]));
     for (const config of [playground, grassRabbit, grassRabbitCodecs]) {
       expect(config.projects?.some(({ name }) => name.includes("soak"))).toBe(false);
     }

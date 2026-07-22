@@ -49,7 +49,8 @@ export class SyntheticAsset {
   public constructor(
     state: Readonly<CandidateHarnessState>,
     family: CodecFamily,
-    codec: string
+    codec: string,
+    renditionCount = 1
   ) {
     this.#state = state;
     this.#family = family;
@@ -58,6 +59,29 @@ export class SyntheticAsset {
     const packed = witnessFrame !== undefined;
     const frameCount = packed ? witnessFrame + 1 : 1;
     const codedHeight = packed ? 40 : 16;
+    const renditions = Array.from({ length: renditionCount }, (_, index) => ({
+      id: renditionCount === 1 ? "main" : `rendition-${String(index)}`,
+      codec,
+      bitDepth: 8,
+      codedWidth: WIDTHS[family],
+      codedHeight,
+      bitrate: { average: 1_000, peak: 1_000 },
+      ...(packed
+        ? {
+            alphaLayout: {
+              type: "stacked",
+              colorRect: [0, 0, 16, 16],
+              alphaRect: [0, 24, 16, 16]
+            },
+            outputQualification: {
+              kind: "packed-alpha-v1",
+              unit,
+              frame: witnessFrame,
+              samples: [{ x: 0, y: 0, expectedRange: [32, 64] }]
+            }
+          }
+        : { alphaLayout: { type: "opaque", colorRect: [0, 0, 16, 16] } })
+    }));
     this.manifest = {
       formatVersion: "1.1",
       generator: "player-startup-test",
@@ -74,42 +98,20 @@ export class SyntheticAsset {
         colorSpace: "srgb"
       },
       frameRate: { numerator: 30, denominator: 1 },
-      renditions: [{
-        id: "main",
-        codec,
-        bitDepth: 8,
-        codedWidth: WIDTHS[family],
-        codedHeight,
-        bitrate: { average: 1_000, peak: 1_000 },
-        ...(packed
-          ? {
-              alphaLayout: {
-                type: "stacked",
-                colorRect: [0, 0, 16, 16],
-                alphaRect: [0, 24, 16, 16]
-              },
-              outputQualification: {
-                kind: "packed-alpha-v1",
-                unit,
-                frame: witnessFrame,
-                samples: [{ x: 0, y: 0, expectedRange: [32, 64] }]
-              }
-            }
-          : { alphaLayout: { type: "opaque", colorRect: [0, 0, 16, 16] } })
-      }],
+      renditions,
       units: [{
         id: unit,
         kind: "body",
         playback: frameCount === 1 ? "finite" : "loop",
         frameCount,
         ports: [{ id: "entry", entryFrame: 0, portalFrames: [0] }],
-        chunks: [{
-          rendition: "main",
-          chunkStart: 0,
+        chunks: renditions.map(({ id }, index) => ({
+          rendition: id,
+          chunkStart: index * frameCount,
           chunkCount: frameCount,
           frameCount,
           sha256: "0".repeat(64)
-        }]
+        }))
       }],
       initialState: family,
       states: [{ id: family, bodyUnit: unit }],
@@ -128,24 +130,27 @@ export class SyntheticAsset {
         runtimeWorkingSetBytes: 1_000_000
       }
     };
-    this.blobs = [{
-      rendition: "main",
+    this.blobs = renditions.map(({ id }, index) => ({
+      rendition: id,
       unit,
-      offset: 1_000,
+      offset: 1_000 + index * frameCount,
       length: frameCount,
-      chunkStart: 0,
+      chunkStart: index * frameCount,
       chunkCount: frameCount,
       frameCount,
       sha256: "0".repeat(64)
-    }];
-    this.records = Array.from({ length: frameCount }, (_, index) => ({
-      byteOffset: 1_000 + index,
-      byteLength: 1,
-      presentationTimestamp: index,
-      duration: 1,
-      randomAccess: index === 0,
-      displayedFrameCount: 1
     }));
+    this.records = Array.from(
+      { length: frameCount * renditionCount },
+      (_, index) => ({
+        byteOffset: 1_000 + index,
+        byteLength: 1,
+        presentationTimestamp: index % frameCount,
+        duration: 1,
+        randomAccess: index % frameCount === 0,
+        displayedFrameCount: 1
+      })
+    );
   }
 
   public async unitBytes(): Promise<Uint8Array<ArrayBuffer>> {
@@ -207,7 +212,7 @@ export function createCandidateHarness(
     baseUrl: "https://example.test/",
     sources: families.map((family, sourceIndex) => ({
       src: `${family}.avl`,
-      codec: CODECS[family],
+      codec: family,
       integrity: "",
       sourceIndex
     })),
@@ -317,6 +322,9 @@ export function baseRgbaCopyDiagnostic(): Readonly<RendererFailureDiagnostic> {
 }
 
 export function codecFamily(codec: string): CodecFamily {
+  if ((FAMILIES as readonly string[]).includes(codec)) {
+    return codec as CodecFamily;
+  }
   const parsed = parseVideoCodecString(codec);
   if (parsed === undefined) {
     throw new Error(`unknown synthetic codec ${codec}`);

@@ -8,19 +8,19 @@ const STATES = ["idle", "loading", "done"] as const;
 const SOURCES = Object.freeze([
   Object.freeze({
     src: "/status/av1.avl",
-    type: 'application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"'
+    codec: "av1"
   }),
   Object.freeze({
     src: "/status/vp9.avl",
-    type: 'application/vnd.aval; codecs="vp09.00.10.08.01.01.01.01.00"'
+    codec: "vp9"
   }),
   Object.freeze({
     src: "/status/h265.avl",
-    type: 'application/vnd.aval; codecs="hvc1.1.6.L30.90"'
+    codec: "h265"
   }),
   Object.freeze({
     src: "/status/h264.avl",
-    type: 'application/vnd.aval; codecs="avc1.42E00A"'
+    codec: "h264"
   })
 ]);
 

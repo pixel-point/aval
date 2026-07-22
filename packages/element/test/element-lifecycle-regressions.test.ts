@@ -13,6 +13,11 @@ import type {
   Binding
 } from "../src/public-types.js";
 import { AvalPlaybackError } from "../src/errors.js";
+import {
+  ELEMENT_SETUP_TIMEOUT_MS,
+  playerPreparationBudgetMs,
+  preparationBudgetMs
+} from "../src/preparation-budget.js";
 
 const harness = vi.hoisted(() => ({
   brokerMode: "immediate" as "immediate" | "queued",
@@ -30,6 +35,10 @@ const harness = vi.hoisted(() => ({
   tickets: [] as BrokerTicket[],
   bindings: [] as Binding[],
   eventStates: new Map<string, string>(),
+  motionSelections: [] as Array<Readonly<{
+    policy: "auto" | "reduce" | "full";
+    reduced: boolean;
+  }>>,
   operations: [] as string[]
 }));
 
@@ -265,7 +274,9 @@ vi.mock("../src/player.js", () => ({
       readyFor: () => true,
       pause: () => undefined,
       resume: async () => undefined,
-      setMotion: async () => undefined,
+      setMotion: async (policy, reduced) => {
+        harness.motionSelections.push(Object.freeze({ policy, reduced }));
+      },
       suspend: async () => {
         animationRetired = true;
         input.onReadiness("staticReady", "visibility-suspended");
@@ -490,12 +501,78 @@ afterEach(async () => {
   harness.tickets.length = 0;
   harness.bindings.length = 0;
   harness.eventStates.clear();
+  harness.motionSelections.length = 0;
   harness.operations.length = 0;
   FakeMutationObserver.instances.length = 0;
+  FakeIntersectionObserver.deferObservation = false;
+  FakeIntersectionObserver.instances.length = 0;
+  vi.useRealTimers();
   await settleMicrotasks();
 });
 
 describe("element lifecycle regressions", () => {
+  it("does not spend player ladder reserve while waiting for element setup", async () => {
+    vi.useFakeTimers();
+    FakeIntersectionObserver.deferObservation = true;
+    const { element } = createConnectedElement("setup-boundary.avl");
+    const preparation = element.prepare();
+    await settleMicrotasks();
+
+    await vi.advanceTimersByTimeAsync(ELEMENT_SETUP_TIMEOUT_MS - 1);
+    expect(harness.inputs).toHaveLength(0);
+    FakeIntersectionObserver.instances[0]?.emit();
+    await preparation;
+
+    expect(harness.inputs).toHaveLength(1);
+    const timeoutMs = (harness.inputs[0] as PlayerInput).preparationTimeoutMs;
+    expect(timeoutMs).toBe(playerPreparationBudgetMs(1) + 1);
+    expect(timeoutMs).toBeLessThan(preparationBudgetMs(1));
+    vi.useRealTimers();
+  });
+
+  it("terminates a stalled element setup at its own boundary", async () => {
+    vi.useFakeTimers();
+    FakeIntersectionObserver.deferObservation = true;
+    const { element } = createConnectedElement("stalled-setup.avl");
+    const preparation = element.prepare();
+    await settleMicrotasks();
+
+    await vi.advanceTimersByTimeAsync(ELEMENT_SETUP_TIMEOUT_MS);
+
+    await expect(preparation).rejects.toMatchObject({
+      failure: { code: "watchdog-timeout", operation: "prepare" }
+    });
+    expect(harness.inputs).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
+  it("reconciles a missed reduced-motion event from the rendered-frame checkpoint", async () => {
+    harness.brokerMode = "immediate";
+    const { element, view } = createConnectedElement("motion.avl");
+
+    await element.prepare();
+    expect(harness.motionSelections).toEqual([]);
+
+    view.media.matches = true;
+    inputAt(0).onDraw();
+    await settleMicrotasks();
+
+    expect(harness.motionSelections).toEqual([{
+      policy: "auto",
+      reduced: true
+    }]);
+    expect(element.getDiagnostics().motionGeneration).toBe(1);
+
+    view.media.dispatch(false);
+    inputAt(0).onDraw();
+    await settleMicrotasks();
+    expect(harness.motionSelections).toEqual([
+      { policy: "auto", reduced: true },
+      { policy: "auto", reduced: false }
+    ]);
+    expect(element.getDiagnostics().motionGeneration).toBe(2);
+  });
+
   it("reconciles initial input and visibility bindings before qualification", async () => {
     harness.brokerMode = "immediate";
     harness.bindings.push(
@@ -737,10 +814,7 @@ describe("element lifecycle regressions", () => {
     const fallbackSource = new FakeElement("source", source.ownerDocument);
     fallbackSource.parentElement = element as unknown as FakeHTMLElement;
     fallbackSource.setAttribute("src", "motion-vp9.avl");
-    fallbackSource.setAttribute(
-      "type",
-      'application/vnd.aval; codecs="vp09.00.21.08.01.01.01.01.00"'
-    );
+    fallbackSource.setAttribute("data-codec", "vp9");
     (element as AvalElement & FakeHTMLElement).childElements.push(fallbackSource);
     await element.prepare();
     const player = playerAt(0);
@@ -1407,7 +1481,7 @@ function createConnectedElement(src: string): {
   const source = new FakeElement("source", currentDocument);
   source.parentElement = element as unknown as FakeHTMLElement;
   source.setAttribute("src", src);
-  source.setAttribute("type", 'application/vnd.aval; codecs="avc1.42E01E"');
+  source.setAttribute("data-codec", "h264");
   element.childElements.push(source);
   element.isConnected = true;
   element.connectedCallback();
@@ -1506,8 +1580,20 @@ class FakeMutationObserver {
 }
 
 class FakeIntersectionObserver {
-  public constructor(readonly callback: IntersectionObserverCallback) {}
+  public static readonly instances: FakeIntersectionObserver[] = [];
+  public static deferObservation = false;
+  #target: Element | null = null;
+  public constructor(readonly callback: IntersectionObserverCallback) {
+    FakeIntersectionObserver.instances.push(this);
+  }
   public observe(target: Element): void {
+    this.#target = target;
+    if (FakeIntersectionObserver.deferObservation) return;
+    this.emit();
+  }
+  public emit(): void {
+    const target = this.#target;
+    if (target === null) return;
     this.callback([{
       target,
       isIntersecting: true,
@@ -1524,6 +1610,7 @@ class FakeWindow extends EventTarget {
   public readonly CSSStyleSheet = FakeCSSStyleSheet;
   public readonly CSSStyleRule = FakeCSSStyleRule;
   public readonly CustomEvent = FakeCustomEvent;
+  public readonly DOMException = globalThis.DOMException;
   public readonly Element = FakeHTMLElement;
   public readonly Worker = class {};
   public readonly VideoDecoder = class {};
@@ -1540,11 +1627,20 @@ class FakeWindow extends EventTarget {
   public readonly setTimeout = (callback: () => void, delay: number): number =>
     globalThis.setTimeout(callback, delay) as unknown as number;
   public readonly clearTimeout = (handle: number): void => globalThis.clearTimeout(handle);
-  public readonly matchMedia = (): MediaQueryList => ({
-    matches: false,
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined
-  }) as unknown as MediaQueryList;
+  public readonly media = new FakeMediaQueryList();
+  public readonly matchMedia = (): MediaQueryList => this.media as MediaQueryList;
+}
+
+class FakeMediaQueryList extends EventTarget {
+  public matches = false;
+  public readonly media = "(prefers-reduced-motion: reduce)";
+  public onchange: ((this: MediaQueryList, event: MediaQueryListEvent) => unknown) | null = null;
+  public addListener(): void {}
+  public removeListener(): void {}
+  public dispatch(value: boolean): void {
+    this.matches = value;
+    this.dispatchEvent(new Event("change"));
+  }
 }
 
 class FakeDocument extends EventTarget {

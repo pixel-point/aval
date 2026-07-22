@@ -7,8 +7,9 @@ application may keep alternate content beside the element, but AVAL never
 selects or manipulates it.
 
 Assets are literal direct-child `<source>` elements. Each requires `src` and
-`type='application/vnd.aval; codecs="..."'`; optional integrity applies to that
-source alone. Child order is preference order.
+`data-codec="av1|vp9|h265|h264"`; optional integrity applies to that source
+alone. Each family may appear once. Child order has no priority meaning: AVAL
+always evaluates AV1 → VP9 → H.265 → H.264.
 
 Core methods are `prepare()`, `setState()`, `send()`, `readyFor()`, `pause()`,
 `resume()`, `getDiagnostics()`, and terminal `dispose()`. Runtime state is read

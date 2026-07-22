@@ -1,11 +1,11 @@
 import {
   parseCompileBundleReport,
-  parseVideoCodecString,
-  VIDEO_CODECS
+  parseVideoCodecString
 } from "@pixel-point/aval-format";
+import { SOURCE_CODEC_PRIORITY } from "@pixel-point/aval-element";
 
-/** Authored preference order for the demo, independent of compiler order. */
-export const CODECS = Object.freeze([...VIDEO_CODECS].reverse());
+/** AVAL's fixed runtime family priority, independent of compiler order. */
+export const CODECS = SOURCE_CODEC_PRIORITY;
 
 const CODEC_LABELS = Object.freeze({
   av1: "AV1",

@@ -5,7 +5,7 @@ import type {
 } from "@pixel-point/aval-element";
 
 import type { RouteLedger } from "./route-ledger.js";
-import { FUNCTIONAL_SOURCE_TYPE } from "./functional-fixture.js";
+import { FUNCTIONAL_SOURCE_CODEC } from "./functional-fixture.js";
 
 export const PUBLIC_EVENT_NAMES = Object.freeze([
   "requestedstatechange",
@@ -31,7 +31,7 @@ export function createPublicMotionElement(
   element.motion = "full";
   const source = document.createElement("source");
   source.src = sourceUrl;
-  source.type = FUNCTIONAL_SOURCE_TYPE;
+  source.setAttribute("data-codec", FUNCTIONAL_SOURCE_CODEC);
   if (integrity !== undefined) source.setAttribute("integrity", integrity);
   const alternate = document.createElement("span");
   alternate.className = "certification-motion-unavailable";

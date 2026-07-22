@@ -3,18 +3,25 @@ import { DecodedOutputIncompatibleError } from
   "./decoded-output-qualifier.js";
 
 export type RetryableCandidateRejection =
-  | Readonly<{ stage: "probe"; cause: "unsupported-config" }>
+  | Readonly<{
+      stage: "probe";
+      cause: "unsupported-config" | "probe-progress-timeout";
+    }>
   | Readonly<{ stage: "configure"; cause: "configure-not-supported" }>
   | Readonly<{
       stage: "decode";
       cause:
         | "decode-not-supported"
         | "decode-encoding-rejected"
+        | "decode-progress-timeout"
         | "decoded-metadata-incompatible";
     }>
   | Readonly<{
       stage: "flush";
-      cause: "flush-not-supported" | "flush-encoding-rejected";
+      cause:
+        | "flush-not-supported"
+        | "flush-encoding-rejected"
+        | "flush-progress-timeout";
     }>
   | Readonly<{ stage: "output"; cause: "decoded-output-incompatible" }>;
 
@@ -54,6 +61,14 @@ export function retryableCandidateOutcome(
   }
   if (local.kind === "decoded-metadata-incompatible") {
     return retryableOutcome("decode", "decoded-metadata-incompatible");
+  }
+  if (local.kind === "progress-timeout") {
+    if (local.phase === "probe") {
+      return retryableOutcome("probe", "probe-progress-timeout");
+    }
+    return local.phase === "decode"
+      ? retryableOutcome("decode", "decode-progress-timeout")
+      : retryableOutcome("flush", "flush-progress-timeout");
   }
   if (local.phase === "configure") {
     return local.errorName === "NotSupportedError"

@@ -62,8 +62,8 @@ describe("compile bundle report", () => {
       }],
       warnings: ["AV1 uses the requested ten-bit pixel pipeline."],
       sourceMarkup: [
-        `<source src="av1.avl" type='application/vnd.aval; codecs="av01.0.00M.10.0.110.01.01.01.0"' integrity="${zeroIntegrity}">`,
-        `<source src="h264.avl" type='application/vnd.aval; codecs="avc1.42E028"' integrity="${oneIntegrity}">`
+        `<source src="av1.avl" data-codec="av1" integrity="${zeroIntegrity}">`,
+        `<source src="h264.avl" data-codec="h264" integrity="${oneIntegrity}">`
       ].join("\n")
     });
     expect(built.bytes).toEqual(serializeCanonicalJson(built.report));

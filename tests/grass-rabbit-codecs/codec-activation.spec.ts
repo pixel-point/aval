@@ -26,6 +26,9 @@ function codecFamily(
   value: string | null
 ): (typeof CODECS)[number] | undefined {
   if (value === null) return undefined;
+  if ((CODECS as readonly string[]).includes(value)) {
+    return value as (typeof CODECS)[number];
+  }
   return CODECS.find((codec) => CODEC_PATTERNS[codec].test(value));
 }
 

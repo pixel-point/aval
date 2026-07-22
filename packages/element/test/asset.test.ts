@@ -6,10 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { serializeCanonicalJson } from "../../format/src/canonical-json.js";
 import { writeCanonicalAsset } from "../../format/src/writer.js";
 import type { CanonicalAssetInput } from "../../format/src/model.js";
+import { ASSET_ADMISSION_REQUEST_LIMIT } from
+  "../src/asset-timing-policy.js";
 import { Asset } from "../src/asset.js";
 
 const URL = "https://example.test/motion.avl";
 const CODEC = "avc1.42E020";
+const SOURCE_CODEC = "h264";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -41,6 +44,20 @@ describe("Asset manifest parity", () => {
     await asset.dispose();
   });
 
+  it("rejects a declared codec family that does not match the manifest", async () => {
+    const body = assetBytes(1, new Uint8Array([1, 2, 3, 4]));
+    vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(body)));
+    await expect(open(`sha256-${"A".repeat(43)}=`, "vp9")).rejects.toThrow(
+      "Invalid AVAL asset"
+    );
+
+    vi.stubGlobal("fetch", vi.fn(async (
+      _input: RequestInfo | URL,
+      init?: RequestInit
+    ) => rangeResponse(body, requestedRange(init))));
+    await expect(open("", "vp9")).rejects.toThrow("Invalid AVAL asset");
+  });
+
   it("does not treat transitioned one-frame completion routes as immediate cycle links", async () => {
     const body = transitionedCompletionCycleBytes();
     vi.stubGlobal("fetch", vi.fn(async () => wholeResponse(body)));
@@ -69,11 +86,14 @@ describe("Asset manifest parity", () => {
     )).toBe(true);
     await full.dispose();
 
-    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
-      rangeResponse(body, requestedRange(init))
-    ));
+    const rangeFetch = vi.fn(async (
+      _input: RequestInfo | URL,
+      init?: RequestInit
+    ) => rangeResponse(body, requestedRange(init)));
+    vi.stubGlobal("fetch", rangeFetch);
     const range = await open();
     expect(range.mode).toBe("range");
+    expect(rangeFetch).toHaveBeenCalledTimes(ASSET_ADMISSION_REQUEST_LIMIT);
     expect(range.manifest.formatVersion).toBe("1.1");
     expect(range.manifest.renditions[0]?.outputQualification?.unit).toBe("body-00");
     await range.dispose();
@@ -878,9 +898,17 @@ function frontEnd(bytes: Uint8Array): number {
   return Number(view.getBigUint64(48, true) + view.getBigUint64(56, true));
 }
 
-async function open(integrity = ""): Promise<Asset> {
+async function open(
+  integrity = "",
+  codec: "h264" | "vp9" = SOURCE_CODEC
+): Promise<Asset> {
   const controller = new AbortController();
-  return Asset.open({ src: URL, codec: CODEC, integrity }, URL, "same-origin", controller.signal);
+  return Asset.open(
+    { src: URL, codec, integrity },
+    URL,
+    "same-origin",
+    controller.signal
+  );
 }
 
 async function until(predicate: () => boolean): Promise<void> {

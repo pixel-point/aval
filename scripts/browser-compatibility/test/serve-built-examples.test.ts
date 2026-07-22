@@ -244,6 +244,7 @@ describe("built browser-compatibility endpoint", () => {
       playerCount: document.querySelectorAll("aval-player").length,
       sourceCount: player.querySelectorAll("source").length,
       source: player.querySelector("source")?.getAttribute("src"),
+      codec: player.querySelector("source")?.getAttribute("data-codec"),
       type: player.querySelector("source")?.getAttribute("type"),
       integrity: player.querySelector("source")?.getAttribute("integrity")
     }));
@@ -252,7 +253,8 @@ describe("built browser-compatibility endpoint", () => {
       sourceCount: 1,
       source: `${baseUrl}/playground/favorite/h264.avl`
     });
-    expect(selected.type).toMatch(/^application\/vnd\.aval; codecs="avc1\./u);
+    expect(selected.codec).toBe("h264");
+    expect(selected.type).toBeNull();
     expect(selected.integrity).toMatch(/^sha256-/u);
     const visibleReport = await validPage.locator("#probe-result").textContent();
     expect(visibleReport).not.toContain(baseUrl);

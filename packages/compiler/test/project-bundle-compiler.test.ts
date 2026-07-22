@@ -115,7 +115,9 @@ describe.skipIf(!HAS_VP9)("project codec bundle compiler", () => {
         integrity: expect.stringMatching(/^sha256-/u)
       }]
     });
-    expect(report.sourceMarkup).toContain('<source src="vp9.avl"');
+    expect(report.sourceMarkup).toContain(
+      '<source src="vp9.avl" data-codec="vp9"'
+    );
     expect(JSON.stringify(report)).not.toContain(directory);
   }, 40_000);
 

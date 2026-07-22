@@ -129,7 +129,7 @@ test("captures codec controller preparation diagnostics", async ({
   expect(timedOut.outcome).toBe("timeout");
   if (certificationMode === "forced-h264") {
     expect(report.authoredSources.map(({ codec }) => codec)).toEqual([
-      "avc1.42E01E"
+      "h264"
     ]);
   } else {
     const runtime = report.latest?.element.diagnostics?.runtime as

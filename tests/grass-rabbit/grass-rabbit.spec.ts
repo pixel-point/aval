@@ -3,7 +3,10 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import type { AvalElement } from "@pixel-point/aval-element";
+import {
+  SOURCE_CODEC_PRIORITY,
+  type AvalElement
+} from "@pixel-point/aval-element";
 import { parseFrontIndex } from "@pixel-point/aval-format";
 
 const BUNDLE_PATH = resolve("examples/grass-rabbit/public/grass-rabbit");
@@ -13,7 +16,7 @@ const SOURCE_PATH = resolve(
 );
 const INDEX_PATH = resolve("examples/grass-rabbit/index.html");
 const BUILD_REPORT_PATH = resolve(BUNDLE_PATH, "build.json");
-const CODECS = ["av1", "vp9", "h265", "h264"] as const;
+const CODECS = SOURCE_CODEC_PRIORITY;
 
 test("preserves the authored 1280x720 graph and exact frame ranges", async () => {
   const project = JSON.parse(await readFile(PROJECT_PATH, "utf8")) as {
@@ -51,7 +54,7 @@ test("preserves the authored 1280x720 graph and exact frame ranges", async () =>
     CODECS.map((codec) => ({ codec, path: `${codec}.avl` }))
   );
   expect(report.sourceMarkup).toBe(report.assets.map((asset) =>
-    `<source src="${asset.path}" type='${asset.type}' integrity="${asset.integrity}">`
+    `<source src="${asset.path}" data-codec="${asset.codec}" integrity="${asset.integrity}">`
   ).join("\n"));
   for (const asset of report.assets) {
     const bytes = new Uint8Array(await readFile(resolve(BUNDLE_PATH, asset.path)));
@@ -60,7 +63,7 @@ test("preserves the authored 1280x720 graph and exact frame ranges", async () =>
     const integrity = `sha256-${createHash("sha256")
       .update(bytes).digest("base64")}`;
     const sourceElement = `<source src="%BASE_URL%grass-rabbit/${asset.path}" ` +
-      `type='${asset.type}' integrity="${asset.integrity}">`;
+      `data-codec="${asset.codec}" integrity="${asset.integrity}">`;
 
     expect(bytes.subarray(0, 4)).toEqual(new Uint8Array([65, 86, 76, 70]));
     expect(bytes.byteLength).toBe(asset.bytes);

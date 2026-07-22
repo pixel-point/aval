@@ -1,6 +1,9 @@
-import { defineAvalElement } from "./modules/element/index.js";
+import {
+  defineAvalElement,
+  SOURCE_CODEC_PRIORITY
+} from "./modules/element/index.js";
 
-const CODECS = Object.freeze(["av1", "vp9", "h265", "h264"]);
+const CODECS = SOURCE_CODEC_PRIORITY;
 const DEMOS = Object.freeze({
   playground: Object.freeze({
     report: "/playground/favorite/build.json",
@@ -88,7 +91,7 @@ async function run() {
   );
   const source = document.createElement("source");
   source.src = new URL(asset.path, new URL(demo.assets, location.href)).href;
-  source.type = asset.type;
+  source.setAttribute("data-codec", selection.codec);
   source.setAttribute("integrity", asset.integrity);
   player.append(source);
 

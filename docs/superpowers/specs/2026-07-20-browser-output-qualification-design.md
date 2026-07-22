@@ -4,7 +4,8 @@
 
 **Status:** Approved by the user's earlier instruction to continue autonomously
 with the recommended compatibility approach; refined after the 2026-07-20
-thermo-nuclear maintainability checkpoint.
+thermo-nuclear maintainability checkpoint and the 2026-07-21 `data-codec`
+source-priority decision.
 
 **Decision:** Treat browser-reported color metadata through one typed semantic
 classifier, prove decoded packed-alpha output against a compiler-authored and
@@ -16,22 +17,23 @@ controller with small WebGL2 and Canvas2D backends.
 ## 1. Objective
 
 AVAL must work on the supported Firefox, Chromium, Android, Windows, and Safari
-matrix without weakening the authored codec order or hiding corrupt output
-behind a readiness flag. The source order remains:
+matrix without weakening the codec ladder or hiding corrupt output behind a
+readiness flag. Runtime family priority remains:
 
 `AV1 -> VP9 -> HEVC/H.265 -> H.264`
 
-H.264 is selected only after every higher-ranked authored candidate fails
+H.264 is selected only after every higher-ranked present candidate fails
 startup qualification. AVAL never owns a static or video fallback. When every
 candidate fails, it publishes the existing typed terminal error so the
 application can render its own image, noninteractive video, text, or other
 fallback.
 
-Arbitrary consumer source arrays remain authored-order inputs and are never
-silently re-sorted. First-party examples and certification fixtures must emit
-and assert the exact order above. H.264 must never be opened, probed, fetched,
-or decoded after HEVC succeeds, and it is touched only after every preceding
-authored candidate records a retryable provisional failure.
+Each direct-child source declares exactly one lowercase `data-codec` family.
+The runtime sorts those declarations into the fixed ladder regardless of DOM
+order. First-party examples and certification fixtures emit the same canonical
+order for readability. H.264 must never be opened, probed, fetched, or decoded
+after HEVC succeeds, and it is touched only after every higher-ranked present
+candidate records a retryable provisional failure.
 
 This design addresses two independently reproduced Android failures:
 
@@ -96,9 +98,9 @@ matrix; Firefox 129 and 128 remain required negative sentinels.
 
 ## 3. Non-negotiable Contracts
 
-- Authored source order is the only codec-priority policy.
-- Shipped examples enforce `AV1 -> VP9 -> HEVC/H.265 -> H.264`; the runtime
-  preserves arbitrary consumer order instead of pretending it is a rank.
+- Required `data-codec` families define membership; fixed runtime policy is
+  `AV1 -> VP9 -> HEVC/H.265 -> H.264`, independent of DOM order.
+- A family appears at most once and must match its `.avl` manifest family.
 - No user-agent, OS-name, device-name, or codec-name exception enters color or
   pixel validation.
 - H.264 is not preferred merely because it is broadly available.
@@ -106,8 +108,10 @@ matrix; Firefox 129 and 128 remain required negative sentinels.
   typed `retry-next-candidate` result.
 - A post-publication failure remains terminal; AVAL does not hot-switch active
   playback.
-- Network, integrity, malformed-format, resource, cleanup, timeout, and policy
-  failures are never relabeled as codec incompatibility.
+- Network, integrity, malformed-format, resource, cleanup, and policy failures
+  are never relabeled as codec incompatibility. A decoder-local decode or flush
+  progress timeout may retry only during provisional startup; all
+  post-readiness timeouts remain terminal.
 - AVAL raises a typed error after terminal exhaustion and does not render
   fallback content.
 - Diagnostics retain exact expected and observed metadata but do not control

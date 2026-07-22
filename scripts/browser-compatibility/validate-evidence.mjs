@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import {
+  SOURCE_CODEC_PRIORITY
+} from "@pixel-point/aval-element";
 import { parseVideoCodecString } from "@pixel-point/aval-format";
 
 import { analyzePngWitness, isMeaningfulPixelWitness } from "./brave/run-matrix.mjs";
@@ -38,10 +41,15 @@ const LANE_COUNTER_KEYS = Object.freeze([
   "nativeDecoderCreatesByLane",
   "nativeDecoderClosesByLane"
 ]);
-
 function codecFamily(value) {
   return typeof value === "string"
     ? parseVideoCodecString(value)?.family ?? null
+    : null;
+}
+
+function sourceCodecFamily(value) {
+  return typeof value === "string" && SOURCE_CODEC_PRIORITY.includes(value)
+    ? value
     : null;
 }
 
@@ -495,7 +503,7 @@ function assertPlaybackReport(
   const activeSources = report.authoredSources.filter(
     ({ playerId }) => playerId === latest.playerId
   );
-  const actualCodecs = activeSources.map(({ codec }) => codecFamily(codec));
+  const actualCodecs = activeSources.map(({ codec }) => sourceCodecFamily(codec));
   if (actualCodecs.some((codec) => codec === null) ||
       !sameArray(actualCodecs, expectedCodecs)) {
     fail("evidence-authored-codecs-mismatch", caseId);
@@ -536,7 +544,7 @@ function assertPlaybackReport(
     ) {
       fail(
         "evidence-unproven-codec-skip",
-        `${caseId}:${String(codecFamily(source.codec))}`
+        `${caseId}:${String(sourceCodecFamily(source.codec))}`
       );
     }
   }
@@ -651,7 +659,7 @@ function diagnosticMatchesCandidate(
 ) {
   if (diagnostic?.sourceGeneration !== sourceGeneration ||
       diagnostic?.sourceIndex !== source.index ||
-      diagnostic?.codec !== source.codec ||
+      codecFamily(diagnostic?.codec) !== sourceCodecFamily(source.codec) ||
       diagnostic?.rendition !== expectedRendition) return false;
   return true;
 }

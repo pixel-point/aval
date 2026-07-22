@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   Decoder,
+  DecoderLocalFailureError,
   type DecoderLimits
 } from "../src/decoder.js";
 import {
@@ -13,6 +14,8 @@ import {
   type DecoderCommand,
   type DecoderWorkerEvent
 } from "../src/decoder-protocol.js";
+import { retryableCandidateOutcome } from
+  "../src/provisional-candidate-outcome.js";
 
 const BT709_LIMITED_COLOR = Object.freeze({
   fullRange: false,
@@ -41,6 +44,48 @@ afterEach(() => {
 });
 
 describe("Decoder output certification", () => {
+  it("times out a silent support probe and exposes a retryable rejection", async () => {
+    vi.useFakeTimers();
+    const Worker = fakeWorker();
+    const VideoFrame = fakeVideoFrame();
+    vi.stubGlobal("Worker", Worker);
+    vi.stubGlobal("VideoFrame", VideoFrame);
+
+    const decoder = configuredDecoder();
+    const worker = Worker.latest();
+    const support = decoder.supported();
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(worker.terminated).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    const failure = await support.catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      name: "DecoderLocalFailureError",
+      failure: { kind: "progress-timeout", phase: "probe" },
+      reason: { name: "TimeoutError" }
+    });
+    expect(retryableCandidateOutcome(failure)).toEqual({
+      kind: "retryable-rejection",
+      rejection: {
+        stage: "probe",
+        cause: "probe-progress-timeout"
+      }
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(decoder.snapshot()).toMatchObject({
+      workerCount: 0,
+      diagnostic: expect.objectContaining({
+        phase: "probe",
+        code: "watchdog-timeout",
+        run: null
+      })
+    });
+    expect(worker.terminated).toBe(true);
+    expect(decoder.terminalError()).toBeInstanceOf(DecoderLocalFailureError);
+    decoder.dispose();
+  });
+
   it.each([0, null])(
     "repairs Safari's missing %s duration after converting AVAL frame ticks",
     async (missingDuration) => {
@@ -992,14 +1037,23 @@ describe("Decoder output certification", () => {
     await decoder.supported();
 
     const run = oneFrameRun(decoder);
+    const decoderFailure = expect(decoder.failure()).rejects.toMatchObject({
+      name: "DecoderLocalFailureError",
+      failure: { kind: "progress-timeout", phase: "decode" },
+      reason: { name: "TimeoutError" }
+    });
     const assertions = [run.ready(), run.take(0), run.complete()].map((promise) =>
-      expect(promise).rejects.toMatchObject({ name: "TimeoutError" })
+      expect(promise).rejects.toMatchObject({
+        name: "DecoderLocalFailureError",
+        failure: { kind: "progress-timeout", phase: "decode" },
+        reason: { name: "TimeoutError" }
+      })
     );
 
     await vi.advanceTimersByTimeAsync(1_999);
     expect(worker.terminated).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    await Promise.all(assertions);
+    await Promise.all([...assertions, decoderFailure]);
     expect(vi.getTimerCount()).toBe(0);
     expect(decoder.snapshot()).toMatchObject({
       workerCount: 0,
@@ -1012,6 +1066,7 @@ describe("Decoder output certification", () => {
       })
     });
     expect(worker.terminated).toBe(true);
+    expect(decoder.terminalError()).toBeInstanceOf(DecoderLocalFailureError);
     decoder.dispose();
   });
 
@@ -1329,7 +1384,9 @@ describe("Decoder output certification", () => {
     expect(worker.terminated).toBe(false);
 
     const missingFrame = expect(run.take(11)).rejects.toMatchObject({
-      name: "TimeoutError"
+      name: "DecoderLocalFailureError",
+      failure: { kind: "progress-timeout", phase: "flush" },
+      reason: { name: "TimeoutError" }
     });
     await vi.advanceTimersByTimeAsync(1_999);
     expect(worker.terminated).toBe(false);

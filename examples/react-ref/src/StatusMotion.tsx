@@ -3,6 +3,7 @@ import {
   defineAvalElement,
   type AvalElement,
   type AvalErrorDetail,
+  type AvalSourceCodec,
   type AvalVisualStateChangeDetail
 } from "@pixel-point/aval-element";
 
@@ -15,7 +16,7 @@ export interface StatusMotionProps {
 
 export interface StatusMotionSource {
   readonly src: string;
-  readonly type: string;
+  readonly codec: AvalSourceCodec;
 }
 
 export function StatusMotion({
@@ -67,7 +68,11 @@ export function StatusMotion({
       aria-hidden="true"
     >
       {sources.map((source) => (
-        <source key={`${source.src}:${source.type}`} {...source} />
+        <source
+          key={`${source.src}:${source.codec}`}
+          src={source.src}
+          data-codec={source.codec}
+        />
       ))}
     </aval-player>
     {failed && (

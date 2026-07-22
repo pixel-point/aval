@@ -476,7 +476,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -532,7 +532,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -649,7 +649,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -738,7 +738,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1024,7 +1024,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: controller.signal,
       preparationTimeoutMs: 5_000,
@@ -1092,7 +1092,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1186,12 +1186,13 @@ describe("player multi-route prefetch", () => {
     });
     vi.stubGlobal("cancelAnimationFrame", () => undefined);
     const events: string[] = [];
+    let drawNotifications = 0;
     const player = await createPlayer({
       canvas: new EventTarget() as HTMLCanvasElement,
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1205,7 +1206,7 @@ describe("player multi-route prefetch", () => {
       onMetadata: () => undefined,
       onReadiness: () => undefined,
       onAnimationResourcesRetired: () => undefined,
-      onDraw: () => undefined,
+      onDraw: () => { drawNotifications += 1; },
       onRestart: () => undefined,
       onEvent: (type) => events.push(type),
       onFailure: (code) => events.push(`failure:${code}`),
@@ -1221,6 +1222,7 @@ describe("player multi-route prefetch", () => {
       12
     );
     const baseline = player.snapshot(false).playbackLifecycle;
+    const baselineDrawNotifications = drawNotifications;
     const targetDraws = baseline.drawsCompleted + 1_440;
 
     for (let attempt = 0; attempt < 1_600; attempt += 1) {
@@ -1235,6 +1237,7 @@ describe("player multi-route prefetch", () => {
 
     const snapshot = player.snapshot(true);
     expect(snapshot.playbackLifecycle.drawsCompleted).toBe(targetDraws);
+    expect(drawNotifications - baselineDrawNotifications).toBe(1_440);
     expect(snapshot.playbackLifecycle.loopCrossings - baseline.loopCrossings).toBe(60);
     expect(snapshot.playbackLifecycle.candidateCommits).toBeGreaterThanOrEqual(60);
     expect(snapshot.playbackLifecycle.logicalRunsCreated).toBeLessThanOrEqual(66);
@@ -1278,7 +1281,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1356,7 +1359,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1457,7 +1460,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1560,7 +1563,7 @@ describe("player multi-route prefetch", () => {
       platform: testPlatform(),
       initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
       baseUrl: "https://example.test/",
-      sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+      sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
       credentials: "same-origin",
       signal: new AbortController().signal,
       preparationTimeoutMs: 5_000,
@@ -1748,7 +1751,7 @@ async function createReadyTerminalPlayer(
     platform: testPlatform(),
     initialPresentation: { width: 16, height: 16, dpr: 1, fit: null },
     baseUrl: "https://example.test/",
-    sources: [{ src: "motion.avl", codec: "avc1.42E020", integrity: "" }],
+    sources: [{ src: "motion.avl", codec: "h264", integrity: "" }],
     credentials: "same-origin",
     signal: new AbortController().signal,
     preparationTimeoutMs: 5_000,

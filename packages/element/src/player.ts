@@ -9,7 +9,6 @@ import {
 } from "@pixel-point/aval-graph";
 import {
   maximumDecodedRgbaBytes,
-  parseVideoCodecString,
   type CompiledManifest as Manifest,
   type Edge,
   type ProductionRendition as Rendition,
@@ -82,6 +81,15 @@ import {
   UnsupportedPlaybackProfileError,
   withProvisionalCandidateFrame
 } from "./provisional-startup.js";
+import {
+  CANDIDATE_INSTALLATION_TIMEOUT_MS,
+  CANDIDATE_PREPARATION_TIMEOUT_MS
+} from "./preparation-budget.js";
+import {
+  PreparationGate,
+  PreparationDeadline,
+  preparationTimeout
+} from "./preparation-deadline.js";
 
 type State = Manifest["states"][number];
 
@@ -141,8 +149,6 @@ interface StateRequest {
   readonly reject: (reason: unknown) => void;
 }
 
-const PREPARE_MS = 5_000;
-const CANDIDATE_PREPARE_MS = 2_500;
 const CONTEXT_RESTORE_MS = 5_000;
 const MAX_RETAINED_DECODER_DIAGNOSTICS = 16;
 const MAX_RETAINED_RENDERER_DIAGNOSTICS = 16;
@@ -174,11 +180,11 @@ const COLOR = Object.freeze({
 export async function createPlayer(
   input: Readonly<PlayerInput>
 ): Promise<Player> {
-  const deadline = new PreparationDeadline(
-    input.signal,
-    input.preparationTimeoutMs,
-    input.platform
-  );
+  const deadline = PreparationDeadline.begin({
+    parent: input.signal,
+    timeoutMs: input.preparationTimeoutMs,
+    platform: input.platform
+  });
   const state: SelectionState = {
     cursor: Object.freeze({ sourceInputIndex: 0, renditionIndex: 0 }),
     reports: [],
@@ -205,7 +211,7 @@ export async function createPlayer(
         }
       },
       qualify: async (current) => {
-        await input.onCandidate?.(current.player);
+        await installProvisionalCandidate(input, current.player, deadline);
         if (current.requiresQualification) {
           await current.player.prepare();
           deadline.complete();
@@ -249,7 +255,9 @@ export async function createPlayer(
     });
     return candidate.player;
   } catch (error) {
-    const timedOut = deadline.timedOut && !input.signal.aborted;
+    const timedOut = !input.signal.aborted && (
+      deadline.timedOut || isTimeout(error)
+    );
     deadline.dispose();
     if (input.signal.aborted || isAbort(error) && !timedOut) throw error;
     throw input.onPlaybackFailure(
@@ -258,6 +266,30 @@ export async function createPlayer(
         : playbackErrorFailureCode(error) ?? selectionFailureCode(error),
       "prepare"
     );
+  }
+}
+
+async function installProvisionalCandidate(
+  input: Readonly<Pick<PlayerInput, "onCandidate">>,
+  player: PlayerImpl,
+  preparation: PreparationDeadline
+): Promise<void> {
+  if (input.onCandidate === undefined) {
+    player.completeCandidateInstallation();
+    return;
+  }
+  const deadline = preparation.forkDeferred(
+    CANDIDATE_INSTALLATION_TIMEOUT_MS
+  );
+  deadline.start();
+  try {
+    await limit(input.onCandidate(player), deadline.signal);
+    player.completeCandidateInstallation();
+  } catch (error) {
+    player.failCandidateInstallation(error);
+    throw error;
+  } finally {
+    deadline.dispose();
   }
 }
 
@@ -286,8 +318,6 @@ async function selectPlayer(
       reportResourceBytes(input, null);
       retained = null;
     }
-    const sourceCodec = parseVideoCodecString(source.codec);
-    if (sourceCodec === undefined) throw unsupportedProfileError();
     const asset = await Asset.open(
       source,
       input.baseUrl,
@@ -297,7 +327,7 @@ async function selectPlayer(
     );
     reportResourceBytes(input, asset);
     retained = asset;
-    if (asset.manifest.codec !== sourceCodec.family ||
+    if (asset.manifest.codec !== source.codec ||
       asset.manifest.renditions.length === 0) {
       retained = asset;
       unavailable = "no-video-rendition";
@@ -546,7 +576,9 @@ async function selectPlayer(
         : Object.freeze({ sourceInputIndex: inputIndex + 1, renditionIndex: 0 });
       let candidateDeadline: PreparationDeadline;
       try {
-        candidateDeadline = deadline.fork(CANDIDATE_PREPARE_MS);
+        candidateDeadline = deadline.forkDeferred(
+          CANDIDATE_PREPARATION_TIMEOUT_MS
+        );
       } catch (error) {
         disposeDecoders();
         renderer.dispose();
@@ -614,6 +646,7 @@ class PlayerImpl implements Player {
   readonly #requests = new Map<number, StateRequest>();
   readonly #terminalSignal: Promise<never>;
   readonly #rejectTerminalSignal: (reason: unknown) => void;
+  readonly #candidateInstallation = new PreparationGate();
   #preparation: Promise<PrepareResult> | null = null;
   #provisionalFailure: unknown = undefined;
   #recovery: Promise<PrepareResult> | null = null;
@@ -642,7 +675,6 @@ class PlayerImpl implements Player {
   #deadline = 0;
   #clockOrigin = 0;
   #clockOrdinal = 0n;
-  #firstFrame = true;
   #lastDraw = "";
   #settledRequests = 0;
   #cleanedFrames = 0;
@@ -795,6 +827,14 @@ class PlayerImpl implements Player {
     return this.#provisionalFailure;
   }
 
+  public completeCandidateInstallation(): void {
+    this.#candidateInstallation.complete();
+  }
+
+  public failCandidateInstallation(reason: unknown): void {
+    this.#candidateInstallation.fail(reason);
+  }
+
   public prepare(options: Readonly<{
     signal?: AbortSignal;
     timeoutMs?: number;
@@ -808,7 +848,7 @@ class PlayerImpl implements Player {
       );
     }
     if (this.#preparation === null) {
-      this.#preparation = this.#prepareBounded();
+      this.#preparation = this.#prepareAfterCandidateInstallation();
     }
     const operation = Promise.race([this.#preparation, this.#terminalSignal]);
     return limit(operation, options.signal, options.timeoutMs, this.#input.platform);
@@ -874,6 +914,10 @@ class PlayerImpl implements Player {
   }
 
   public async resume(): Promise<void> {
+    if (!this.#candidateInstallation.settled) {
+      this.#paused = false;
+      return;
+    }
     const epoch = this.#pauseEpoch;
     await this.prepare();
     const preparedTerminal = this.#terminalWork;
@@ -1068,6 +1112,7 @@ class PlayerImpl implements Player {
   public async dispose(): Promise<void> {
     if (!this.#disposed) {
       this.#disposed = true;
+      this.failCandidateInstallation(abortError());
       this.#clearContextRestoreTimer();
       this.#awaitingContextRestore = false;
       this.#animationGeneration += 1;
@@ -1089,8 +1134,15 @@ class PlayerImpl implements Player {
     await this.#retireAnimationResources();
   }
 
+  async #prepareAfterCandidateInstallation(): Promise<PrepareResult> {
+    await this.#candidateInstallation.wait();
+    return this.#prepareBounded();
+  }
+
   async #prepareBounded(): Promise<PrepareResult> {
     try {
+      this.#preparationDeadline.start();
+      this.#preparationDeadline.signal.throwIfAborted();
       const result = await limit(this.#start(), this.#preparationDeadline.signal);
       this.#prepared = true;
       this.#preparationDeadline.complete();
@@ -1825,11 +1877,7 @@ class PlayerImpl implements Player {
     this.#assertAnimation(generation, renderer, decoders);
     this.#lastDraw = key;
     this.#drawsCompleted = saturatingIncrement(this.#drawsCompleted);
-    if (this.#firstFrame) {
-      this.#assertAnimation(generation, renderer, decoders);
-      this.#firstFrame = false;
-      this.#input.onDraw();
-    }
+    this.#input.onDraw();
   }
 
   #assertAnimation(
@@ -2712,78 +2760,6 @@ function limit<T>(
   });
 }
 
-class PreparationDeadline {
-  readonly #controller = new AbortController();
-  readonly #parent: AbortSignal;
-  readonly #platform: Pick<
-    PlayerInput["platform"],
-    "setTimeout" | "clearTimeout" | "now"
-  >;
-  readonly #parentAbort: () => void;
-  readonly #expiresAt: number;
-  #timer: number | undefined;
-  public timedOut = false;
-
-  public constructor(
-    parent: AbortSignal,
-    timeoutMs = PREPARE_MS,
-    platform: Pick<
-      PlayerInput["platform"],
-      "setTimeout" | "clearTimeout" | "now"
-    >
-  ) {
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > PREPARE_MS) {
-      throw new RangeError("AVAL preparation timeout is invalid");
-    }
-    this.#parent = parent;
-    this.#platform = platform;
-    this.#expiresAt = platform.now() + timeoutMs;
-    this.#parentAbort = () => this.#controller.abort(parent.reason);
-    if (parent.aborted) this.#parentAbort();
-    else parent.addEventListener("abort", this.#parentAbort, { once: true });
-    if (!this.#controller.signal.aborted) {
-      this.#timer = platform.setTimeout(() => {
-        this.timedOut = true;
-        this.#controller.abort(preparationTimeout());
-      }, timeoutMs);
-    }
-  }
-
-  public get signal(): AbortSignal { return this.#controller.signal; }
-
-  public remainingMs(): number {
-    return Math.max(0, Math.ceil(this.#expiresAt - this.#platform.now()));
-  }
-
-  public fork(maximumMs: number): PreparationDeadline {
-    const timeoutMs = Math.min(maximumMs, this.remainingMs());
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
-      throw preparationTimeout();
-    }
-    return new PreparationDeadline(this.signal, timeoutMs, this.#platform);
-  }
-
-  public complete(): void {
-    if (this.#timer !== undefined) this.#platform.clearTimeout(this.#timer);
-    this.#timer = undefined;
-  }
-
-  public cancel(reason: unknown): void {
-    this.complete();
-    this.#controller.abort(reason);
-  }
-
-  public dispose(): void {
-    this.complete();
-    this.#parent.removeEventListener("abort", this.#parentAbort);
-    this.#controller.abort(abortError());
-  }
-}
-
-function preparationTimeout(): DOMException {
-  return new DOMException("AVAL preparation timed out", "TimeoutError");
-}
-
 function resourceBudgetError(): Error {
   const error = new RangeError("AVAL runtime resource budget is insufficient");
   error.name = "ResourceBudgetError";
@@ -3076,6 +3052,10 @@ class PublicationGate {
 
 function isAbort(error: unknown): boolean {
   return errorString(error, "name") === "AbortError";
+}
+
+function isTimeout(error: unknown): boolean {
+  return errorString(error, "name") === "TimeoutError";
 }
 
 function errorString(value: unknown, key: "name" | "message"): string | null {

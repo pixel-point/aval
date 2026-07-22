@@ -1024,11 +1024,18 @@ function codecSelectionReport(
   rendition = "motion.1x",
   rendererDiagnostics: readonly Readonly<{ sourceIndex: number }>[] = []
 ) {
+  const sourceCodecFamilies = ["av1", "vp9", "h265", "h264"];
+  const sourceCodecStrings = [
+    "av01.0.08M.08.0.110.01.01.01.0",
+    "vp09.00.10.08.01.01.01.01.00",
+    "hvc1.1.6.L93.B0",
+    "avc1.42E020"
+  ];
   const authoredSources = [
-    { playerId: "player-1", index: 0, codec: "av01.0.08M.08.0.110.01.01.01.0" },
-    { playerId: "player-1", index: 1, codec: "vp09.00.10.08.01.01.01.01.00" },
-    { playerId: "player-1", index: 2, codec: "hvc1.1.6.L93.B0" },
-    { playerId: "player-1", index: 3, codec: "avc1.42E020" }
+    { playerId: "player-1", index: 0, codec: sourceCodecFamilies[0] },
+    { playerId: "player-1", index: 1, codec: sourceCodecFamilies[1] },
+    { playerId: "player-1", index: 2, codec: sourceCodecFamilies[2] },
+    { playerId: "player-1", index: 3, codec: sourceCodecFamilies[3] }
   ];
   return {
     latest: {
@@ -1042,7 +1049,7 @@ function codecSelectionReport(
             decoderDiagnostics: decoderDiagnostics.map((diagnostic) => ({
               ...diagnostic,
               sourceGeneration: 1,
-              codec: authoredSources[diagnostic.sourceIndex]?.codec,
+              codec: sourceCodecStrings[diagnostic.sourceIndex],
               rendition,
               exception: diagnostic.exception ?? null,
               outputFailure: diagnostic.outputFailure ?? null
@@ -1050,7 +1057,7 @@ function codecSelectionReport(
             rendererDiagnostics: rendererDiagnostics.map((diagnostic) => ({
               sourceGeneration: 1,
               sourceIndex: diagnostic.sourceIndex,
-              codec: authoredSources[diagnostic.sourceIndex]?.codec,
+              codec: sourceCodecStrings[diagnostic.sourceIndex],
               rendition,
               phase: "rgba-copy",
               operation: "runtime",
@@ -1138,7 +1145,7 @@ function task7BraveDiagnosticReport(
     authoredSources: codecs.map((codec, index) => ({
       playerId: "player-1",
       index,
-      codec: codecStrings[codec]
+      codec
     })),
     checkpoints: [],
     latest: {

@@ -549,7 +549,7 @@ async function waitForElementReady(page, expectedReadiness) {
         const bytes = (await response.arrayBuffer()).byteLength;
         return {
           source: source.src,
-          sourceType: source.getAttribute("type"),
+          sourceCodec: source.getAttribute("data-codec"),
           requestHeaders: headers,
           status: response.status,
           type: response.type,
@@ -587,7 +587,7 @@ async function publicSnapshot(page) {
       stateNames: [...motion.stateNames],
       sources: [...motion.querySelectorAll(":scope > source")].map((source) => ({
         src: source.getAttribute("src") ?? "",
-        type: source.getAttribute("type") ?? "",
+        codec: source.getAttribute("data-codec") ?? "",
         integrity: source.getAttribute("integrity") ?? ""
       })),
       sourceGeneration: motion.getDiagnostics().sourceGeneration,
@@ -626,7 +626,7 @@ function verifyBuildEvent(value) {
     assert(asset.path === join(value.outputPath, `${expectedCodec}.avl`), `dev build ${expectedCodec} path was invalid`);
     assert(Number.isSafeInteger(asset.bytes) && asset.bytes > 32, `dev build ${expectedCodec} byte count was invalid`);
     assert(/^[0-9a-f]{64}$/u.test(asset.sha256), `dev build ${expectedCodec} digest was invalid`);
-    assert(hasCodecSourceMetadata(asset, expectedCodec), `dev build ${expectedCodec} source metadata was invalid`);
+    assert(hasBuildAssetMetadata(asset, expectedCodec), `dev build ${expectedCodec} source metadata was invalid`);
     assert(asset.integrity === integrityForSha256(asset.sha256), `dev build ${expectedCodec} integrity did not match its digest`);
   }
 }
@@ -652,7 +652,7 @@ function verifyBuildReport(report, build) {
     assert(report.encodings[index]?.codec === published.codec, `served build report ${published.codec} encoding order drifted`);
   }
   const sourceMarkup = report.assets.map((asset) =>
-    `<source src="${asset.path}" type='${asset.type}' integrity="${asset.integrity}">`
+    `<source src="${asset.path}" data-codec="${asset.codec}" integrity="${asset.integrity}">`
   ).join("\n");
   assert(report.sourceMarkup === sourceMarkup, "served build report source markup was not canonical");
 }
@@ -673,7 +673,7 @@ function snapshotUsesGeneration(snapshot, sequence) {
     snapshot.sources.every((source, index) => {
       const codec = expectedCodecs[index];
       return source.src.endsWith(`${codec}.avl#v=${String(sequence)}`) &&
-        hasCodecSourceMetadata(source, codec);
+        hasAuthoredSourceMetadata(source, codec);
     });
 }
 
@@ -683,14 +683,20 @@ function hasStaticBundleSources(snapshot) {
     snapshot.sources.every((source, index) => {
       const codec = expectedCodecs[index];
       return source.src === `./motion/${codec}.avl` &&
-        hasCodecSourceMetadata(source, codec);
+        hasAuthoredSourceMetadata(source, codec);
     });
 }
 
-function hasCodecSourceMetadata(source, codec) {
+function hasBuildAssetMetadata(source, codec) {
   if (typeof source?.type !== "string" || typeof source.integrity !== "string") return false;
   const codecString = /^application\/vnd\.aval; codecs="([^"]+)"$/u.exec(source.type)?.[1];
   return codecString?.startsWith(expectedCodecPrefixes[codec]) === true &&
+    /^sha256-[A-Za-z0-9+/]{43}=$/u.test(source.integrity);
+}
+
+function hasAuthoredSourceMetadata(source, codec) {
+  return source?.codec === codec &&
+    typeof source.integrity === "string" &&
     /^sha256-[A-Za-z0-9+/]{43}=$/u.test(source.integrity);
 }
 

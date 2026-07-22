@@ -37,7 +37,6 @@ import {
   openRuntimeAsset,
   openRuntimeAssetBytes,
   parseExternalIntegrity,
-  selectVideoSource,
   translateGraphReadiness,
   type DecoderWorkerMetrics,
   type DecoderWorkerSample,
@@ -111,12 +110,8 @@ import {
   type RuntimeVisibilitySnapshot,
   type RuntimeVisibilityState,
   type StaticReason,
-  type AcceptedVideoSource,
   type CertifiedVideoRendition,
   type SourceSupportProbeCreationOptions,
-  type VideoSourceDescriptor,
-  type VideoSourceSelectionInput,
-  type VideoSourceSession,
   type VisibilityPolicyTransition
 } from "../index.js";
 
@@ -135,21 +130,10 @@ const graphReadiness: MotionGraphReadiness = "preparing";
 const translation = translateGraphReadiness(graphReadiness);
 const catalogFactory: (bytes: Uint8Array) => RuntimeAssetCatalog =
   installRuntimeAssetCatalog;
-const sourceSelector: typeof selectVideoSource = selectVideoSource;
 const sourceProbeFactory: typeof createSourceSupportProbe =
   createSourceSupportProbe;
 const catalogEntry = null as unknown as RuntimeCatalogChunk;
 const videoCandidate = null as unknown as CertifiedVideoRendition;
-const sourceDescriptor = null as unknown as VideoSourceDescriptor;
-const sourceSession = null as unknown as VideoSourceSession;
-const sourceSelectionInput = null as unknown as VideoSourceSelectionInput<
-  VideoSourceDescriptor,
-  VideoSourceSession
->;
-const acceptedSource = null as unknown as AcceptedVideoSource<
-  VideoSourceDescriptor,
-  VideoSourceSession
->;
 const sourceProbeOptions = null as unknown as SourceSupportProbeCreationOptions;
 const frameKey: RuntimeFrameKey = {
   rendition: "video",
@@ -413,14 +397,9 @@ lifecycleSnapshot.pendingWaitCount = 1;
 void readiness;
 void translation;
 void catalogFactory;
-void sourceSelector;
 void sourceProbeFactory;
 void catalogEntry;
 void videoCandidate;
-void sourceDescriptor;
-void sourceSession;
-void sourceSelectionInput;
-void acceptedSource;
 void sourceProbeOptions;
 void frameKey;
 void candidate;
