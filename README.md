@@ -67,27 +67,24 @@ family per file. AVAL derives preference from that attribute, not DOM order;
 the exact WebCodecs configuration remains inside each `.avl` manifest.
 
 ```html
-<div class="motion-shell">
-  <aval-player id="motion" width="320" height="320">
-    <source
-      src="/motion/av1.avl"
-      data-codec="av1"
-    >
-    <source
-      src="/motion/vp9.avl"
-      data-codec="vp9"
-    >
-    <source
-      src="/motion/h265.avl"
-      data-codec="h265"
-    >
-    <source
-      src="/motion/h264.avl"
-      data-codec="h264"
-    >
-  </aval-player>
-  <img id="motion-unavailable" src="/motion.png" alt="" hidden>
-</div>
+<aval-player id="motion" width="320" height="320">
+  <source
+    src="/motion/av1.avl"
+    data-codec="av1"
+  >
+  <source
+    src="/motion/vp9.avl"
+    data-codec="vp9"
+  >
+  <source
+    src="/motion/h265.avl"
+    data-codec="h265"
+  >
+  <source
+    src="/motion/h264.avl"
+    data-codec="h264"
+  >
+</aval-player>
 
 <script type="module" src="/motion.js"></script>
 ```
@@ -100,22 +97,10 @@ import {
 } from "@pixel-point/aval-element";
 
 const motion = document.querySelector("#motion");
-const unavailable = document.querySelector("#motion-unavailable");
-function revealPlaybackUnavailable(failure) {
-  const diagnostics = motion.getDiagnostics();
-  if (
-    motion.readiness === "error" &&
-    diagnostics.lastFailure !== null &&
-    failure === diagnostics.lastFailure
-  ) {
-    unavailable.hidden = false;
-  }
-}
 motion.addEventListener("error", (event) => {
-  if (event.detail.fatal) revealPlaybackUnavailable(event.detail.failure);
-});
-motion.addEventListener("readinesschange", () => {
-  if (motion.readiness === "interactiveReady") unavailable.hidden = true;
+  if (event.detail.fatal) {
+    console.error("AVAL playback unavailable", event.detail.failure);
+  }
 });
 defineAvalElement();
 
@@ -123,7 +108,6 @@ try {
   await motion.prepare();
 } catch (error) {
   if (!(error instanceof AvalPlaybackError)) throw error;
-  revealPlaybackUnavailable(error.failure);
 }
 ```
 
@@ -132,8 +116,8 @@ declarations belong to each candidate. `data-codec` accepts exactly `av1`,
 `vp9`, `h265`, or `h264`, and a family may appear at most once. Missing,
 unknown, or duplicate declarations are invalid configuration. AVAL raises
 `AvalPlaybackError` when playback cannot run. The
-application decides whether to show its sibling image, another renderer, text,
-or nothing. Applications can select any authored state without media seeking:
+application decides whether to show another renderer, text, or nothing.
+Applications can select any authored state without media seeking:
 
 ```js
 const motion = document.querySelector("aval-player");
