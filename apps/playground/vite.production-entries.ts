@@ -5,18 +5,12 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Plugin } from "vite";
+import { PRODUCTION_PUBLIC_ENTRIES } from "../../scripts/release/release-set-model.mjs";
 
 const ENTRY_MANIFEST_PATH = "assets/public-entry-manifest.json";
 const RESOLUTION_IMPORTER = fileURLToPath(new URL("./src/certification/app.ts", import.meta.url));
 const PACKAGES_ROOT = fileURLToPath(new URL("../../packages", import.meta.url));
-
-const PUBLIC_ENTRIES = Object.freeze([
-  entry("@pixel-point/aval-graph", ".", "graph", "dist/index.js", true),
-  entry("@pixel-point/aval-format", ".", "format", "dist/index.js", true),
-  entry("@pixel-point/aval-player-web", ".", "player-web", "dist/index.js", true),
-  entry("@pixel-point/aval-element", ".", "element", "dist/index.js", true),
-  entry("@pixel-point/aval-element/auto", "./auto", "element", "dist/auto.js", true)
-]);
+const PRODUCTION_SOURCE_DIRECTORIES = new Set(PRODUCTION_PUBLIC_ENTRIES.map(({ directory }) => directory));
 
 export interface ProductionPublicEntryRecord {
   readonly package: string;
@@ -48,8 +42,8 @@ export function productionPublicEntriesPlugin(): Plugin {
       const records: ProductionPublicEntryRecord[] = [];
       expectedPaths = new Set<string>();
       canonicalPackagesRoot = await realpath(PACKAGES_ROOT);
-      for (const definition of PUBLIC_ENTRIES) {
-        const expected = await realpath(definition.absolutePath);
+      for (const definition of PRODUCTION_PUBLIC_ENTRIES) {
+        const expected = await realpath(resolve(PACKAGES_ROOT, definition.directory, definition.path));
         const resolved = await this.resolve(definition.specifier, RESOLUTION_IMPORTER, { skipSelf: true });
         if (resolved === null || resolved.external === true) {
           this.error(`release import ${definition.specifier} did not resolve to a bundled distribution entry`);
@@ -61,9 +55,9 @@ export function productionPublicEntriesPlugin(): Plugin {
         const bytes = await readStableRegularFile(expected);
         if (definition.requiredInGraph) expectedPaths.add(expected);
         records.push(Object.freeze({
-          package: definition.packageName,
-          export: definition.exportName,
-          path: definition.packagePath,
+          package: definition.package,
+          export: definition.export,
+          path: definition.path,
           byteLength: bytes.byteLength,
           sha256: createHash("sha256").update(bytes).digest("hex")
         }));
@@ -85,7 +79,8 @@ export function productionPublicEntriesPlugin(): Plugin {
         const path = await canonicalFilePath(id, false);
         if (path === null) continue;
         const packageRelative = relative(canonicalPackagesRoot, path).split(sep).join("/");
-        if (/^(?:graph|format|player-web|element)\/src\//u.test(packageRelative)) {
+        const [packageDirectory, sourceDirectory] = packageRelative.split("/");
+        if (sourceDirectory === "src" && packageDirectory !== undefined && PRODUCTION_SOURCE_DIRECTORIES.has(packageDirectory)) {
           this.error(`release playground bundled a workspace source module: ${packageRelative}`);
         }
         if (expectedPaths.has(path)) included.add(path);
@@ -95,33 +90,6 @@ export function productionPublicEntriesPlugin(): Plugin {
       }
     }
   };
-}
-
-function entry(
-  specifier: string,
-  exportName: string,
-  packageDirectory: string,
-  packagePath: string,
-  requiredInGraph: boolean
-): Readonly<{
-  specifier: string;
-  packageName: string;
-  exportName: string;
-  packagePath: string;
-  absolutePath: string;
-  requiredInGraph: boolean;
-}> {
-  const packageName = specifier === "@pixel-point/aval-element/auto"
-    ? "@pixel-point/aval-element"
-    : specifier;
-  return Object.freeze({
-    specifier,
-    packageName,
-    exportName,
-    packagePath,
-    absolutePath: resolve(PACKAGES_ROOT, packageDirectory, packagePath),
-    requiredInGraph
-  });
 }
 
 async function canonicalFilePath(id: string, required = true): Promise<string | null> {

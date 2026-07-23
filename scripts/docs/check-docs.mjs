@@ -207,8 +207,8 @@ for (const directory of ["examples/zero-config-loop", "examples/idle-hover-state
 const reactDirectory = "examples/react-ref";
 const reactPackage = JSON.parse(await readFile(join(reactDirectory, "package.json"), "utf8"));
 const reactLock = JSON.parse(await readFile(join(reactDirectory, "package-lock.json"), "utf8"));
-if (reactPackage.peerDependencies?.["@pixel-point/aval-element"] !== "1.0.0") failures.push(`${reactDirectory}: example must target exact element 1.0.0`);
-if (reactPackage.peerDependenciesMeta?.["@pixel-point/aval-element"]?.optional !== true) failures.push(`${reactDirectory}: unpublished element peer must remain optional until packed verification`);
+if (reactPackage.peerDependencies?.["@pixel-point/aval-react"] !== "1.0.0") failures.push(`${reactDirectory}: example must target exact React adapter 1.0.0`);
+if (reactPackage.peerDependenciesMeta?.["@pixel-point/aval-react"]?.optional !== true) failures.push(`${reactDirectory}: unpublished React adapter peer must remain optional until packed verification`);
 for (const [name, version] of Object.entries({
   react: "19.2.7",
   "react-dom": "19.2.7"
@@ -232,11 +232,49 @@ if (JSON.stringify(reactLock.packages?.[""] ?? {}) !== JSON.stringify({
   peerDependenciesMeta: reactPackage.peerDependenciesMeta
 })) failures.push(`${reactDirectory}: isolated package lock root is stale`);
 const reactSource = await readFile(join(reactDirectory, "src/StatusMotion.tsx"), "utf8");
-const reactAugmentation = await readFile(join(reactDirectory, "src/aval-player-jsx.d.ts"), "utf8");
-if (!reactSource.includes('from "@pixel-point/aval-element"') || /@pixel-point\/aval-element\//u.test(reactSource)) failures.push(`${reactDirectory}: component must use only the public element package root`);
+if (!reactSource.includes('from "@pixel-point/aval-react"') || /@pixel-point\/aval-react\//u.test(reactSource)) failures.push(`${reactDirectory}: component must use only the public React package root`);
 if (hasAvalFallbackSlot(reactSource)) failures.push(`${reactDirectory}: component must not give AVAL ownership of alternate UI`);
-if (!reactSource.includes('addEventListener("error"') || !reactSource.includes("setFailed(true)")) failures.push(`${reactDirectory}: component must handle terminal playback failure in React-owned UI`);
-if (!reactAugmentation.includes('declare module "react"') || !reactAugmentation.includes("AvalElementAttributes")) failures.push(`${reactDirectory}: copyable React JSX augmentation is missing`);
+try {
+  await access(join(reactDirectory, "src/aval-player-jsx.d.ts"));
+  failures.push(`${reactDirectory}: dedicated package consumers must not require JSX augmentation`);
+} catch (error) {
+  if (error?.code !== "ENOENT") throw error;
+}
+const rabbitReactDirectory = "examples/grass-rabbit-react";
+const rabbitReactPackage = JSON.parse(await readFile(
+  join(rabbitReactDirectory, "package.json"),
+  "utf8"
+));
+for (const [name, version] of Object.entries({
+  "@pixel-point/aval-react": "1.0.0",
+  next: "16.2.11",
+  react: "19.2.7",
+  "react-dom": "19.2.7"
+})) {
+  if (rabbitReactPackage.dependencies?.[name] !== version) {
+    failures.push(`${rabbitReactDirectory}: ${name} must be exactly ${version}`);
+  }
+}
+for (const [name, version] of Object.entries({
+  "@tailwindcss/postcss": "4.3.2",
+  tailwindcss: "4.3.2",
+  typescript: "6.0.3"
+})) {
+  if (rabbitReactPackage.devDependencies?.[name] !== version) {
+    failures.push(`${rabbitReactDirectory}: ${name} must be exactly ${version}`);
+  }
+}
+const rabbitReactSource = await readFile(
+  join(rabbitReactDirectory, "components/rabbit-demo.tsx"),
+  "utf8"
+);
+if (
+  !rabbitReactSource.includes('from "@pixel-point/aval-react"') ||
+  /@pixel-point\/aval-react\//u.test(rabbitReactSource)
+) failures.push(`${rabbitReactDirectory}: component must use only the public React package root`);
+if (hasAvalFallbackSlot(rabbitReactSource)) {
+  failures.push(`${rabbitReactDirectory}: alternate UI must remain outside AVAL ownership`);
+}
 const plainDirectory = "examples/plain-html";
 const plainPackage = JSON.parse(await readFile(join(plainDirectory, "package.json"), "utf8"));
 const plainHtml = await readFile(join(plainDirectory, "index.html"), "utf8");
@@ -266,7 +304,7 @@ for (const path of [
   }
 }
 if (failures.length > 0) throw new Error(failures.join("\n"));
-process.stdout.write(`${JSON.stringify({ status: "passed", documents: files.length, examples: 5 })}\n`);
+process.stdout.write(`${JSON.stringify({ status: "passed", documents: files.length, examples: 6 })}\n`);
 
 function renderSupport(index) {
   if (!Array.isArray(index.profiles) || index.profiles.length === 0) return [
@@ -291,7 +329,7 @@ async function collect(directory, output) {
 async function collectPublicBoundaryFiles(directory, output) {
   const allowed = new Set([".html", ".js", ".md", ".ts", ".tsx"]);
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.name === "dist" || entry.name === "node_modules" || entry.name === "public") continue;
+    if ([".next", "dist", "node_modules", "out", "public"].includes(entry.name)) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) await collectPublicBoundaryFiles(path, output);
     else if (entry.isFile() && allowed.has(extname(entry.name))) output.push(path);

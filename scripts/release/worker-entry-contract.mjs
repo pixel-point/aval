@@ -2,7 +2,11 @@ import definitions from "../../packages/compiler/src/commands/dev-worker-entries
 import { RELEASE_PACKAGE_SPECS } from "./release-set-model.mjs";
 
 const RELEASE_PACKAGES = new Set(RELEASE_PACKAGE_SPECS.map(({ name }) => name));
-const COMPILER_PACKAGE_NAME = "@pixel-point/aval-compiler";
+const COMPILER_WORKER_REGISTRY_OUTPUT = "commands/dev-worker-entries.json";
+const COMPILER_REGISTRY_OWNERS = RELEASE_PACKAGE_SPECS.filter(({ buildConfig }) =>
+  buildConfig.additionalSources.includes(COMPILER_WORKER_REGISTRY_OUTPUT)
+);
+if (COMPILER_REGISTRY_OWNERS.length !== 1) throw new Error("release package contract must declare exactly one compiler worker registry owner");
 
 const CANONICAL_DEFINITIONS = Object.freeze(definitions.map((definition) => {
   if (
@@ -23,8 +27,8 @@ const CANONICAL_DEFINITIONS = Object.freeze(definitions.map((definition) => {
 }));
 
 export const COMPILER_WORKER_REGISTRY_ENTRY = Object.freeze({
-  packageName: COMPILER_PACKAGE_NAME,
-  output: "commands/dev-worker-entries.json",
+  packageName: COMPILER_REGISTRY_OWNERS[0].name,
+  output: COMPILER_WORKER_REGISTRY_OUTPUT,
   // TypeScript's resolveJsonModule emission is canonical four-space JSON.
   contents: `${JSON.stringify(CANONICAL_DEFINITIONS, null, 4)}\n`
 });

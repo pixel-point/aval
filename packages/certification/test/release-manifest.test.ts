@@ -39,9 +39,11 @@ describe("immutable release manifests", () => {
       artifacts: manifest.artifacts.map((artifact, index) => index === 0 ? { ...artifact, executable: true } : artifact)
     })).toThrow(/unknown field/u);
     expect(() => validateCandidateManifest({ ...manifest, artifacts: manifest.artifacts.filter(({ role }) => role !== "license-report") })).toThrow(/license-report/u);
-    expect(() => validateCandidateManifest({ ...manifest, artifacts: manifest.artifacts.filter(({ role }) => role !== "package").concat(manifest.artifacts.filter(({ role }) => role === "package").slice(0, 1)) })).toThrow(/five-package/u);
+    expect(() => validateCandidateManifest({ ...manifest, artifacts: manifest.artifacts.filter(({ role }) => role !== "package").concat(manifest.artifacts.filter(({ role }) => role === "package").slice(0, 1)) })).toThrow(/public-package/u);
     expect(() => validateCandidateManifest({ ...manifest, artifacts: manifest.artifacts.filter(({ path }) => path !== "sbom/compiler.spdx.json") })).toThrow(/required SBOM/u);
     expect(() => validateCandidateManifest({ ...manifest, artifacts: manifest.artifacts.filter(({ path }) => path !== "etc/api/compiler.api.md") })).toThrow(/required API report/u);
+    expect(() => validateCandidateManifest({ ...manifest, artifacts: manifest.artifacts.filter(({ path }) => path !== "sbom/react.spdx.json") })).toThrow(/required SBOM/u);
+    expect(() => validateCandidateManifest({ ...manifest, artifacts: manifest.artifacts.filter(({ path }) => path !== "etc/api/react.api.md") })).toThrow(/required API report/u);
     expect(() => validateCandidateManifest({ ...manifest, artifacts: manifest.artifacts.filter(({ role }) => role !== "candidate-layout") })).toThrow(/candidate-layout/u);
     expect(() => validateCandidateManifest({ ...manifest, tools: { ...manifest.tools, node: "latest" } })).toThrow(/semantic tool/u);
     expect(() => validateCandidateManifest({ ...manifest, tools: { ...manifest.tools, playwrightBrowserManifestSha256: "f".repeat(64) } })).toThrow(/unknown field/u);

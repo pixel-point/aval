@@ -52,7 +52,7 @@ export function applyApprovedPublicationMetadata(source, input) {
 
 export function reconcilePublicationMetadata(manifests, input) {
   const metadata = validateApprovedPublicationMetadata(input);
-  if (!Array.isArray(manifests) || manifests.length !== 5) throw new Error("publication metadata requires the exact five package manifests");
+  if (!Array.isArray(manifests) || manifests.length !== RELEASE_PACKAGE_NAMES.length) throw new Error("publication metadata requires the exact public package manifests");
   for (const manifest of manifests) {
     const expected = applyApprovedPublicationMetadata({ name: manifest.name }, metadata);
     if (JSON.stringify(manifest.repository) !== JSON.stringify(expected.repository) || manifest.homepage !== expected.homepage || JSON.stringify(manifest.bugs) !== JSON.stringify(expected.bugs)) throw new Error(`package publication metadata does not match reviewed authority: ${String(manifest.name)}`);

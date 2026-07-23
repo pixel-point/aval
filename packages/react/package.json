@@ -1,0 +1,29 @@
+{
+  "name": "@pixel-point/aval-react",
+  "version": "1.0.0",
+  "description": "React bindings for interactive AVAL assets.",
+  "keywords": ["animation", "react", "web-component", "motion"],
+  "private": false,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "license": "MIT",
+  "engines": { "node": ">=22.12.0" },
+  "dependencies": {
+    "@pixel-point/aval-element": "1.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18.3.0 || ^19.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.release.json",
+    "test:browser": "playwright test --config test/browser/playwright.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/browser/tsconfig.json --noEmit"
+  }
+}

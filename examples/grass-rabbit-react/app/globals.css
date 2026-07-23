@@ -1,0 +1,96 @@
+@import "@fontsource-variable/inter";
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter Variable", sans-serif;
+  --font-sans--font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01", "ss03";
+  --color-canvas: #f2efe7;
+  --color-paper: #faf8f3;
+  --color-ink: #172019;
+  --color-ink-muted: #667067;
+  --color-line: #d9d4c8;
+  --color-forest: #28533b;
+  --color-forest-bright: #356a4d;
+  --color-moss-light: #9bd3a8;
+  --color-stage: #08110c;
+  --color-code: #111914;
+  --color-code-foreground: #e8eee9;
+}
+
+@keyframes rabbit-hint-pulse {
+  0% {
+    opacity: 0.8;
+    transform: scale(0.86);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+
+@layer base {
+  html {
+    min-width: 20rem;
+    background: var(--color-canvas);
+    font-family: var(--font-sans);
+    font-feature-settings: var(--font-sans--font-feature-settings);
+  }
+
+  body {
+    min-width: 0;
+    margin: 0;
+    background: var(--color-canvas);
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-forest) 22%, transparent);
+  }
+
+  aval-player {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
+
+  aval-player:focus-visible {
+    outline: 2px solid rgb(255 255 255 / 0.9);
+    outline-offset: -4px;
+  }
+}
+
+@layer components {
+  .rabbit-player {
+    opacity: 1;
+    transition: opacity 250ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+
+  .rabbit-stage[data-ready="false"] .rabbit-player {
+    opacity: 0.18;
+  }
+
+  .rabbit-stage[data-failed="true"] .rabbit-player {
+    visibility: hidden;
+  }
+
+  .rabbit-interaction-hint::before {
+    position: absolute;
+    inset: 0;
+    border: 2px solid rgb(255 255 255 / 0.8);
+    border-radius: 9999px;
+    content: "";
+    animation: rabbit-hint-pulse 2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rabbit-player {
+    transition: none;
+  }
+
+  .rabbit-interaction-hint {
+    display: none;
+  }
+}

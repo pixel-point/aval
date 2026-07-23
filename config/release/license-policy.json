@@ -1,6 +1,10 @@
 {
   "schemaVersion": "1.0",
   "allowed": ["0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MIT", "MPL-2.0", "OFL-1.1", "Unicode-3.0"],
-  "reviewRequired": ["BlueOak-1.0.0"],
+  "reviewRequired": [
+    "BlueOak-1.0.0",
+    "CC-BY-4.0",
+    "LGPL-3.0-or-later"
+  ],
   "denied": ["AGPL-1.0-only", "AGPL-3.0-only", "SSPL-1.0"]
 }

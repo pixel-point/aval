@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
+import { RELEASE_PACKAGE_SPECS } from "./release-set-model.mjs";
+
 const local = process.argv.slice(2);
 if (local.some((argument) => argument !== "--local")) {
   throw new Error("usage: run-api-extractor.mjs [--local]");
 }
 
-const packages = ["graph", "format", "player-web", "element", "compiler"];
+const packages = RELEASE_PACKAGE_SPECS.map(({ directory }) => directory);
 for (const packageName of packages) {
   const args = [
     "node_modules/@microsoft/api-extractor/bin/api-extractor",

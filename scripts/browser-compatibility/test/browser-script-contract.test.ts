@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import grassRabbitCodecs from "../../../playwright.grass-rabbit-codecs.config.js";
+import grassRabbitReact from "../../../playwright.grass-rabbit-react.config.js";
 import grassRabbit from "../../../playwright.grass-rabbit.config.js";
 import kineticOrb from "../../../playwright.kinetic-orb.config.js";
 import playground from "../../../playwright.playground.config.js";
@@ -14,6 +15,7 @@ describe("permanent-demo browser command contract", () => {
   it.each([
     ["playground", playground],
     ["grass-rabbit", grassRabbit],
+    ["grass-rabbit-react", grassRabbitReact],
     ["grass-rabbit-codecs", grassRabbitCodecs],
     ["kinetic-orb", kineticOrb]
   ])("includes Chromium, Firefox, and WebKit for %s", (_name, config) => {
@@ -28,6 +30,7 @@ describe("permanent-demo browser command contract", () => {
     for (const name of [
       "test:playground",
       "test:grass-rabbit",
+      "test:grass-rabbit-react",
       "test:grass-rabbit-codecs",
       "test:kinetic-orb:prebuilt"
     ]) {
@@ -40,6 +43,7 @@ describe("permanent-demo browser command contract", () => {
     for (const config of [
       playground,
       grassRabbit,
+      grassRabbitReact,
       grassRabbitCodecs,
       kineticOrb
     ]) {
@@ -62,7 +66,12 @@ describe("permanent-demo browser command contract", () => {
         timeout: 95_000
       })
     ]));
-    for (const config of [playground, grassRabbit, grassRabbitCodecs]) {
+    for (const config of [
+      playground,
+      grassRabbit,
+      grassRabbitReact,
+      grassRabbitCodecs
+    ]) {
       expect(config.projects?.some(({ name }) => name.includes("soak"))).toBe(false);
     }
   });

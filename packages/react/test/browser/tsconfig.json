@@ -1,0 +1,13 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "paths": {
+      "@pixel-point/aval-element": ["../../../element/src/index.ts"],
+      "@pixel-point/aval-react": ["../../src/index.ts"]
+    },
+    "types": ["node", "react", "react-dom", "vite/client", "@playwright/test"]
+  },
+  "include": ["*.ts", "*.tsx"]
+}

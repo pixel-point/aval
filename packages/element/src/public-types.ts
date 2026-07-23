@@ -178,6 +178,26 @@ export interface AvalErrorDetail {
   readonly fatal: boolean;
 }
 
+/** Cached framework-neutral state for concurrent UI consumers. */
+export interface AvalSnapshot {
+  readonly revision: number;
+  readonly generation: number;
+  readonly connected: boolean;
+  readonly readiness: RuntimeReadiness;
+  readonly mode: AvalMode;
+  readonly assurance: "best-effort" | null;
+  readonly staticReason: StaticReason | null;
+  readonly requestedState: string | null;
+  readonly visualState: string | null;
+  readonly isTransitioning: boolean;
+  readonly paused: boolean;
+  readonly effectivelyVisible: boolean;
+  readonly stateNames: readonly string[];
+  readonly eventNames: readonly string[];
+  readonly inputBindings: readonly Readonly<Binding>[];
+  readonly lastError: Readonly<AvalErrorDetail> | null;
+}
+
 export interface AvalElementEventMap {
   readonly readinesschange: CustomEvent<Readonly<AvalReadinessChangeDetail>>;
   readonly requestedstatechange: CustomEvent<Readonly<AvalRequestedStateChangeDetail>>;
@@ -664,6 +684,8 @@ export interface AvalElement extends HTMLElement {
   readyFor(state: string): boolean;
   pause(): void;
   resume(): Promise<void>;
+  getSnapshot(): Readonly<AvalSnapshot>;
+  subscribe(listener: () => void): () => void;
   getDiagnostics(options?: Readonly<{ readonly trace?: boolean }>): Readonly<AvalDiagnostics>;
   dispose(): Promise<void>;
 

@@ -6,7 +6,6 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "test:listener-timing": "playwright test --config playwright.listener-timing.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
@@ -14,17 +13,16 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "typescript": "7.0.2",
     "vite": "8.1.4"
   },
   "peerDependencies": {
-    "@pixel-point/aval-element": "1.0.0"
+    "@pixel-point/aval-react": "1.0.0"
   },
   "peerDependenciesMeta": {
-    "@pixel-point/aval-element": {
+    "@pixel-point/aval-react": {
       "optional": true
     }
   }

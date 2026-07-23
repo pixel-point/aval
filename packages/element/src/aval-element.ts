@@ -8,6 +8,10 @@ import { normalizeIntegrity, normalizeSource } from "./element-configuration.js"
 import { ElementEventMutationGate } from "./element-event-mutation-gate.js";
 import { ElementEngagementBinding } from "./element-engagement-binding.js";
 import { ElementPublicEvents } from "./element-public-events.js";
+import {
+  ElementSnapshotStore,
+  type ElementSnapshotState
+} from "./element-snapshot-store.js";
 import { ElementTrace } from "./element-trace.js";
 import { ELEMENT_DECODER_CAPACITY } from "./decoder-capacity.js";
 import type {
@@ -46,6 +50,7 @@ import type {
   AvalDiagnostics,
   AvalElement,
   AvalElementConstructor,
+  AvalErrorDetail,
   AvalFit,
   AvalMode,
   AvalMotion,
@@ -53,6 +58,7 @@ import type {
   AvalPublicFailure,
   AvalReadinessChangeDetail,
   AvalRendererDiagnostic,
+  AvalSnapshot,
   Binding,
   RuntimeReadiness,
   RuntimeReadinessResult,
@@ -104,6 +110,7 @@ export function createAvalElementClass(
     readonly #events: ElementPublicEvents;
     readonly #eventMutations: ElementEventMutationGate;
     readonly #engagementBinding: ElementEngagementBinding;
+    readonly #snapshots: ElementSnapshotStore;
     readonly #trace = new ElementTrace();
     readonly #counters = {
       prepare: 0,
@@ -167,7 +174,6 @@ export function createAvalElementClass(
     #controller: AbortController | null = null;
     #metadata: Readonly<Metadata> | null = null;
     #explicitTarget: Element | null = null;
-    #connected = false;
     #finalDisposed = false;
     #disposePromise: Promise<void> | null = null;
     #reloadQueued = false;
@@ -175,18 +181,10 @@ export function createAvalElementClass(
     #timerCount = 0;
     #stalePublicationCount = 0;
     #elementGeneration = 1;
-    #sourceGeneration = 0;
     #inputGeneration = 0;
     #motionGeneration = 0;
     #visibilityGeneration = 0;
     #resizeGeneration = 0;
-    #readiness: RuntimeReadiness = "unready";
-    #mode: AvalMode = null;
-    #staticReason: StaticReason | null = null;
-    #requestedState: string | null = null;
-    #visualState: string | null = null;
-    #transitioning = false;
-    #lastFailure: Readonly<AvalPublicFailure> | null = null;
     #terminalError: AvalPlaybackError | null = null;
     #cleanupFailureCount = 0;
     #decoderDiagnosticLimit = 0;
@@ -202,7 +200,6 @@ export function createAvalElementClass(
     #intersecting = false;
     #lastVisibility: boolean | null = null;
     #positiveBox = false;
-    #manualPlaying = false;
     #playSequence = 0;
     #hovered = false;
     #focused = false;
@@ -219,9 +216,39 @@ export function createAvalElementClass(
       );
       this.#sourceObserver = this.#createSourceObserver();
       this.#attributes.upgrade(AVAL_UPGRADE_PROPERTIES);
-      this.#manualPlaying = this.autoplay === "visible";
+      this.#snapshots = new ElementSnapshotStore({
+        generation: 0,
+        connected: false,
+        readiness: "unready",
+        mode: null,
+        assurance: null,
+        staticReason: null,
+        requestedState: null,
+        visualState: null,
+        isTransitioning: false,
+        paused: this.autoplay !== "visible",
+        effectivelyVisible: false,
+        stateNames: [],
+        eventNames: [],
+        inputBindings: [],
+        lastError: null
+      });
       this.#applyIntrinsic();
     }
+
+    get #sourceGeneration(): number { return this.getSnapshot().generation; }
+    get #connected(): boolean { return this.getSnapshot().connected; }
+    get #readiness(): RuntimeReadiness { return this.getSnapshot().readiness; }
+    get #mode(): AvalMode { return this.getSnapshot().mode; }
+    get #staticReason(): StaticReason | null {
+      return this.getSnapshot().staticReason;
+    }
+    get #requestedState(): string | null {
+      return this.getSnapshot().requestedState;
+    }
+    get #visualState(): string | null { return this.getSnapshot().visualState; }
+    get #transitioning(): boolean { return this.getSnapshot().isTransitioning; }
+    get #manualPlaying(): boolean { return !this.getSnapshot().paused; }
 
     public connectedCallback(): void {
       if (this.#finalDisposed) return;
@@ -235,7 +262,10 @@ export function createAvalElementClass(
         }
         this.#removeObservers();
       }
-      this.#connected = true;
+      this.#commitPublicState({
+        connected: true,
+        effectivelyVisible: this.#effectiveVisibility()
+      });
       if (!wasConnected) {
         this.#trace.record("connect", Math.max(1, this.#sourceGeneration));
       }
@@ -248,16 +278,24 @@ export function createAvalElementClass(
     public disconnectedCallback(): void {
       queueMicrotask(() => {
         if (this.isConnected || this.#finalDisposed) return;
-        this.#connected = false;
+        this.#removeObservers();
+        this.#commitPublicState({
+          connected: false,
+          effectivelyVisible: this.#effectiveVisibility()
+        });
         this.#trace.record("disconnect", Math.max(1, this.#sourceGeneration));
         this.#load = null;
-        this.#removeObservers();
         const retirement = this.#queueRetirement(false);
         const finish = (): void => {
           if (!this.#connected && !this.#finalDisposed) {
-            this.#mode = null;
-            this.#staticReason = null;
-            this.#setReadiness("unready");
+            const from = this.readiness;
+            this.#commitPublicState({
+              readiness: "unready",
+              mode: null,
+              assurance: null,
+              staticReason: null
+            });
+            this.#dispatchReadinessChange(from, "unready");
           }
         };
         void retirement.then(finish, finish);
@@ -267,7 +305,6 @@ export function createAvalElementClass(
     public adoptedCallback(): void {
       if (this.#finalDisposed) return;
       const epoch = ++this.#adoptionEpoch;
-      this.#connected = this.isConnected;
       this.#trace.record("adopt", Math.max(1, this.#sourceGeneration));
       this.#load = null;
       if (this.#explicitTarget !== null) {
@@ -275,6 +312,10 @@ export function createAvalElementClass(
         catch { this.#explicitTarget = null; }
       }
       this.#removeObservers();
+      this.#commitPublicState({
+        connected: this.isConnected,
+        effectivelyVisible: this.#effectiveVisibility()
+      });
       this.#sourceObserver = this.#createSourceObserver();
       rebindAdoptedStyles(this.#layers, this.ownerDocument);
       const retirement = this.#queueRetirement(false);
@@ -333,7 +374,7 @@ export function createAvalElementClass(
       } else if (name === "bindings" || name === "interaction-for") {
         this.#bindInputs();
       } else if (name === "autoplay") {
-        this.#manualPlaying = this.autoplay === "visible";
+        this.#commitPublicState({ paused: this.autoplay !== "visible" });
         this.#playSequence += 1;
         this.#updatePlayback();
       }
@@ -399,27 +440,54 @@ export function createAvalElementClass(
     public get height(): number | null { return this.#attributes.height; }
     public set height(value: number | null) { this.#attributes.height = value; }
 
-    public get readiness(): RuntimeReadiness { return this.#readiness; }
-    public get mode(): AvalMode { return this.#mode; }
+    public get readiness(): RuntimeReadiness { return this.getSnapshot().readiness; }
+    public get mode(): AvalMode { return this.getSnapshot().mode; }
     public get assurance(): "best-effort" | null {
-      return this.#mode === "animated" ? "best-effort" : null;
+      return this.getSnapshot().assurance;
     }
-    public get staticReason(): StaticReason | null { return this.#staticReason; }
-    public get requestedState(): string | null { return this.#requestedState; }
-    public get visualState(): string | null { return this.#visualState; }
-    public get isTransitioning(): boolean { return this.#transitioning; }
-    public get paused(): boolean { return !this.#manualPlaying; }
+    public get staticReason(): StaticReason | null {
+      return this.getSnapshot().staticReason;
+    }
+    public get requestedState(): string | null {
+      return this.getSnapshot().requestedState;
+    }
+    public get visualState(): string | null { return this.getSnapshot().visualState; }
+    public get isTransitioning(): boolean {
+      return this.getSnapshot().isTransitioning;
+    }
+    public get paused(): boolean { return this.getSnapshot().paused; }
     public get effectivelyVisible(): boolean {
-      return this.#documentVisible() && this.#intersecting && this.#positiveBox;
+      return this.getSnapshot().effectivelyVisible;
     }
     public get stateNames(): readonly string[] {
-      return this.#metadata?.stateNames ?? Object.freeze([]);
+      return this.getSnapshot().stateNames;
     }
     public get eventNames(): readonly string[] {
-      return this.#metadata?.eventNames ?? Object.freeze([]);
+      return this.getSnapshot().eventNames;
     }
     public get inputBindings(): readonly Readonly<Binding>[] {
-      return this.#metadata?.bindings ?? Object.freeze([]);
+      return this.getSnapshot().inputBindings;
+    }
+
+    public getSnapshot(): Readonly<AvalSnapshot> {
+      return this.#snapshots.getSnapshot();
+    }
+
+    public subscribe(listener: () => void): () => void {
+      return this.#snapshots.subscribe(listener);
+    }
+
+    #commitPublicState(
+      patch: Readonly<Partial<ElementSnapshotState>>
+    ): void {
+      this.#events.transaction(true);
+      try {
+        this.#snapshots.transition((current) => ({
+          ...current,
+          ...patch
+        }));
+      }
+      finally { this.#events.transaction(false); }
     }
 
     public prepare(
@@ -535,7 +603,7 @@ export function createAvalElementClass(
       if (this.#finalDisposed) return;
       if (this.#deferPublicMutation(() => this.pause())) return;
       this.#flushSourceMutations();
-      this.#manualPlaying = false;
+      this.#commitPublicState({ paused: true });
       this.#playSequence += 1;
       this.#counters.pause += 1;
       this.#player?.pause();
@@ -547,7 +615,7 @@ export function createAvalElementClass(
       if (deferred !== null) return deferred;
       this.#flushSourceMutations();
       const previous = this.#manualPlaying;
-      this.#manualPlaying = true;
+      this.#commitPublicState({ paused: false });
       const sequence = ++this.#playSequence;
       let attempted: Player | null = null;
       this.#counters.resume += 1;
@@ -589,7 +657,9 @@ export function createAvalElementClass(
             attempted === this.#suspendingPlayer
           )
         ) attempted.pause();
-        if (sequence === this.#playSequence) this.#manualPlaying = previous;
+        if (sequence === this.#playSequence) {
+          this.#commitPublicState({ paused: !previous });
+        }
         throw this.#retainedTerminalError() ?? error;
       }
     }
@@ -609,12 +679,17 @@ export function createAvalElementClass(
         this.#finalDisposed = true;
         this.#trace.record("dispose", Math.max(1, this.#sourceGeneration));
       }
-      this.#connected = false;
       this.#load = null;
       this.#removeObservers();
+      this.#commitPublicState({
+        connected: false,
+        effectivelyVisible: this.#effectiveVisibility()
+      });
       const finish = (retirementCompleted: boolean): void => {
         const presentationCleanupCompleted = this.#layers.dispose();
-        this.#setReadiness("disposed");
+        const from = this.readiness;
+        this.#commitPublicState({ readiness: "disposed" });
+        this.#dispatchReadinessChange(from, "disposed");
         const ownership = this.#ownershipSnapshot(true);
         const sourceCleanupCompleted = retirementCompleted &&
           this.#player === null && this.#retiringPlayer === null &&
@@ -770,15 +845,12 @@ export function createAvalElementClass(
         !this.#connected || this.#finalDisposed
       ) throw abortError();
       this.#clearRestart();
-      const generation = ++this.#sourceGeneration;
+      const generation = this.#sourceGeneration + 1;
+      const fromReadiness = this.readiness;
       this.#trace.record("source-start", generation);
       if (generation > 1) this.#counters.sourceReplacement += 1;
       this.#controller = new AbortController();
       this.#metadata = null;
-      this.#requestedState = null;
-      this.#visualState = null;
-      this.#transitioning = false;
-      this.#lastFailure = null;
       this.#terminalError = null;
       this.#cleanupFailureCount = 0;
       this.#decoderDiagnosticLimit = 0;
@@ -788,10 +860,22 @@ export function createAvalElementClass(
       if (!preservePlaybackLifecycle) {
         this.#playbackLifecycle = emptyPlaybackLifecycleCounters();
       }
-      this.#mode = null;
-      this.#staticReason = null;
       this.#layers.resetSource(generation);
-      this.#setReadiness("unready");
+      this.#commitPublicState({
+        generation,
+        readiness: "unready",
+        mode: null,
+        assurance: null,
+        staticReason: null,
+        requestedState: null,
+        visualState: null,
+        isTransitioning: false,
+        stateNames: [],
+        eventNames: [],
+        inputBindings: [],
+        lastError: null
+      });
+      this.#dispatchReadinessChange(fromReadiness, "unready");
       const document = this.ownerDocument;
       const sourceRead = readSources(this);
       for (const failure of sourceRead.failures) {
@@ -888,7 +972,7 @@ export function createAvalElementClass(
             }
             if (this.#restartPlayer !== candidate) this.#restartPlayer = null;
             candidate.activate({ publish: false });
-            this.#metadata = candidate.metadata;
+            this.#setMetadata(candidate.metadata);
             this.#applyIntrinsic();
             await this.#reconcileSelectionMotion(
               candidate,
@@ -913,20 +997,36 @@ export function createAvalElementClass(
           onMetadata: (metadata) => {
             if (!this.#publicationCurrent(generation, token)) return;
             if (this.#metadata === metadata) return;
-            this.#metadata = metadata;
+            this.#setMetadata(metadata);
             this.#applyIntrinsic();
             this.#bindInputs();
             this.#resize();
           },
           onReadiness: (value, reason) => {
             if (!this.#publicationCurrent(generation, token)) return;
+            const readiness = value as RuntimeReadiness;
+            const from = this.readiness;
             if (value === "staticReady") {
-              this.#mode = "static";
-              this.#staticReason = reason as StaticReason;
+              this.#commitPublicState({
+                readiness,
+                mode: "static",
+                assurance: null,
+                staticReason: reason as StaticReason
+              });
             } else if (value === "interactiveReady" || value === "visualReady") {
-              this.#mode = "animated";
+              this.#commitPublicState({
+                readiness,
+                mode: "animated",
+                assurance: "best-effort"
+              });
+            } else {
+              this.#commitPublicState({ readiness });
             }
-            this.#setReadiness(value as RuntimeReadiness, reason as StaticReason);
+            this.#dispatchReadinessChange(
+              from,
+              readiness,
+              reason as StaticReason
+            );
           },
           onAnimationResourcesRetired: () => {
             if (!this.#publicationCurrent(generation, token)) return;
@@ -1207,18 +1307,23 @@ export function createAvalElementClass(
       generation: number
     ): void {
       if (type === "requestedstatechange") {
-        this.#requestedState = String(detail.to);
         this.#inputGeneration += 1;
-      } else if (type === "visualstatechange") {
-        this.#visualState = String(detail.to);
       } else if (type === "underflow") {
         this.#counters.underflow += 1;
       }
-      this.#transitioning = transitioningState(
-        this.#transitioning,
-        type,
-        detail
-      );
+      this.#commitPublicState({
+        ...(type === "requestedstatechange"
+          ? { requestedState: String(detail.to) }
+          : {}),
+        ...(type === "visualstatechange"
+          ? { visualState: String(detail.to) }
+          : {}),
+        isTransitioning: transitioningState(
+          this.#transitioning,
+          type,
+          detail
+        )
+      });
       this.#dispatch(type, detail, generation);
       if (type === "transitionend") this.#queueEngagementRetry();
     }
@@ -1240,7 +1345,9 @@ export function createAvalElementClass(
         message: `AVAL operation failed (${publicCode})`,
         operation
       }) as Readonly<AvalPublicFailure>;
-      this.#lastFailure = failure;
+      this.#commitPublicState({
+        lastError: Object.freeze({ generation, failure, fatal })
+      });
       this.#dispatch("error", { failure, fatal }, generation);
     }
 
@@ -1257,10 +1364,20 @@ export function createAvalElementClass(
       const retainedLoad = Promise.reject(error);
       void retainedLoad.catch(() => undefined);
       this.#load = retainedLoad;
-      this.#lastFailure = error.failure;
-      this.#mode = null;
-      this.#staticReason = null;
-      this.#setReadiness("error");
+      const from = this.readiness;
+      const lastError: Readonly<AvalErrorDetail> = Object.freeze({
+        generation,
+        failure: error.failure,
+        fatal: true
+      });
+      this.#commitPublicState({
+        readiness: "error",
+        mode: null,
+        assurance: null,
+        staticReason: null,
+        lastError
+      });
+      this.#dispatchReadinessChange(from, "error");
       this.#dispatch("error", { failure: error.failure, fatal: true }, generation);
       return error;
     }
@@ -1278,10 +1395,12 @@ export function createAvalElementClass(
       }), generation);
     }
 
-    #setReadiness(value: RuntimeReadiness, reason?: StaticReason): void {
-      const from = this.#readiness;
+    #dispatchReadinessChange(
+      from: RuntimeReadiness,
+      value: RuntimeReadiness,
+      reason?: StaticReason
+    ): void {
       if (from === value) return;
-      this.#readiness = value;
       this.#dispatch("readinesschange", {
         from,
         to: value,
@@ -1384,6 +1503,9 @@ export function createAvalElementClass(
           if (epoch !== this.#observerEpoch) return;
           this.#pageHidden = false;
           if (persistedPageShow(event)) {
+            this.#commitPublicState({
+              effectivelyVisible: this.#effectiveVisibility()
+            });
             this.#trace.record("bfcache-restore", Math.max(1, this.#sourceGeneration));
             this.#pageParticipant?.setVisible(this.effectivelyVisible);
             this.#invalidateSourceRequest();
@@ -1399,6 +1521,9 @@ export function createAvalElementClass(
         return true;
       } catch {
         this.#removeObservers();
+        this.#commitPublicState({
+          effectivelyVisible: this.#effectiveVisibility()
+        });
         return false;
       }
     }
@@ -1533,9 +1658,19 @@ export function createAvalElementClass(
       this.#layers.setIntrinsicSize({ aspectRatio: ratio, width, height });
     }
 
+    #setMetadata(metadata: Readonly<Metadata>): void {
+      this.#metadata = metadata;
+      this.#commitPublicState({
+        stateNames: metadata.stateNames,
+        eventNames: metadata.eventNames,
+        inputBindings: metadata.bindings
+      });
+    }
+
     #visibilityChanged(): void {
       if (!this.#intersectionKnown && !this.#pageHidden) return;
-      const visible = this.effectivelyVisible;
+      const visible = this.#effectiveVisibility();
+      this.#commitPublicState({ effectivelyVisible: visible });
       const player = this.#player;
       const edge = visible !== this.#lastVisibility;
       const playerChanged = player !== this.#visibilityPlayer;
@@ -1875,6 +2010,10 @@ export function createAvalElementClass(
       return !this.#pageHidden && this.ownerDocument.visibilityState !== "hidden";
     }
 
+    #effectiveVisibility(): boolean {
+      return this.#documentVisible() && this.#intersecting && this.#positiveBox;
+    }
+
     #ensurePageParticipant(): PageDecoderParticipant {
       if (this.#pageParticipant !== null) return this.#pageParticipant;
       const realm = this.ownerDocument.defaultView ?? globalThis;
@@ -2126,7 +2265,7 @@ export function createAvalElementClass(
         hostReducedMotion: this.#media?.matches ?? null,
         autoplay: this.autoplay,
         fit: this.fit,
-        lastFailure: this.#lastFailure,
+        lastFailure: this.getSnapshot().lastError?.failure ?? null,
         counters: Object.freeze({
           ...this.#counters,
           contextRecovery: contextRecoveryCount(

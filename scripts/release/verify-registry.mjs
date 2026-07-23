@@ -8,7 +8,7 @@ import { RELEASE_PACKAGE_NAMES } from "./release-set-model.mjs";
 
 export function verifyRegistryReleaseSet({ releaseSet, tag, readState }) {
   if (tag !== "next" && tag !== "latest") throw new Error("registry verification tag must be next or latest");
-  if (releaseSet === null || typeof releaseSet !== "object" || !Array.isArray(releaseSet.packages) || releaseSet.packages.length !== 5) throw new Error("registry verification requires the exact five-package release set");
+  if (releaseSet === null || typeof releaseSet !== "object" || !Array.isArray(releaseSet.packages) || releaseSet.packages.length !== RELEASE_PACKAGE_NAMES.length) throw new Error("registry verification requires the exact public-package release set");
   if (releaseSet.packages.some((archive, index) => archive?.name !== RELEASE_PACKAGE_NAMES[index] || !isCanonicalIntegrity(archive.registryIntegrity))) throw new Error("registry verification release-set identity/order is invalid");
   const results = [];
   for (const archive of releaseSet.packages) {

@@ -3,29 +3,23 @@ import { lstat, mkdir, mkdtemp, open, readdir, rename, rm, writeFile } from "nod
 import { join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { RELEASE_PACKAGE_NAMES, releasePackageDirectory } from "./release-set-model.mjs";
+import { RELEASE_PACKAGE_NAMES, releasePackageDirectory, releasePackageSpecification } from "./release-set-model.mjs";
 import { ensureCompilerCliExecutable } from "./compiler-cli-mode.mjs";
-import { ELEMENT_RELEASE_TYPESCRIPT_ROOTS, ELEMENT_RELEASE_WORKER } from "./element-release-contract.mjs";
-import { COMPILER_WORKER_REGISTRY_ENTRY } from "./worker-entry-contract.mjs";
+import { ELEMENT_RELEASE_WORKER } from "./element-release-contract.mjs";
 
-const BUILD_INFO = Object.freeze({
-  "@pixel-point/aval-graph": new Set(["graph.tsbuildinfo"]),
-  "@pixel-point/aval-format": new Set(["format.tsbuildinfo"]),
-  "@pixel-point/aval-player-web": new Set(["player-web.release.tsbuildinfo"]),
-  "@pixel-point/aval-element": new Set(["element.release.tsbuildinfo"]),
-  "@pixel-point/aval-compiler": new Set(["compiler.tsbuildinfo"])
-});
-const SOURCE_MAP_PACKAGES = new Set([
-  "@pixel-point/aval-graph",
-  "@pixel-point/aval-format",
-  "@pixel-point/aval-compiler"
-]);
-const RELEASE_CONFIG = Object.freeze({
-  "@pixel-point/aval-graph": "tsconfig.json",
-  "@pixel-point/aval-format": "tsconfig.json",
-  "@pixel-point/aval-player-web": "tsconfig.release.json",
-  "@pixel-point/aval-element": "tsconfig.release.json",
-  "@pixel-point/aval-compiler": "tsconfig.json"
+const BUILD_STEPS = Object.freeze({
+  "element-worker": Object.freeze({
+    outputs: Object.freeze([ELEMENT_RELEASE_WORKER.output]),
+    run({ repository, distribution }) {
+      const result = spawnSync(process.execPath, [
+        resolve(repository, "scripts/release/minify-element-worker.mjs"),
+        "--out",
+        distribution
+      ], { cwd: repository, stdio: "inherit", timeout: 5 * 60_000 });
+      if (result.error !== undefined) throw result.error;
+      if (result.status !== 0) throw new Error("private element worker minification failed");
+    }
+  })
 });
 
 export async function buildFreshPublicDistributions(root) {
@@ -84,26 +78,19 @@ export async function buildFreshElementDistribution(root) {
 }
 
 async function stagePublicDistribution({ repository, name, temporary, staged }) {
-  const short = releasePackageDirectory(name);
+  const specification = releasePackageSpecification(name);
+  const short = specification.directory;
   const distribution = join(temporary, "dist", short);
   await mkdir(distribution, { recursive: true });
   const config = join(temporary, `tsconfig.${short}.json`);
-  await writeFile(config, `${JSON.stringify(privateBuildConfig(repository, name, distribution, staged), null, 2)}\n`, { flag: "wx", mode: 0o400 });
+  await writeFile(config, `${JSON.stringify(privateBuildConfig(repository, specification, distribution, staged), null, 2)}\n`, { flag: "wx", mode: 0o400 });
   const source = packageDirectory(repository, name, "src");
-  const sourceFiles = listProgramSourceFiles({ repository, config, source, packageName: name });
+  const sourceFiles = listProgramSourceFiles({ repository, config, source, specification });
   const result = spawnSync(process.execPath, [resolve(repository, "node_modules/typescript/bin/tsc"), "-p", config, "--pretty", "false"], { cwd: repository, stdio: "inherit", timeout: 5 * 60_000 });
   if (result.error !== undefined) throw result.error;
   if (result.status !== 0) throw new Error(`private fresh public build failed for ${name}`);
-  if (name === "@pixel-point/aval-element") {
-    const minify = spawnSync(process.execPath, [
-      resolve(repository, "scripts/release/minify-element-worker.mjs"),
-      "--out",
-      distribution
-    ], { cwd: repository, stdio: "inherit", timeout: 5 * 60_000 });
-    if (minify.error !== undefined) throw minify.error;
-    if (minify.status !== 0) throw new Error("private element worker minification failed");
-  }
-  if (name === "@pixel-point/aval-compiler") await ensureCompilerCliExecutable(join(distribution, "cli.js"));
+  for (const stepName of specification.buildConfig.buildSteps) reviewedBuildStep(stepName).run({ repository, distribution });
+  for (const target of Object.values(specification.bin)) await ensureCompilerCliExecutable(distributionEntry(distribution, target));
   await assertDistributionDerived({ source, sourceFiles, distribution, packageName: name });
   return distribution;
 }
@@ -139,41 +126,35 @@ export async function installVerifiedDistributions({ root, staged, backupRoot, r
   }
 }
 
-function privateBuildConfig(root, name, distribution, staged) {
-  const source = packageDirectory(root, name, "src");
-  const short = releasePackageDirectory(name);
-  const buildInfo = [...BUILD_INFO[name]][0];
+function privateBuildConfig(root, specification, distribution, staged) {
+  const source = packageDirectory(root, specification.name, "src");
+  const build = specification.buildConfig;
   const paths = Object.fromEntries([...staged].map(([packageName, path]) => [packageName, [join(path, "index.d.ts")]]));
   const config = {
-    extends: packageDirectory(root, name, RELEASE_CONFIG[name]),
+    extends: packageDirectory(root, specification.name, build.config),
     compilerOptions: {
-      ...(name === "@pixel-point/aval-element" ? { composite: false, incremental: true } : {}),
+      ...build.compilerOptions,
       rootDir: source,
       outDir: distribution,
-      tsBuildInfoFile: join(distribution, buildInfo),
+      tsBuildInfoFile: join(distribution, specification.buildInfo),
       paths
     }
   };
-  if (name === "@pixel-point/aval-element") {
+  if (build.source.kind === "files") {
     return {
       ...config,
-      files: ELEMENT_RELEASE_TYPESCRIPT_ROOTS.map((path) => slash(join(source, path))),
+      files: [...build.source.paths, ...build.additionalSources].map((path) => slash(join(source, path))),
       include: []
     };
   }
   return {
     ...config,
-    include: [
-      slash(join(source, "**/*.ts")),
-      ...(name === COMPILER_WORKER_REGISTRY_ENTRY.packageName
-        ? [slash(join(source, COMPILER_WORKER_REGISTRY_ENTRY.output))]
-        : [])
-    ],
-    exclude: [slash(join(source, "**/*.test.ts")), slash(join(source, "**/*.compile.ts")), slash(join(source, "**/*test-support.ts"))]
+    include: [...build.source.include, ...build.additionalSources].map((path) => slash(join(source, path))),
+    exclude: build.source.exclude.map((path) => slash(join(source, path)))
   };
 }
 
-function listProgramSourceFiles({ repository, config, source, packageName }) {
+function listProgramSourceFiles({ repository, config, source, specification }) {
   const result = spawnSync(process.execPath, [
     resolve(repository, "node_modules/typescript/bin/tsc"),
     "-p",
@@ -186,7 +167,7 @@ function listProgramSourceFiles({ repository, config, source, packageName }) {
   if (result.status !== 0) {
     if (result.stdout) process.stderr.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
-    throw new Error(`private release source-closure discovery failed for ${packageName}`);
+    throw new Error(`private release source-closure discovery failed for ${specification.name}`);
   }
   const sourceRoot = resolve(source);
   const prefix = `${sourceRoot}${sep}`;
@@ -198,10 +179,10 @@ function listProgramSourceFiles({ repository, config, source, packageName }) {
     .filter((path) => path.startsWith(prefix))
     .map((path) => slash(relative(sourceRoot, path)))
     .sort(compareText);
-  if (sourceFiles.length === 0) throw new Error(`${packageName} compiler program has no package source files`);
-  if (new Set(sourceFiles).size !== sourceFiles.length) throw new Error(`${packageName} compiler program contains duplicate package source files`);
+  if (sourceFiles.length === 0) throw new Error(`${specification.name} compiler program has no package source files`);
+  if (new Set(sourceFiles).size !== sourceFiles.length) throw new Error(`${specification.name} compiler program contains duplicate package source files`);
   for (const path of sourceFiles) {
-    if (!isReleaseSource(path, packageName)) throw new Error(`${packageName} compiler program contains non-release source: ${path}`);
+    if (!isReleaseSource(path, specification)) throw new Error(`${specification.name} compiler program contains non-release source: ${path}`);
   }
   return Object.freeze(sourceFiles);
 }
@@ -222,14 +203,14 @@ async function pathExists(path) { try { await lstat(path); return true; } catch 
 function slash(path) { return path.split(sep).join("/"); }
 
 export async function assertDistributionDerived({ source, sourceFiles, distribution, packageName }) {
+  const specification = releasePackageSpecification(packageName);
   if (!Array.isArray(sourceFiles) || sourceFiles.length === 0) throw new Error(`${packageName} has no compiler-derived release source files`);
-  const availableSources = new Set((await collectFiles(resolve(source))).filter((path) => isReleaseSource(path, packageName)));
+  const availableSources = new Set((await collectFiles(resolve(source))).filter((path) => isReleaseSource(path, specification)));
   const reviewedSources = [...sourceFiles].sort(compareText);
   if (new Set(reviewedSources).size !== reviewedSources.length) throw new Error(`${packageName} release source closure contains duplicates`);
   for (const path of reviewedSources) {
-    if (!isReleaseSource(path, packageName) || !availableSources.has(path)) throw new Error(`${packageName} release source closure contains an invalid source: ${path}`);
+    if (!isReleaseSource(path, specification) || !availableSources.has(path)) throw new Error(`${packageName} release source closure contains an invalid source: ${path}`);
   }
-  if (!BUILD_INFO[packageName]) throw new Error(`${packageName} has no reviewed release emission contract`);
   const expected = new Set();
   for (const path of reviewedSources) {
     if (path.endsWith(".json")) {
@@ -237,16 +218,18 @@ export async function assertDistributionDerived({ source, sourceFiles, distribut
       continue;
     }
     if (path.endsWith(".d.ts")) continue;
-    const stem = path.slice(0, -3);
+    const stem = path.endsWith(".tsx") ? path.slice(0, -4) : path.slice(0, -3);
     expected.add(`${stem}.js`);
     expected.add(`${stem}.d.ts`);
-    if (SOURCE_MAP_PACKAGES.has(packageName)) {
+    if (specification.buildConfig.sourceMaps) {
       expected.add(`${stem}.js.map`);
       expected.add(`${stem}.d.ts.map`);
     }
   }
-  if (packageName === "@pixel-point/aval-element") expected.add(ELEMENT_RELEASE_WORKER.output);
-  for (const name of BUILD_INFO[packageName]) expected.add(name);
+  for (const stepName of specification.buildConfig.buildSteps) {
+    for (const output of reviewedBuildStep(stepName).outputs) expected.add(output);
+  }
+  expected.add(specification.buildInfo);
   const outputs = await collectFiles(resolve(distribution));
   for (const path of outputs) {
     if (!expected.has(path)) throw new Error(`${packageName} distribution output is not in the exact release emission contract: ${path}`);
@@ -268,11 +251,19 @@ async function collectFiles(root, directory = root, output = []) {
   return output;
 }
 
-function isReleaseSource(path, packageName) {
-  return packageName === COMPILER_WORKER_REGISTRY_ENTRY.packageName &&
-      path === COMPILER_WORKER_REGISTRY_ENTRY.output ||
-    path.endsWith(".ts") && !/\.(?:test|compile)\.ts$/u.test(path) &&
-      !/test-support\.ts$/u.test(path);
+function isReleaseSource(path, specification) {
+  return specification.buildConfig.additionalSources.includes(path) ||
+    /\.tsx?$/u.test(path) && !/\.(?:test|compile)\.tsx?$/u.test(path) &&
+      !/test-support\.tsx?$/u.test(path);
 }
 function packageDirectory(root, name, child) { return resolve(root, "packages", releasePackageDirectory(name), child); }
+function reviewedBuildStep(name) {
+  const step = BUILD_STEPS[name];
+  if (step === undefined) throw new Error(`unknown reviewed release build step: ${String(name)}`);
+  return step;
+}
+function distributionEntry(distribution, target) {
+  if (typeof target !== "string" || !target.startsWith("./dist/") || target.includes("..") || target.includes("\\")) throw new Error(`release bin target is unsafe: ${String(target)}`);
+  return join(distribution, target.slice("./dist/".length));
+}
 function compareText(left, right) { return left < right ? -1 : left > right ? 1 : 0; }

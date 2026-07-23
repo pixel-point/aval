@@ -8,7 +8,7 @@ on:
       release-artifact: { description: Exact final-release artifact name, required: true, type: string }
       candidate-manifest-sha256: { description: Reviewed candidate manifest SHA-256, required: true, type: string }
       release-manifest-sha256: { description: Reviewed release manifest SHA-256, required: true, type: string }
-      release-set-sha256: { description: Reviewed five-package release-set SHA-256, required: true, type: string }
+      release-set-sha256: { description: Reviewed public-package release-set SHA-256, required: true, type: string }
       publish-approval-id: { description: Protected next-publication approval ID, required: true, type: string }
       promotion-approval-id: { description: Separate protected latest-promotion approval ID, required: true, type: string }
 

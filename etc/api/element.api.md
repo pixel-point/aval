@@ -305,6 +305,8 @@ export interface AvalElement extends HTMLElement {
         readonly trace?: boolean;
     }>): Readonly<AvalDiagnostics>;
     // (undocumented)
+    getSnapshot(): Readonly<AvalSnapshot>;
+    // (undocumented)
     height: number | null;
     // (undocumented)
     readonly inputBindings: readonly Readonly<Binding>[];
@@ -348,6 +350,8 @@ export interface AvalElement extends HTMLElement {
     readonly stateNames: readonly string[];
     // (undocumented)
     readonly staticReason: StaticReason | null;
+    // (undocumented)
+    subscribe(listener: () => void): () => void;
     // (undocumented)
     readonly visualState: string | null;
     // (undocumented)
@@ -632,6 +636,42 @@ export interface AvalRuntimeTraceRecord {
     readonly settledRequestIds: readonly number[];
     // (undocumented)
     readonly submitted: readonly Readonly<AvalRuntimeMediaCursor>[];
+}
+
+// @public
+export interface AvalSnapshot {
+    // (undocumented)
+    readonly assurance: "best-effort" | null;
+    // (undocumented)
+    readonly connected: boolean;
+    // (undocumented)
+    readonly effectivelyVisible: boolean;
+    // (undocumented)
+    readonly eventNames: readonly string[];
+    // (undocumented)
+    readonly generation: number;
+    // (undocumented)
+    readonly inputBindings: readonly Readonly<Binding>[];
+    // (undocumented)
+    readonly isTransitioning: boolean;
+    // (undocumented)
+    readonly lastError: Readonly<AvalErrorDetail> | null;
+    // (undocumented)
+    readonly mode: AvalMode;
+    // (undocumented)
+    readonly paused: boolean;
+    // (undocumented)
+    readonly readiness: RuntimeReadiness;
+    // (undocumented)
+    readonly requestedState: string | null;
+    // (undocumented)
+    readonly revision: number;
+    // (undocumented)
+    readonly stateNames: readonly string[];
+    // (undocumented)
+    readonly staticReason: StaticReason | null;
+    // (undocumented)
+    readonly visualState: string | null;
 }
 
 // @public (undocumented)

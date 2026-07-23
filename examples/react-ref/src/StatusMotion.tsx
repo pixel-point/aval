@@ -1,81 +1,46 @@
-import { useCallback, useState } from "react";
 import {
-  defineAvalElement,
-  type AvalElement,
+  useAval,
+  type AvalBindingTarget,
   type AvalErrorDetail,
-  type AvalSourceCodec,
-  type AvalVisualStateChangeDetail
-} from "@pixel-point/aval-element";
+  type AvalSources
+} from "@pixel-point/aval-react";
 
 export interface StatusMotionProps {
   readonly state: string;
-  readonly sources: readonly Readonly<StatusMotionSource>[];
+  readonly sources: AvalSources;
+  readonly bindTo?: AvalBindingTarget;
   readonly onError?: (failure: Readonly<AvalErrorDetail>) => void;
-  readonly onVisualState?: (state: string | null) => void;
-}
-
-export interface StatusMotionSource {
-  readonly src: string;
-  readonly codec: AvalSourceCodec;
+  readonly onVisual?: (state: string | null) => void;
 }
 
 export function StatusMotion({
   state,
   sources,
+  bindTo,
   onError,
-  onVisualState
+  onVisual
 }: StatusMotionProps) {
-  const [failed, setFailed] = useState(false);
-
-  const attachMotion = useCallback((element: AvalElement | null) => {
-    if (element === null) return;
-    const handleError = (event: CustomEvent<Readonly<AvalErrorDetail>>) => {
-      if (!event.detail.fatal) return;
-      setFailed(true);
-      onError?.(event.detail);
-    };
-    const handleReadiness = () => {
-      if (element.readiness === "interactiveReady") setFailed(false);
-    };
-    const handleVisualState = (
-      event: CustomEvent<Readonly<AvalVisualStateChangeDetail>>
-    ) => {
-      onVisualState?.(event.detail.to);
-    };
-    const detach = () => {
-      element.removeEventListener("error", handleError);
-      element.removeEventListener("readinesschange", handleReadiness);
-      element.removeEventListener("visualstatechange", handleVisualState);
-    };
-    element.addEventListener("error", handleError);
-    element.addEventListener("readinesschange", handleReadiness);
-    element.addEventListener("visualstatechange", handleVisualState);
-    try {
-      defineAvalElement();
-    } catch (error) {
-      detach();
-      throw error;
+  const { aval, AvalComponent } = useAval({
+    sources,
+    state,
+    autoplay: true,
+    autoBind: true,
+    onVisualStateChange: ({ to }) => onVisual?.(to),
+    onError: (detail) => {
+      if (!detail.fatal) return;
+      onError?.(detail);
     }
-    return detach;
-  }, [onError, onVisualState]);
+  });
 
   return <>
-    <aval-player
-      ref={attachMotion}
-      state={state}
+    <AvalComponent
       width={160}
       height={160}
-      aria-hidden="true"
-    >
-      {sources.map((source) => (
-        <source
-          key={`${source.src}:${source.codec}`}
-          src={source.src}
-          data-codec={source.codec}
-        />
-      ))}
-    </aval-player>
-    {failed && (
+      bindTo={bindTo}
+      data-mounted={aval.mounted ? "true" : "false"}
+      aria-hidden
+    />
+    {aval.lastError?.fatal === true && (
       <span className="motion-fallback" aria-hidden="true">{state}</span>
     )}
   </>;

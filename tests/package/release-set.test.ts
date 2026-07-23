@@ -1,19 +1,22 @@
 import { gunzipSync, gzipSync } from "node:zlib";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { inspectTarballBytes } from "../../scripts/release/inspect-tarball.mjs";
+import { packInstalledClosure } from "../../scripts/release/local-package-archives.mjs";
 import { ELEMENT_RELEASE_WORKER } from "../../scripts/release/element-release-contract.mjs";
-import { validatePublishManifest } from "../../scripts/release/publish-manifest.mjs";
+import { createPublishManifest, validatePublishManifest } from "../../scripts/release/publish-manifest.mjs";
 import { COMPILER_WORKER_REGISTRY_ENTRY } from "../../scripts/release/worker-entry-contract.mjs";
 import {
+  PRODUCTION_PUBLIC_ENTRIES,
   RELEASE_PACKAGE_NAMES,
   RELEASE_PACKAGE_SPECS,
   loadVerifiedReleaseSet,
   releaseArchiveFilename,
   releasePackageDirectory,
+  releasePackageSpecification,
   releaseSetSummary,
   topologicalPackageOrder,
   validateReleasePackageManifests
@@ -21,16 +24,33 @@ import {
 
 const policy = { releaseVersion: "1.0.0" as const, publicPackages: RELEASE_PACKAGE_NAMES };
 
-describe("verified five-package release set", () => {
+describe("verified six-package release set", () => {
   it("derives the one safe publication order and rejects graph drift", () => {
     expect(RELEASE_PACKAGE_NAMES).toEqual([
       "@pixel-point/aval-graph",
       "@pixel-point/aval-format",
       "@pixel-point/aval-element",
       "@pixel-point/aval-player-web",
-      "@pixel-point/aval-compiler"
+      "@pixel-point/aval-compiler",
+      "@pixel-point/aval-react"
     ]);
-    expect(RELEASE_PACKAGE_SPECS.map(({ directory }) => directory)).toEqual(["graph", "format", "player-web", "element", "compiler"]);
+    expect(RELEASE_PACKAGE_SPECS.map(({ directory }) => directory)).toEqual(["graph", "format", "player-web", "element", "compiler", "react"]);
+    for (const specification of RELEASE_PACKAGE_SPECS) {
+      expect(Object.isFrozen(specification)).toBe(true);
+      expect(Object.isFrozen(specification.peerDependencies)).toBe(true);
+      expect(Object.isFrozen(specification.exports)).toBe(true);
+      expect(Object.isFrozen(specification.bin)).toBe(true);
+      expect(Object.isFrozen(specification.buildConfig)).toBe(true);
+      expect(Object.isFrozen(specification.buildConfig.source)).toBe(true);
+      expect(Object.isFrozen(specification.productionEntries)).toBe(true);
+      expect(typeof specification.buildInfo).toBe("string");
+    }
+    expect(releasePackageSpecification("@pixel-point/aval-compiler").productionEntries).toEqual([]);
+    for (const entry of PRODUCTION_PUBLIC_ENTRIES) {
+      const specification = releasePackageSpecification(entry.package);
+      expect(specification.productionEntries).toContainEqual({ export: entry.export, requiredInGraph: entry.requiredInGraph });
+      expect(specification.exports[entry.export]).toEqual(expect.objectContaining({ import: `./${entry.path}` }));
+    }
     expect(releaseArchiveFilename("@pixel-point/aval-graph")).toBe("pixel-point-aval-graph-1.0.0.tgz");
     expect(() => releaseArchiveFilename("@pixel-point/aval-unknown")).toThrow(/unknown release package/u);
     expect(topologicalPackageOrder(RELEASE_PACKAGE_SPECS)).toEqual(RELEASE_PACKAGE_NAMES);
@@ -45,7 +65,7 @@ describe("verified five-package release set", () => {
     const manifests = RELEASE_PACKAGE_SPECS.map(({ name, dependencies }) => packageManifest(name, dependencies));
     expect(validateReleasePackageManifests(manifests).map(({ name }) => name)).toEqual(RELEASE_PACKAGE_NAMES);
     expect(() => validateReleasePackageManifests([...manifests.slice(0, -1), manifests[0]!])).toThrow(/duplicate/u);
-    expect(() => validateReleasePackageManifests(manifests.slice(0, -1))).toThrow(/exactly five/u);
+    expect(() => validateReleasePackageManifests(manifests.slice(0, -1))).toThrow(/exactly 6/u);
     expect(() => validateReleasePackageManifests(manifests.map((manifest) => manifest.name === "@pixel-point/aval-graph"
       ? { ...manifest, dependencies: { "@pixel-point/aval-unknown": "1.0.0" } }
       : manifest))).toThrow(/exact reviewed set/u);
@@ -54,7 +74,7 @@ describe("verified five-package release set", () => {
       : manifest))).toThrow(/must be exactly/u);
   });
 
-  it("opens and reconciles exactly five canonical archive instances", async () => {
+  it("opens and reconciles exactly six canonical archive instances", async () => {
     const root = await mkdtemp(join(tmpdir(), "aval-release-set-"));
     try {
       for (const { name, dependencies } of RELEASE_PACKAGE_SPECS) {
@@ -69,7 +89,7 @@ describe("verified five-package release set", () => {
       substituted.packages[0]!.sha256 = "0".repeat(64);
       await expect(loadVerifiedReleaseSet({ directory: root, policy, packageIndex: substituted })).rejects.toThrow(/does not match archive bytes/u);
       await writeFile(join(root, "extra.tgz"), Buffer.from("not a tarball"));
-      await expect(loadVerifiedReleaseSet({ directory: root, policy })).rejects.toThrow(/exactly five/u);
+      await expect(loadVerifiedReleaseSet({ directory: root, policy })).rejects.toThrow(/exactly 6/u);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -80,7 +100,7 @@ describe("verified five-package release set", () => {
     try {
       for (const { name, dependencies } of RELEASE_PACKAGE_SPECS) await writeFile(join(root, filename(name)), packageArchive(packageManifest(name, dependencies)));
       await writeFile(join(root, ".swapped.tgz"), packageArchive(packageManifest("@pixel-point/aval-graph", [])));
-      await expect(loadVerifiedReleaseSet({ directory: root, policy })).rejects.toThrow(/exactly five/u);
+      await expect(loadVerifiedReleaseSet({ directory: root, policy })).rejects.toThrow(/exactly 6/u);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -96,7 +116,28 @@ describe("verified five-package release set", () => {
           await symlink("outside.tgz", join(root, filename(name)));
         } else await writeFile(join(root, filename(name)), archive);
       }
-      await expect(loadVerifiedReleaseSet({ directory: root, policy })).rejects.toThrow(/non-tarball|exactly five|symbolic/u);
+      await expect(loadVerifiedReleaseSet({ directory: root, policy })).rejects.toThrow(/non-tarball|exactly 6|symbolic/u);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("packs named installed dependencies and their manifest-derived closure once", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aval-local-closure-"));
+    try {
+      const modules = join(root, "node_modules");
+      await mkdir(join(modules, "fixture-root"), { recursive: true });
+      await mkdir(join(modules, "fixture-leaf"), { recursive: true });
+      await writeFile(join(modules, "fixture-root", "package.json"), `${JSON.stringify({ name: "fixture-root", version: "1.0.0", dependencies: { "fixture-leaf": "1.0.0" } })}\n`);
+      await writeFile(join(modules, "fixture-leaf", "package.json"), `${JSON.stringify({ name: "fixture-leaf", version: "1.0.0" })}\n`);
+      await expect(packInstalledClosure({
+        root,
+        destination: join(root, "archives"),
+        packages: ["fixture-root", "fixture-root"]
+      })).resolves.toEqual([
+        join(root, "archives", "fixture-root-1.0.0.tgz"),
+        join(root, "archives", "fixture-leaf-1.0.0.tgz")
+      ]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -173,7 +214,20 @@ describe("bounded tar inspection", () => {
 
   it("rejects external dependencies, unexpected bins/exports, and native distribution payloads", () => {
     const graph = packageManifest("@pixel-point/aval-graph", []);
+    const react = packageManifest("@pixel-point/aval-react", ["@pixel-point/aval-element"]);
+    const publishedReact = createPublishManifest({
+      ...react,
+      devDependencies: { "react-dom": "19.2.7" },
+      peerDependenciesMeta: { react: { optional: true } }
+    });
     expect(() => validatePublishManifest({ ...graph, dependencies: { leftpad: "1.3.0" } })).toThrow(/exact reviewed set/u);
+    expect(publishedReact.peerDependencies).toEqual({ react: "^18.3.0 || ^19.0.0" });
+    expect(publishedReact).not.toHaveProperty("devDependencies");
+    expect(publishedReact).not.toHaveProperty("peerDependenciesMeta");
+    expect(validatePublishManifest(react)).toBe(react);
+    expect(() => validatePublishManifest({ ...react, peerDependencies: { react: "^19.0.0" } })).toThrow(/peerDependencies/u);
+    expect(() => validatePublishManifest({ ...react, peerDependencies: undefined })).toThrow(/peerDependencies/u);
+    expect(() => validatePublishManifest({ ...graph, peerDependencies: { react: "^18.3.0 || ^19.0.0" } })).toThrow(/peerDependencies/u);
     expect(() => validatePublishManifest({ ...graph, bin: { surprise: "./dist/index.js" } })).toThrow(/bin map/u);
     expect(() => validatePublishManifest({ ...graph, exports: { ...graph.exports, "./private": "./dist/private.js" } })).toThrow(/reviewed public surface/u);
     expect(() => inspectTarballBytes(tarGzip([...baseEntries(graph), { path: "package/dist/native.node", bytes: Buffer.from("native") }]))).toThrow(/unreviewed distribution file type/u);
@@ -212,37 +266,38 @@ interface TestManifest {
   type: string;
   license: string;
   files: string[];
-  sideEffects: boolean | string[];
-  exports: Record<string, unknown>;
+  sideEffects: boolean | readonly string[];
+  exports: Readonly<Record<string, unknown>>;
   dependencies: Record<string, string>;
+  peerDependencies?: Readonly<Record<string, string>>;
   engines: { node: string };
   repository: { type: string; url: string; directory: string };
   homepage: string;
   bugs: { url: string };
-  bin?: Record<string, string>;
+  bin?: Readonly<Record<string, string>>;
   scripts?: Record<string, string>;
   publishConfig?: Record<string, string>;
 }
 
 function packageManifest(name: string, dependencies: readonly string[]): TestManifest {
-  const manifest: TestManifest = {
+  const specification = releasePackageSpecification(name);
+  return {
     name,
     version: "1.0.0",
     private: false,
     type: "module",
     license: "MIT",
     files: ["dist", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
-    sideEffects: name === "@pixel-point/aval-element" ? ["./dist/auto.js"] : false,
-    exports: { ".": { types: "./dist/index.d.ts", import: "./dist/index.js" } },
+    sideEffects: specification.sideEffects,
+    exports: specification.exports,
     dependencies: Object.fromEntries(dependencies.map((dependency) => [dependency, "1.0.0"])),
     engines: { node: ">=22.12.0" },
     repository: { type: "git", url: "https://example.test/aval.git", directory: `packages/${releasePackageDirectory(name)}` },
     homepage: "https://example.test/aval",
-    bugs: { url: "https://example.test/aval/issues" }
+    bugs: { url: "https://example.test/aval/issues" },
+    ...(Object.keys(specification.bin).length === 0 ? {} : { bin: specification.bin }),
+    ...(Object.keys(specification.peerDependencies).length === 0 ? {} : { peerDependencies: specification.peerDependencies })
   };
-  if (name === "@pixel-point/aval-compiler") manifest.bin = { avl: "./dist/cli.js" };
-  if (name === "@pixel-point/aval-element") manifest.exports["./auto"] = { types: "./dist/auto.d.ts", import: "./dist/auto.js" };
-  return manifest;
 }
 
 function packageArchive(manifest: TestManifest): Buffer {

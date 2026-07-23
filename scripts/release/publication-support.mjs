@@ -67,7 +67,7 @@ export async function loadRegistryConsumerEvidence({ path, expectedDigest, autho
   if (evidence === null || typeof evidence !== "object" || Array.isArray(evidence) || Object.keys(evidence).sort().join(",") !== [...allowed].sort().join(",")) throw new Error("registry-consumer evidence fields are invalid");
   if (evidence.schemaVersion !== "1.0" || evidence.evidenceKind !== "registry-consumers" || evidence.status !== "passed" || evidence.tag !== "next") throw new Error("registry-consumer evidence has not passed next-tag consumers");
   for (const [key, expected] of Object.entries({ candidateManifestDigest: authorization.digest, releaseManifestDigest: authorization.releaseDigest, releaseSetDigest: authorization.releaseSet.releaseSetDigest, registryUrl: authorization.policy.registry.url })) if (evidence[key] !== expected) throw new Error(`registry-consumer evidence ${key} mismatch`);
-  if (!Array.isArray(evidence.packages) || evidence.packages.length !== 5 || evidence.packages.some((name, index) => name !== authorization.releaseSet.order[index])) throw new Error("registry-consumer evidence package set/order mismatch");
+  if (!Array.isArray(evidence.packages) || evidence.packages.length !== authorization.releaseSet.order.length || evidence.packages.some((name, index) => name !== authorization.releaseSet.order[index])) throw new Error("registry-consumer evidence package set/order mismatch");
   return Object.freeze({ bytes, digest: expectedDigest, evidence });
 }
 

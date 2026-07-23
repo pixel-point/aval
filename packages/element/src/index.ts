@@ -24,6 +24,7 @@ export {
   type AvalRequestedStateChangeDetail,
   type AvalRuntimeMediaCursor,
   type AvalRuntimeTraceRecord,
+  type AvalSnapshot,
   type AvalSourceCodec,
   type AvalTransitionDetail,
   type AvalUnderflowDetail,

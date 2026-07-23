@@ -11,9 +11,9 @@ import { prepareImmutableReleaseSetOutput } from "./immutable-release-output.mjs
 import { createPublishManifest } from "./publish-manifest.mjs";
 import { validateApprovedPublicationMetadata } from "./publication-metadata.mjs";
 import { buildFreshPublicDistributions } from "./fresh-public-build.mjs";
-import { computeReleaseSetDigest, loadVerifiedReleaseSet, releasePackageDirectory, releaseSetSummary, validateReleasePackageManifests, validateReleasePolicy } from "./release-set.mjs";
+import { computeReleaseSetDigest, loadVerifiedReleaseSet, releasePackageDirectory, releasePackageSpecification, releaseSetSummary, validateReleasePackageManifests, validateReleasePolicy } from "./release-set.mjs";
 import { assertTestOnlyArchiveOutput, testOnlyPublicationMetadata } from "./test-only-archive-proof.mjs";
-import { COMPILER_WORKER_REGISTRY_ENTRY, RELEASE_WORKER_ENTRIES } from "./worker-entry-contract.mjs";
+import { RELEASE_WORKER_ENTRIES } from "./worker-entry-contract.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const policy = JSON.parse(await readFile(resolve(root, "config/release/release-policy.json"), "utf8"));
@@ -40,6 +40,7 @@ try {
   const packed = [];
   try {
     for (const name of policy.publicPackages) {
+      const specification = releasePackageSpecification(name);
       const short = releasePackageDirectory(name);
       const source = resolve(root, "packages", short);
       const manifest = JSON.parse(await readFile(join(source, "package.json"), "utf8"));
@@ -50,17 +51,14 @@ try {
       const publishManifest = createPublishManifest(manifest, publicationMetadata);
       await writeFile(join(staging, "package.json"), `${JSON.stringify(publishManifest, null, 2)}\n`, { flag: "wx", mode: 0o444 });
       const copied = [];
-      await copyDistribution(join(source, "dist"), join(staging, "dist"), copied, name);
-      requireEntry(copied, "index.js", name);
-      requireEntry(copied, "index.d.ts", name);
-      if (name === "@pixel-point/aval-compiler") {
-        requireEntry(copied, "cli.js", name);
-        requireEntry(copied, COMPILER_WORKER_REGISTRY_ENTRY.output, name);
-        await chmod(join(staging, "dist", "cli.js"), 0o755);
+      await copyDistribution(join(source, "dist"), join(staging, "dist"), copied, specification);
+      for (const target of manifestTargets(publishManifest.exports)) requireEntry(copied, distributionTarget(target), name);
+      for (const target of Object.values(specification.bin)) {
+        const relative = distributionTarget(target);
+        requireEntry(copied, relative, name);
+        await chmod(join(staging, "dist", relative), 0o755);
       }
-      if (name === "@pixel-point/aval-element") {
-        requireEntry(copied, "auto.js", name);
-      }
+      for (const required of specification.buildConfig.additionalSources) requireEntry(copied, required, name);
       for (const worker of RELEASE_WORKER_ENTRIES) {
         if (worker.packageName === name) requireEntry(copied, worker.output, name);
       }
@@ -97,7 +95,7 @@ try {
   await immutableOutput.dispose();
 }
 
-async function copyDistribution(source, target, copied, packageName, prefix = "") {
+async function copyDistribution(source, target, copied, specification, prefix = "") {
   for (const entry of await readdir(source, { withFileTypes: true })) {
     const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
     const sourcePath = join(source, entry.name);
@@ -105,21 +103,34 @@ async function copyDistribution(source, target, copied, packageName, prefix = ""
     if (entry.isSymbolicLink()) throw new Error(`distribution symlink is forbidden: ${relative}`);
     if (entry.isDirectory()) {
       await mkdir(targetPath, { recursive: true });
-      await copyDistribution(sourcePath, targetPath, copied, packageName, relative);
+      await copyDistribution(sourcePath, targetPath, copied, specification, relative);
       continue;
     }
     if (!entry.isFile()) throw new Error(`distribution entry is not a regular file: ${relative}`);
     if (/\.map$|\.tsbuildinfo$|(?:^|\/)[^/]+\.(?:test|compile)\.(?:js|d\.ts)$|test-support/iu.test(relative)) continue;
-    const isCanonicalCompilerRegistry =
-      packageName === COMPILER_WORKER_REGISTRY_ENTRY.packageName &&
-      relative === COMPILER_WORKER_REGISTRY_ENTRY.output;
-    if (!/\.(?:js|d\.ts)$/u.test(relative) && !isCanonicalCompilerRegistry) {
+    const isReviewedAdditionalSource = specification.buildConfig.additionalSources.includes(relative);
+    if (!/\.(?:js|d\.ts)$/u.test(relative) && !isReviewedAdditionalSource) {
       throw new Error(`unexpected distribution file type: ${relative}`);
     }
     if ((await stat(sourcePath)).size > 8 * 1024 * 1024) throw new Error(`distribution file is unexpectedly large: ${relative}`);
     await copyFile(sourcePath, targetPath);
     copied.push(relative);
   }
+}
+
+function manifestTargets(value, targets = []) {
+  if (typeof value === "string") {
+    targets.push(value);
+    return targets;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("reviewed package target map is invalid");
+  for (const target of Object.values(value)) manifestTargets(target, targets);
+  return targets;
+}
+
+function distributionTarget(target) {
+  if (typeof target !== "string" || !target.startsWith("./dist/") || target.includes("..") || target.includes("\\")) throw new Error(`reviewed distribution target is unsafe: ${String(target)}`);
+  return target.slice("./dist/".length);
 }
 
 function pack(staging, destination) {

@@ -21,8 +21,9 @@ const REQUIRED_CANDIDATE_ROLES = new Set([
   "release-policy", "legal-review", "license-report", "candidate-layout"
 ]);
 const ALLOWED_CANDIDATE_ROLES = new Set([...REQUIRED_CANDIDATE_ROLES, "project-metadata"]);
-const REQUIRED_SBOM_PATHS = new Set(["workspace", "graph", "format", "player-web", "element", "compiler"].map((name) => `sbom/${name}.spdx.json`));
-const REQUIRED_API_PATHS = new Set(["graph", "format", "player-web", "element", "compiler"].map((name) => `etc/api/${name}.api.md`));
+const RELEASE_PACKAGE_DIRECTORIES = PUBLIC_RELEASE_PACKAGES.map((name) => name.slice("@pixel-point/aval-".length));
+const REQUIRED_SBOM_PATHS = new Set(["workspace", ...RELEASE_PACKAGE_DIRECTORIES].map((name) => `sbom/${name}.spdx.json`));
+const REQUIRED_API_PATHS = new Set(RELEASE_PACKAGE_DIRECTORIES.map((name) => `etc/api/${name}.api.md`));
 
 export function candidateManifestDigest(manifest: CandidateManifest): string {
   validateCandidateManifest(manifest);
@@ -153,7 +154,7 @@ function validateCandidateArtifacts(values: readonly unknown[]): void {
     boundedInteger(artifact.byteLength, `${path}.byteLength`, 0, MAX_REFERENCE_BYTES);
     if (mediaType(artifact.mediaType, `${path}.mediaType`) !== artifact.mediaType) fail(`${path}.mediaType`, "media type must be lowercase canonical text");
   }
-  if (packagePaths.size !== PACKAGE_ARTIFACT_PATHS.size) fail("candidate.artifacts", "candidate must bind the exact five-package release set");
+  if (packagePaths.size !== PACKAGE_ARTIFACT_PATHS.size) fail("candidate.artifacts", "candidate must bind the exact public-package release set");
   for (const required of REQUIRED_CANDIDATE_ROLES) if (!roles.has(required)) fail("candidate.artifacts", `candidate is missing required artifact role ${required}`);
   for (const requiredPath of ["package-index.json", "package-inspection.json", "config/release/release-policy.json", "config/release/publication-metadata.json", "config/release/legal-review.json", "license-report.json", "candidate-layout.json", "package-lock.json", "certification.html", "assets/public-entry-manifest.json"]) {
     if (!paths.has(requiredPath)) fail("candidate.artifacts", `candidate is missing required artifact path ${requiredPath}`);

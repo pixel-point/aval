@@ -5,17 +5,31 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+import { RELEASE_PACKAGE_NAMES, releaseArchiveFilename } from "./release-set-model.mjs";
+import { packInstalledClosure } from "./local-package-archives.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const directoryIndex = process.argv.indexOf("--packages");
 const packageDirectory = resolve(root, directoryIndex < 0 ? "artifacts/1.0.0/packages" : process.argv[directoryIndex + 1]);
-const archives = (await readdir(packageDirectory)).filter((name) => name.endsWith(".tgz")).map((name) => join(packageDirectory, name));
-if (archives.length !== 5) throw new Error(`expected five package archives, found ${archives.length}`);
+const archiveNames = (await readdir(packageDirectory)).filter((name) => name.endsWith(".tgz")).sort();
+const expectedArchiveNames = RELEASE_PACKAGE_NAMES.map((name) => releaseArchiveFilename(name)).sort();
+if (JSON.stringify(archiveNames) !== JSON.stringify(expectedArchiveNames)) throw new Error(`expected the exact public package archives, found ${JSON.stringify(archiveNames)}`);
+const archives = archiveNames.map((name) => join(packageDirectory, name));
 const temporary = await mkdtemp(join(tmpdir(), "aval-consumers-"));
 try {
+  const peerDirectory = join(temporary, "peers");
+  const reactPeerArchives = await packInstalledClosure({
+    root,
+    destination: peerDirectory,
+    packages: ["react", "@types/react"]
+  });
+  const expectedReact = JSON.parse(await readFile(resolve(root, "node_modules/react/package.json"), "utf8"));
   for (const fixture of ["node-esm", "typescript-nodenext", "typescript-bundler", "browser-vite"]) {
     const target = join(temporary, fixture);
     await cp(resolve(root, "tests/consumers", fixture), target, { recursive: true });
-    run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--offline", "--cache", join(temporary, "npm-cache"), ...archives], target, 120_000);
+    run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--offline", "--cache", join(temporary, "npm-cache"), ...reactPeerArchives, ...archives], target, 120_000);
+    const installedReact = JSON.parse(await readFile(join(target, "node_modules/react/package.json"), "utf8"));
+    if (installedReact.version !== expectedReact.version) throw new Error(`packed consumer React peer version drifted: ${String(installedReact.version)}`);
     if (fixture === "node-esm") run(process.execPath, ["index.mjs"], target, 30_000);
     else if (fixture === "browser-vite") run(process.execPath, [resolve(root, "node_modules/vite/bin/vite.js"), "build"], target, 60_000);
     else run(process.execPath, [resolve(root, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.json"], target, 60_000);
@@ -24,7 +38,7 @@ try {
   if (compilerArchive === undefined) throw new Error("compiler archive is missing");
   const cliRoot = join(temporary, "cli");
   await cp(resolve(root, "tests/consumers/node-esm"), cliRoot, { recursive: true });
-  run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--offline", "--cache", join(temporary, "npm-cache"), ...archives], cliRoot, 120_000);
+  run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--offline", "--cache", join(temporary, "npm-cache"), ...reactPeerArchives, ...archives], cliRoot, 120_000);
   const cli = resolve(cliRoot, "node_modules/@pixel-point/aval-compiler/dist/cli.js");
   run(process.execPath, [cli, "--help"], cliRoot, 30_000);
   const invalid = spawnSync(process.execPath, [cli, "validate", "missing.avl"], { cwd: cliRoot, encoding: "utf8", timeout: 30_000 });

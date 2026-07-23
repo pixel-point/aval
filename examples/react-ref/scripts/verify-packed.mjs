@@ -14,10 +14,10 @@ if (packagesFlag < 0 || process.argv[packagesFlag + 1] === undefined) {
 const packageDirectory = resolve(process.cwd(), process.argv[packagesFlag + 1]);
 const packageJson = JSON.parse(await readFile(join(example, "package.json"), "utf8"));
 if (
-  packageJson.peerDependencies?.["@pixel-point/aval-element"] !== "1.0.0" ||
-  packageJson.peerDependenciesMeta?.["@pixel-point/aval-element"]?.optional !== true
+  packageJson.peerDependencies?.["@pixel-point/aval-react"] !== "1.0.0" ||
+  packageJson.peerDependenciesMeta?.["@pixel-point/aval-react"]?.optional !== true
 ) {
-  throw new Error("React example must target the exact optional element 1.0.0 peer");
+  throw new Error("React example must target the exact optional React 1.0.0 peer");
 }
 
 const archives = (await readdir(packageDirectory))
@@ -26,6 +26,9 @@ const archives = (await readdir(packageDirectory))
   .map((name) => join(packageDirectory, name));
 if (!archives.some((path) => basename(path) === "pixel-point-aval-element-1.0.0.tgz")) {
   throw new Error("packed React verification requires the element archive");
+}
+if (!archives.some((path) => basename(path) === "pixel-point-aval-react-1.0.0.tgz")) {
+  throw new Error("packed React verification requires the React archive");
 }
 
 const temporary = await mkdtemp(join(tmpdir(), "aval-react-example-"));
@@ -63,6 +66,13 @@ try {
   if (installedElement.version !== "1.0.0") {
     throw new Error(`React example installed element ${String(installedElement.version)}, expected 1.0.0`);
   }
+  const installedReact = JSON.parse(await readFile(
+    join(target, "node_modules", "@pixel-point", "aval-react", "package.json"),
+    "utf8"
+  ));
+  if (installedReact.version !== "1.0.0") {
+    throw new Error(`React example installed adapter ${String(installedReact.version)}, expected 1.0.0`);
+  }
   run("npm", ["run", "typecheck"], target, 60_000);
   run("npm", ["run", "build"], target, 60_000);
   const builtIndex = join(target, "dist/index.html");
@@ -72,6 +82,7 @@ try {
   process.stdout.write(`${JSON.stringify({
     status: "passed",
     elementVersion: installedElement.version,
+    reactAdapterVersion: installedReact.version,
     archives: archives.length,
     typecheck: "passed",
     build: "passed"

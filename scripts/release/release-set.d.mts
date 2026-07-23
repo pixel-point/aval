@@ -3,6 +3,18 @@ export interface ReleasePolicy {
   readonly publicPackages: readonly string[];
 }
 
+export {
+  RELEASE_PACKAGE_NAMES,
+  RELEASE_PACKAGE_SPECS,
+  RELEASE_VERSION,
+  PRODUCTION_PUBLIC_ENTRIES,
+  releaseArchiveFilename,
+  releasePackageDirectory,
+  releasePackageSpecification,
+  topologicalPackageOrder
+} from "./release-set-model.mjs";
+export type { ProductionPublicEntryDefinition, ReleaseBuildConfig, ReleaseBuildSource, ReleasePackageName, ReleasePackageSpecification, ReleaseProductionEntrySelection } from "./release-set-model.mjs";
+
 export interface InspectedReleasePackage {
   readonly name: string;
   readonly version: "1.0.0";
@@ -18,12 +30,6 @@ export interface InspectedReleasePackage {
   readonly manifest: Readonly<Record<string, unknown>>;
 }
 
-export const RELEASE_VERSION: "1.0.0";
-export const RELEASE_PACKAGE_NAMES: readonly string[];
-export const RELEASE_PACKAGE_SPECS: readonly Readonly<{ name: string; directory: string; dependencies: readonly string[] }>[];
-export function releasePackageDirectory(name: string): string;
-export function releaseArchiveFilename(name: string): string;
-export function topologicalPackageOrder(specifications: readonly Readonly<{ name: string; dependencies: readonly string[] }>[]): string[];
 export function validateReleasePolicy<T extends ReleasePolicy>(policy: T): T;
 export function validateReleasePackageManifests<T extends object>(manifests: readonly T[]): readonly T[];
 export function computeReleaseSetDigest(packages: readonly InspectedReleasePackage[]): string;

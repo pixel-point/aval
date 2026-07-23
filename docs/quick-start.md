@@ -77,6 +77,41 @@ A one-state compiled body loops without JavaScript seeking or a loop range.
 The package root is SSR-safe and has no registration side effect. Client-only
 pages may instead import `@pixel-point/aval-element/auto`.
 
+## React applications
+
+Install `@pixel-point/aval-react@1.0.0` and pass the compiled asset URLs
+directly to `useAval()`:
+
+```tsx
+import { useAval } from "@pixel-point/aval-react";
+
+export function Motion() {
+  const { aval, AvalComponent } = useAval({
+    sources: {
+      av1: "/my-motion/av1.avl",
+      vp9: "/my-motion/vp9.avl",
+      h265: "/my-motion/h265.avl",
+      h264: "/my-motion/h264.avl"
+    },
+    state: "idle",
+    autoplay: true,
+    autoBind: true
+  });
+
+  return (
+    <>
+      <AvalComponent width={320} height={320} aria-hidden />
+      {aval.lastError?.fatal && <img src="/my-motion.png" alt="" />}
+    </>
+  );
+}
+```
+
+The adapter renders the direct source children, installs failure listeners
+before registration, and is safe to import during server rendering. See the
+[React integration guide](element/react.md) for state timing, authored events,
+manual playback, and binding a motion to another semantic control.
+
 The compiler requires a caller-installed FFmpeg/FFprobe build with libx264. It
 never downloads or bundles native tools. See [compiler setup](compiler.md) and
 [browser support](browser-support.md). See

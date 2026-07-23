@@ -4,13 +4,24 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
+import { RELEASE_PACKAGE_NAMES, releaseArchiveFilename } from "../release/release-set-model.mjs";
+import { packInstalledClosure } from "../release/local-package-archives.mjs";
+
 const directoryIndex = process.argv.indexOf("--packages");
 const packageDirectory = resolve(directoryIndex < 0 ? "artifacts/1.0.0/packages" : process.argv[directoryIndex + 1]);
-const archives = (await readdir(packageDirectory)).filter((name) => name.endsWith(".tgz")).map((name) => join(packageDirectory, name));
-if (archives.length !== 5) throw new Error("example test requires the exact five-package candidate set");
+const archiveNames = (await readdir(packageDirectory)).filter((name) => name.endsWith(".tgz")).sort();
+const expectedArchiveNames = RELEASE_PACKAGE_NAMES.map((name) => releaseArchiveFilename(name)).sort();
+if (JSON.stringify(archiveNames) !== JSON.stringify(expectedArchiveNames)) throw new Error("example test requires the exact public-package candidate set");
+const archives = archiveNames.map((name) => join(packageDirectory, name));
 const examples = ["zero-config-loop", "idle-hover-states", "network-integrity", "plain-html"];
 const temporary = await mkdtemp(join(tmpdir(), "aval-examples-"));
 try {
+  const peerDirectory = join(temporary, "peers");
+  const reactPeerArchives = await packInstalledClosure({
+    root: resolve("."),
+    destination: peerDirectory,
+    packages: ["react", "@types/react"]
+  });
   for (const name of examples) {
     const target = join(temporary, name);
     await cp(resolve("examples", name), target, { recursive: true });
@@ -21,7 +32,7 @@ try {
     }
     delete manifest.devDependencies;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--offline", ...archives], target, 120_000);
+    run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--offline", "--cache", join(temporary, "npm-cache"), ...reactPeerArchives, ...archives], target, 120_000);
     run(process.execPath, [resolve("node_modules/vite/bin/vite.js"), "build"], target, 60_000);
   }
   run(process.execPath, [

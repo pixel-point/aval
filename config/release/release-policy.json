@@ -9,7 +9,8 @@
     "@pixel-point/aval-format",
     "@pixel-point/aval-element",
     "@pixel-point/aval-player-web",
-    "@pixel-point/aval-compiler"
+    "@pixel-point/aval-compiler",
+    "@pixel-point/aval-react"
   ],
   "registry": { "url": "https://registry.npmjs.org/" },
   "toolchain": {

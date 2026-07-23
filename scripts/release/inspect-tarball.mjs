@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 import { validatePublishManifest } from "./publish-manifest.mjs";
+import { releasePackageSpecification } from "./release-set-model.mjs";
 import { COMPILER_WORKER_REGISTRY_ENTRY, RELEASE_WORKER_ENTRIES } from "./worker-entry-contract.mjs";
 
 const TAR_BLOCK_BYTES = 512;
@@ -131,8 +132,11 @@ function parseTar(bytes, label, maximumEntryBytes) {
 }
 
 function validatePackageContents(entries, manifest, label) {
+  const specification = releasePackageSpecification(manifest.name);
   const filePaths = new Set(entries.filter(({ kind }) => kind === "file").map(({ path }) => path));
   const compilerRegistryPath = `dist/${COMPILER_WORKER_REGISTRY_ENTRY.output}`;
+  const additionalSourcePaths = new Set(specification.buildConfig.additionalSources.map((path) => `dist/${path}`));
+  const executablePaths = new Set(Object.values(specification.bin).map((target) => target.slice(2)));
   for (const entry of entries) {
     if (!entry.path.startsWith("package/")) throw new Error(`${label} contains a path outside the package root: ${entry.path}`);
     if (entry.kind !== "file") continue;
@@ -143,24 +147,19 @@ function validatePackageContents(entries, manifest, label) {
     if (!new Set(["package.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]).has(relative) && !relative.startsWith("dist/")) {
       throw new Error(`${label} contains an undeclared package-root file: ${relative}`);
     }
-    const isCanonicalCompilerRegistry =
-      manifest.name === COMPILER_WORKER_REGISTRY_ENTRY.packageName &&
-      relative === compilerRegistryPath;
-    if (relative.startsWith("dist/") && !/\.(?:js|d\.ts)$/u.test(relative) && !isCanonicalCompilerRegistry) {
+    const isReviewedAdditionalSource = additionalSourcePaths.has(relative);
+    if (relative.startsWith("dist/") && !/\.(?:js|d\.ts)$/u.test(relative) && !isReviewedAdditionalSource) {
       throw new Error(`${label} contains an unreviewed distribution file type: ${relative}`);
     }
     const executable = (entry.mode & 0o111) !== 0;
-    const allowedExecutable = manifest.name === "@pixel-point/aval-compiler" && relative === "dist/cli.js";
+    const allowedExecutable = executablePaths.has(relative);
     if (executable !== allowedExecutable) throw new Error(`${label} has an unexpected executable mode: ${relative}`);
   }
   for (const required of ["package/package.json", "package/README.md", "package/LICENSE", "package/THIRD_PARTY_NOTICES.md", "package/dist/index.js", "package/dist/index.d.ts"]) {
     if (!filePaths.has(required)) throw new Error(`${label} is missing ${required.slice("package/".length)}`);
   }
   const specialEntries = [
-    ...(manifest.name === "@pixel-point/aval-compiler"
-      ? ["package/dist/cli.js", `package/${compilerRegistryPath}`] : []),
-    ...(manifest.name === "@pixel-point/aval-element"
-      ? ["package/dist/auto.js"] : []),
+    ...[...additionalSourcePaths].map((path) => `package/${path}`),
     ...RELEASE_WORKER_ENTRIES
       .filter(({ packageName }) => packageName === manifest.name)
       .map(({ output }) => `package/dist/${output}`)
@@ -168,7 +167,7 @@ function validatePackageContents(entries, manifest, label) {
   for (const specialEntry of specialEntries) {
     if (!filePaths.has(specialEntry)) throw new Error(`${label} is missing ${specialEntry.slice("package/".length)}`);
   }
-  if (manifest.name === COMPILER_WORKER_REGISTRY_ENTRY.packageName) {
+  if (additionalSourcePaths.has(compilerRegistryPath)) {
     const registry = entries.find(({ kind, path }) =>
       kind === "file" && path === `package/${compilerRegistryPath}`
     );

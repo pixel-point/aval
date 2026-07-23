@@ -156,11 +156,11 @@ describe("publication ledger", () => {
     const operations = initialReleaseRollbackOperations();
     const rollback = ledger(operations, { phase: "rollback", status: "passed" });
     expect(validatePublicationLedger(rollback)).toBe(rollback);
-    expect(operations).toHaveLength(15);
+    expect(operations).toHaveLength(PUBLIC_RELEASE_PACKAGES.length * 3);
     expect(operations.map(({ packageName, action, tag, after }) => ({ packageName, action, tag, after })).slice(0, 3)).toEqual([
-      { packageName: "@pixel-point/aval-compiler", action: "rollback-tag", tag: "latest", after: null },
-      { packageName: "@pixel-point/aval-compiler", action: "rollback-tag", tag: "next", after: null },
-      { packageName: "@pixel-point/aval-compiler", action: "deprecate", tag: "deprecated", after: "Withdrawn" }
+      { packageName: "@pixel-point/aval-react", action: "rollback-tag", tag: "latest", after: null },
+      { packageName: "@pixel-point/aval-react", action: "rollback-tag", tag: "next", after: null },
+      { packageName: "@pixel-point/aval-react", action: "deprecate", tag: "deprecated", after: "Withdrawn" }
     ]);
     expect(() => validatePublicationLedger({ ...rollback, operations: operations.slice(0, -1) })).toThrow(/exact release set/u);
     expect(() => validatePublicationLedger({ ...rollback, operations: operations.map((operation, index) => index === 4 ? { ...operation, tag: "latest" } : operation) })).toThrow(/exact authorized reverse-order shape/u);

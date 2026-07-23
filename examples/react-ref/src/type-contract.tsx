@@ -1,38 +1,56 @@
-import type { AvalElement } from "@pixel-point/aval-element";
-import { createRef } from "react";
+import { useRef } from "react";
+import { useAval, type AvalSources } from "@pixel-point/aval-react";
 
-const motion = createRef<AvalElement>();
+const sources = {
+  av1: "/status/av1.avl",
+  h264: "/status/h264.avl"
+} satisfies AvalSources;
 
-void (
-  <aval-player
-    ref={motion}
-    state="loading"
-    motion="reduce"
-    autoplay="manual"
-    fit="contain"
-    bindings="none"
-    width={160}
-    height="160"
-    aria-label="Decorative status motion"
-  >
-    <source
-      src="/status/h264.avl"
-      data-codec="h264"
-    />
-  </aval-player>
-);
+export function TypeContract() {
+  const button = useRef<HTMLButtonElement>(null);
+  const { aval, AvalComponent } = useAval({
+    sources,
+    state: "loading",
+    autoplay: false,
+    autoBind: true,
+    motion: "reduce",
+    fit: "contain"
+  });
 
-void (
-  // @ts-expect-error source URLs belong to direct-child source elements
-  <aval-player src="/status.avl" />
-);
+  const readyFor: (state: string) => boolean = aval.readyFor;
+  const setState: (state: string) => Promise<void> = aval.setState;
+  const send: (event: string) => boolean = aval.send;
+  const pause: () => void = aval.pause;
+  const play: () => Promise<void> = aval.play;
+  void [readyFor, setState, send, pause, play];
 
-void (
-  // @ts-expect-error motion remains a closed public union in JSX
-  <aval-player motion="sometimes" />
-);
+  return (
+    <button ref={button} type="button">
+      <AvalComponent
+        bindTo={button}
+        width={160}
+        height={160}
+        className="status-motion"
+        aria-label="Decorative status motion"
+      />
+    </button>
+  );
+}
 
-void (
-  // @ts-expect-error object interaction targets are assigned through a ref
-  <aval-player interactionTarget={document.body} />
-);
+export function InvalidEmptySources() {
+  useAval({
+    // @ts-expect-error at least one codec URL is required
+    sources: {}
+  });
+  return null;
+}
+
+export function InvalidSourceValue() {
+  useAval({
+    sources: {
+      // @ts-expect-error React sources are URL strings, not descriptors
+      h264: { src: "/status/h264.avl" }
+    }
+  });
+  return null;
+}

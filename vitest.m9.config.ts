@@ -6,9 +6,13 @@ export default defineConfig({
   test: {
     include: [
       "packages/**/*.test.ts",
+      "packages/**/*.test.tsx",
       "apps/**/*.test.ts",
+      "apps/**/*.test.tsx",
       "tests/**/*.test.ts",
-      "scripts/**/*.test.ts"
+      "tests/**/*.test.tsx",
+      "scripts/**/*.test.ts",
+      "scripts/**/*.test.tsx"
     ],
     exclude: ["**/node_modules/**", "**/dist/**"],
     pool: "threads",
@@ -27,6 +31,9 @@ export default defineConfig({
       ),
       "@pixel-point/aval-graph": fileURLToPath(
         new URL("./packages/graph/src/index.ts", import.meta.url)
+      ),
+      "@pixel-point/aval-react": fileURLToPath(
+        new URL("./packages/react/src/index.ts", import.meta.url)
       ),
       "@pixel-point/aval-player-web": fileURLToPath(
         new URL("./packages/player-web/src/index.ts", import.meta.url)

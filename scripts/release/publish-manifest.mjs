@@ -1,7 +1,7 @@
-import { RELEASE_PACKAGE_SPECS, RELEASE_VERSION } from "./release-set-model.mjs";
+import { RELEASE_VERSION, releasePackageSpecification } from "./release-set-model.mjs";
 import { applyApprovedPublicationMetadata } from "./publication-metadata.mjs";
 
-const ALLOWED_KEYS = new Set(["name", "version", "description", "keywords", "private", "type", "sideEffects", "exports", "files", "license", "engines", "repository", "homepage", "bugs", "bin", "types", "dependencies"]);
+const ALLOWED_KEYS = new Set(["name", "version", "description", "keywords", "private", "type", "sideEffects", "exports", "files", "license", "engines", "repository", "homepage", "bugs", "bin", "types", "dependencies", "peerDependencies"]);
 const REQUIRED_KEYS = ["name", "version", "private", "type", "sideEffects", "exports", "files", "license", "engines", "repository", "homepage", "bugs", "dependencies"];
 
 export function createPublishManifest(source, publicationMetadata) {
@@ -16,19 +16,17 @@ export function validatePublishManifest(manifest) {
   if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) throw new TypeError("publish package manifest is invalid");
   for (const key of Object.keys(manifest)) if (!ALLOWED_KEYS.has(key)) throw new Error(`${manifest.name ?? "package"} contains forbidden publish manifest key: ${key}`);
   for (const key of REQUIRED_KEYS) if (!(key in manifest)) throw new Error(`${manifest.name ?? "package"} publish manifest is missing ${key}`);
-  const specification = RELEASE_PACKAGE_SPECS.find(({ name }) => name === manifest.name);
-  if (specification === undefined || manifest.version !== RELEASE_VERSION || manifest.private !== false || manifest.type !== "module" || manifest.license !== "MIT") throw new Error(`${manifest.name ?? "package"} publish identity is invalid`);
+  let specification;
+  try { specification = releasePackageSpecification(manifest.name); }
+  catch { throw new Error(`${manifest.name ?? "package"} publish identity is invalid`); }
+  if (manifest.version !== RELEASE_VERSION || manifest.private !== false || manifest.type !== "module" || manifest.license !== "MIT") throw new Error(`${manifest.name ?? "package"} publish identity is invalid`);
   if (JSON.stringify(manifest.files) !== JSON.stringify(["dist", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"])) throw new Error(`${manifest.name} publish files are not the exact allowlist`);
-  const expectedExports = manifest.name === "@pixel-point/aval-element"
-    ? { ".": { types: "./dist/index.d.ts", import: "./dist/index.js" }, "./auto": { types: "./dist/auto.d.ts", import: "./dist/auto.js" } }
-    : { ".": { types: "./dist/index.d.ts", import: "./dist/index.js" } };
   validateExportMapBounds(manifest.exports);
-  if (JSON.stringify(manifest.exports) !== JSON.stringify(expectedExports)) throw new Error(`${manifest.name} exports do not match the reviewed public surface`);
-  const expectedBin = manifest.name === "@pixel-point/aval-compiler" ? { avl: "./dist/cli.js" } : undefined;
+  if (JSON.stringify(manifest.exports) !== JSON.stringify(specification.exports)) throw new Error(`${manifest.name} exports do not match the reviewed public surface`);
+  const expectedBin = optionalRecord(specification.bin);
   if (JSON.stringify(manifest.bin) !== JSON.stringify(expectedBin)) throw new Error(`${manifest.name} bin map does not match the reviewed public surface`);
   if (manifest.types !== undefined && manifest.types !== "./dist/index.d.ts") throw new Error(`${manifest.name} top-level types target is invalid`);
-  const expectedSideEffects = manifest.name === "@pixel-point/aval-element" ? ["./dist/auto.js"] : false;
-  if (JSON.stringify(manifest.sideEffects) !== JSON.stringify(expectedSideEffects)) throw new Error(`${manifest.name} sideEffects declaration is invalid`);
+  if (JSON.stringify(manifest.sideEffects) !== JSON.stringify(specification.sideEffects)) throw new Error(`${manifest.name} sideEffects declaration is invalid`);
   if (JSON.stringify(manifest.engines) !== JSON.stringify({ node: ">=22.12.0" })) throw new Error(`${manifest.name} engines policy is invalid`);
   validateRepositoryMetadata(manifest, specification.directory);
   const dependencies = manifest.dependencies;
@@ -37,9 +35,15 @@ export function validatePublishManifest(manifest) {
   const expectedDependencies = [...specification.dependencies].sort();
   if (JSON.stringify(actualDependencies) !== JSON.stringify(expectedDependencies)) throw new Error(`${manifest.name} dependencies must be the exact reviewed set`);
   for (const name of expectedDependencies) if (dependencies[name] !== RELEASE_VERSION) throw new Error(`${manifest.name} dependency ${name} must be exactly ${RELEASE_VERSION}`);
+  const expectedPeerDependencies = optionalRecord(specification.peerDependencies);
+  if (JSON.stringify(manifest.peerDependencies) !== JSON.stringify(expectedPeerDependencies)) throw new Error(`${manifest.name} peerDependencies do not match the reviewed public contract`);
   if (manifest.description !== undefined && (typeof manifest.description !== "string" || manifest.description.length < 1 || manifest.description.length > 512)) throw new Error(`${manifest.name} description is invalid`);
   if (manifest.keywords !== undefined && (!Array.isArray(manifest.keywords) || manifest.keywords.length > 32 || manifest.keywords.some((value) => typeof value !== "string" || value.length < 1 || value.length > 64))) throw new Error(`${manifest.name} keywords are invalid`);
   return manifest;
+}
+
+function optionalRecord(value) {
+  return Object.keys(value).length === 0 ? undefined : value;
 }
 
 function validateRepositoryMetadata(manifest, directory) {

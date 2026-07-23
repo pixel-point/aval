@@ -5,9 +5,9 @@ import { basename, join, relative, resolve, sep } from "node:path";
 
 import { inspectTarballBytes } from "./inspect-tarball.mjs";
 import { validatePublishManifest } from "./publish-manifest.mjs";
-import { RELEASE_PACKAGE_NAMES, RELEASE_PACKAGE_SPECS, RELEASE_VERSION, releaseArchiveFilename, releasePackageDirectory, topologicalPackageOrder } from "./release-set-model.mjs";
+import { PRODUCTION_PUBLIC_ENTRIES, RELEASE_PACKAGE_NAMES, RELEASE_PACKAGE_SPECS, RELEASE_VERSION, releaseArchiveFilename, releasePackageDirectory, releasePackageSpecification, topologicalPackageOrder } from "./release-set-model.mjs";
 
-export { RELEASE_PACKAGE_NAMES, RELEASE_PACKAGE_SPECS, RELEASE_VERSION, releaseArchiveFilename, releasePackageDirectory, topologicalPackageOrder };
+export { PRODUCTION_PUBLIC_ENTRIES, RELEASE_PACKAGE_NAMES, RELEASE_PACKAGE_SPECS, RELEASE_VERSION, releaseArchiveFilename, releasePackageDirectory, releasePackageSpecification, topologicalPackageOrder };
 
 export function validateReleasePolicy(policy) {
   if (policy === null || typeof policy !== "object") throw new TypeError("release policy is invalid");
@@ -19,7 +19,7 @@ export function validateReleasePolicy(policy) {
 }
 
 export function validateReleasePackageManifests(manifests) {
-  if (!Array.isArray(manifests) || manifests.length !== RELEASE_PACKAGE_NAMES.length) throw new Error("release set must contain exactly five package manifests");
+  if (!Array.isArray(manifests) || manifests.length !== RELEASE_PACKAGE_NAMES.length) throw new Error(`release set must contain exactly ${String(RELEASE_PACKAGE_NAMES.length)} package manifests`);
   const byName = new Map();
   for (const manifest of manifests) {
     if (manifest === null || typeof manifest !== "object" || typeof manifest.name !== "string") throw new TypeError("release package manifest is invalid");
@@ -41,13 +41,13 @@ export function validateReleasePackageManifests(manifests) {
   return RELEASE_PACKAGE_NAMES.map((name) => byName.get(name));
 }
 
-/** Open every archive without following links, read it once, and reconcile the exact five-package DAG. */
+/** Open every archive without following links, read it once, and reconcile the exact public-package DAG. */
 export async function loadVerifiedReleaseSet({ directory, policy, packageIndex } = {}) {
   validateReleasePolicy(policy);
   const root = await realpath(resolve(directory));
   const directoryEntries = await readdir(root, { withFileTypes: true });
   if (directoryEntries.some((entry) => !entry.isFile() || !entry.name.endsWith(".tgz"))) throw new Error("release package directory contains a non-tarball entry");
-  if (directoryEntries.length !== RELEASE_PACKAGE_NAMES.length) throw new Error("release package directory must contain exactly five tarballs");
+  if (directoryEntries.length !== RELEASE_PACKAGE_NAMES.length) throw new Error(`release package directory must contain exactly ${String(RELEASE_PACKAGE_NAMES.length)} tarballs`);
   const packages = [];
   for (const entry of directoryEntries.sort((left, right) => compareText(left.name, right.name))) {
     const path = join(root, entry.name);

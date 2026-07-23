@@ -1,10 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const port = process.env.AVAL_REACT_REF_PORT ?? "4187";
+const port = process.env.AVAL_REACT_BROWSER_PORT ?? "4187";
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
-  testDir: "./test",
+  testDir: ".",
+  testMatch: "listener-timing.spec.ts",
   workers: 1,
   reporter: [["list"]],
   use: {
@@ -12,8 +13,8 @@ export default defineConfig({
     trace: "retain-on-failure"
   },
   webServer: {
-    command: `npm run dev -- --config vite.listener-timing.config.ts --host 127.0.0.1 --port ${port} --strictPort`,
-    url: `${baseURL}/listener-timing-test.html`,
+    command: `vite --config vite.config.ts --host 127.0.0.1 --port ${port} --strictPort`,
+    url: `${baseURL}/index.html`,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000
   },

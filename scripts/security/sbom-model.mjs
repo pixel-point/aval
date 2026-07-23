@@ -69,7 +69,7 @@ export function reconcilePackageSbom(document, archive) {
 
 export function reconcileReleaseSbomSet({ documentsByPath, releaseSet, workspaceLockBytes }) {
   const expectedPaths = new Set(["sbom/workspace.spdx.json", ...releaseSet.packages.map(({ name }) => `sbom/${releasePackageDirectory(name)}.spdx.json`)]);
-  if (documentsByPath.size !== expectedPaths.size || [...documentsByPath.keys()].some((path) => !expectedPaths.has(path))) throw new Error("candidate SBOM set is not exactly workspace plus five packages");
+  if (documentsByPath.size !== expectedPaths.size || [...documentsByPath.keys()].some((path) => !expectedPaths.has(path))) throw new Error("candidate SBOM set is not exactly workspace plus the public packages");
   for (const archive of releaseSet.packages) reconcilePackageSbom(documentsByPath.get(`sbom/${releasePackageDirectory(archive.name)}.spdx.json`), archive);
   reconcileWorkspaceSbom(documentsByPath.get("sbom/workspace.spdx.json"), workspaceLockBytes);
 }

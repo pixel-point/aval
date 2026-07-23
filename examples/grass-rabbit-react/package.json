@@ -1,0 +1,28 @@
+{
+  "name": "@pixel-point/aval-grass-rabbit-react-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/prepare-assets.mjs",
+    "dev": "next dev --hostname 0.0.0.0",
+    "prebuild": "node scripts/prepare-assets.mjs",
+    "build": "next build",
+    "typecheck": "next typegen && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.2.8",
+    "@pixel-point/aval-react": "1.0.0",
+    "next": "16.2.11",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.2",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "tailwindcss": "4.3.2",
+    "typescript": "6.0.3"
+  }
+}

@@ -4,12 +4,50 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { createLicenseReport, reconcileLicenseReport } from "../../scripts/security/license-model.mjs";
+import { createLicenseReport, reconcileLicenseReport, validateLicensePolicy } from "../../scripts/security/license-model.mjs";
 import { reconcileWorkspaceSbom, validateSpdxDocument } from "../../scripts/security/sbom-model.mjs";
 
 const execFileAsync = promisify(execFile);
 
 describe("release supply-chain policy", () => {
+  it("evaluates required compound licenses atomically and fails closed on alternatives", () => {
+    const policy = {
+      schemaVersion: "1.0",
+      allowed: ["Apache-2.0", "MIT"],
+      reviewRequired: ["LGPL-3.0-or-later"],
+      denied: ["AGPL-3.0-only"]
+    };
+    expect(() => validateLicensePolicy({
+      ...policy,
+      allowed: [...policy.allowed, "MIT AND AGPL-3.0-only"]
+    })).toThrow(/license policy allowed is invalid/u);
+
+    const lockWith = (license: string) => Buffer.from(JSON.stringify({
+      packages: {
+        "node_modules/example": {
+          name: "example",
+          version: "1.0.0",
+          integrity: "sha512-example",
+          license
+        }
+      }
+    }));
+    const policyBytes = Buffer.from(JSON.stringify(policy));
+
+    expect(() => createLicenseReport(
+      lockWith("Apache-2.0 AND LGPL-3.0-or-later"),
+      policyBytes
+    )).toThrow(/requires an explicit policy record/u);
+    expect(() => createLicenseReport(
+      lockWith("MIT AND AGPL-3.0-only"),
+      policyBytes
+    )).toThrow(/denied license AGPL-3\.0-only in expression/u);
+    expect(() => createLicenseReport(
+      lockWith("MIT OR AGPL-3.0-only"),
+      policyBytes
+    )).toThrow(/unsupported license expression/u);
+  });
+
   it.each([
     "scripts/security/check-lockfile.mjs",
     "scripts/security/check-workflows.mjs"
@@ -18,16 +56,24 @@ describe("release supply-chain policy", () => {
     expect(JSON.parse(stdout)).toMatchObject({ status: "passed" });
   });
 
-  it("keeps the unreviewed BlueOak build dependency fail-closed", async () => {
-    await expect(execFileAsync(
+  it("keeps unreviewed build dependencies fail-closed", async () => {
+    const failure = await execFileAsync(
       process.execPath,
       ["scripts/security/check-licenses.mjs"],
       { cwd: process.cwd(), maxBuffer: 1024 * 1024 }
-    )).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "node_modules/minimatch: license BlueOak-1.0.0 requires an explicit policy record"
-      )
-    });
+    ).then(
+      () => { throw new Error("license check unexpectedly passed"); },
+      (error: unknown) => error as { readonly stderr: string }
+    );
+    expect(failure.stderr).toContain(
+      "node_modules/minimatch: license BlueOak-1.0.0 requires an explicit policy record"
+    );
+    expect(failure.stderr).toContain(
+      "node_modules/caniuse-lite: license CC-BY-4.0 requires an explicit policy record"
+    );
+    expect(failure.stderr).toContain(
+      "node_modules/@img/sharp-libvips-darwin-arm64: license LGPL-3.0-or-later requires an explicit policy record"
+    );
   });
 
   it("generates and validates a bounded SPDX 2.3 inventory", async () => {
@@ -63,8 +109,8 @@ describe("release supply-chain policy", () => {
       const policy = JSON.parse(policyBytes.toString("utf8"));
       const syntheticReviewedPolicy = Buffer.from(JSON.stringify({
         ...policy,
-        allowed: [...policy.allowed, "BlueOak-1.0.0"],
-        reviewRequired: policy.reviewRequired.filter((value: string) => value !== "BlueOak-1.0.0")
+        allowed: [...policy.allowed, ...policy.reviewRequired],
+        reviewRequired: []
       }));
       const report = createLicenseReport(lockBytes, syntheticReviewedPolicy);
       expect(reconcileLicenseReport(report, lockBytes, syntheticReviewedPolicy)).toBe(report);

@@ -1,28 +1,17 @@
 import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
+import type { AvalSources } from "@pixel-point/aval-react";
 
 import { StatusMotion } from "./StatusMotion.js";
 import "./styles.css";
 
 const STATES = ["idle", "loading", "done"] as const;
-const SOURCES = Object.freeze([
-  Object.freeze({
-    src: "/status/av1.avl",
-    codec: "av1"
-  }),
-  Object.freeze({
-    src: "/status/vp9.avl",
-    codec: "vp9"
-  }),
-  Object.freeze({
-    src: "/status/h265.avl",
-    codec: "h265"
-  }),
-  Object.freeze({
-    src: "/status/h264.avl",
-    codec: "h264"
-  })
-]);
+const SOURCES = Object.freeze({
+  av1: "/status/av1.avl",
+  vp9: "/status/vp9.avl",
+  h265: "/status/h265.avl",
+  h264: "/status/h264.avl"
+}) satisfies AvalSources;
 
 function App() {
   const [requestedState, setRequestedState] = useState<string>("idle");
@@ -36,7 +25,7 @@ function App() {
 
   return (
     <main>
-      <h1>AVAL React ref example</h1>
+      <h1>AVAL React example</h1>
       <p>
         Replace <code>public/status/</code> with a codec bundle that defines
         the states used by these controls.
@@ -44,7 +33,7 @@ function App() {
       <StatusMotion
         sources={SOURCES}
         state={requestedState}
-        onVisualState={handleVisualState}
+        onVisual={handleVisualState}
         onError={handleError}
       />
       <div className="controls" aria-label="Requested motion state">
