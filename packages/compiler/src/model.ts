@@ -131,8 +131,21 @@ export type SourceTransition =
       readonly reverseOf?: string;
     };
 
+/**
+ * Ring membership of a turn edge.
+ *
+ * Authors write `kind: "turn"` with the ring and signed step; expansion emits the
+ * same shape with `derived: true` for the edges it generated.
+ */
+export interface SourceTurnMembership {
+  readonly kind?: "turn";
+  readonly ring?: string;
+  readonly step?: 1 | -1;
+  readonly derived?: true;
+}
+
 export type SourceEdge =
-  | {
+  | (SourceTurnMembership & {
       readonly id: string;
       readonly from: string;
       readonly to: string;
@@ -141,8 +154,8 @@ export type SourceEdge =
       readonly transition?: SourceTransition;
       readonly continuity: "exact-authored" | "exact-reverse";
       readonly targetRunwayFrames?: never;
-    }
-  | {
+    })
+  | (SourceTurnMembership & {
       readonly id: string;
       readonly from: string;
       readonly to: string;
@@ -151,7 +164,38 @@ export type SourceEdge =
       readonly transition?: never;
       readonly continuity: "cut";
       readonly targetRunwayFrames: number;
-    };
+    });
+
+/**
+ * One authored departure from the ring default, applied to a single ordered
+ * neighbour pair. An override is the only way to give a step its own bridge
+ * unit, and it is rejected unless its pair is actually adjacent.
+ */
+export interface SourceRingOverride {
+  readonly from: string;
+  readonly to: string;
+  readonly mode: "cut" | "unit";
+  readonly unit?: string;
+  readonly direction?: "forward" | "reverse";
+  readonly continuity?: "exact-authored" | "exact-reverse";
+}
+
+/** How every step of a ring departs and what it plays, before overrides. */
+export interface SourceRingTurn {
+  readonly mode: "cut" | "unit";
+  readonly start: Exclude<SourceStart, { readonly type: "cut" }>;
+  readonly continuity: "exact-authored" | "exact-reverse";
+}
+
+export interface SourceRing {
+  readonly id: string;
+  readonly states: readonly string[];
+  readonly cyclic: boolean;
+  readonly tieBreak: "forward" | "backward";
+  readonly turn: SourceRingTurn;
+  readonly maxChainedSteps: number;
+  readonly overrides: readonly SourceRingOverride[];
+}
 
 export type SourceBindingName =
   | "activate"
@@ -249,6 +293,8 @@ export interface SourceProject {
   readonly states: readonly SourceState[];
   readonly edges: readonly SourceEdge[];
   readonly bindings: readonly SourceBinding[];
+  /** Absent in projects which author no ring. */
+  readonly rings?: readonly SourceRing[];
 }
 
 export type NormalizedVideoEncoding = VideoEncoding<NormalizedSourceRenditionTarget>;
@@ -263,8 +309,13 @@ export interface NormalizedSourceProject {
   readonly units: readonly SourceUnit[];
   readonly initialState: string;
   readonly states: readonly SourceState[];
+  /** Authored edges plus every step expansion derived from a ring. */
   readonly edges: readonly SourceEdge[];
   readonly bindings: readonly SourceBinding[];
+  /** Absent in projects which author no ring. */
+  readonly rings?: readonly SourceRing[];
+  /** Author-facing notes from ring expansion, such as a shadowed step. */
+  readonly ringNotes?: readonly string[];
 }
 
 export interface AlphaPixelLocation {

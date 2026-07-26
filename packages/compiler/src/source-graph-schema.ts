@@ -4,7 +4,8 @@ import type {
   SourceEdge,
   SourceStart,
   SourceTransition,
-  SourceTrigger
+  SourceTrigger,
+  SourceTurnMembership
 } from "./model.js";
 
 import {
@@ -31,6 +32,9 @@ const BINDING_SOURCES = [
   "pointer.leave",
   "visible"
 ] as const satisfies readonly SourceBindingName[];
+
+/** Author-facing ring membership; `derived` is emitted by expansion, not read. */
+const TURN_KEYS = ["kind", "ring", "step"] as const;
 
 export function cloneSourceEdges(
   value: unknown,
@@ -77,7 +81,7 @@ function cloneEdge(value: unknown, path: string): SourceEdge {
     `${path}.start.type`
   );
   const commonKeys = ["id", "from", "to", "start", "continuity"];
-  const optionalCommon = ["trigger"];
+  const optionalCommon = ["trigger", ...TURN_KEYS];
   if (startType === "cut") {
     exactKeys(input, [...commonKeys, "targetRunwayFrames"], path, optionalCommon);
   } else {
@@ -88,6 +92,7 @@ function cloneEdge(value: unknown, path: string): SourceEdge {
   const to = identifier(input.to, `${path}.to`);
   const trigger = cloneTrigger(input.trigger, `${path}.trigger`);
   const start = cloneStart(startInput, startType, `${path}.start`);
+  const turn = cloneTurnMembership(input, path);
 
   if (startType === "cut") {
     literal(input.continuity, "cut", `${path}.continuity`);
@@ -96,6 +101,7 @@ function cloneEdge(value: unknown, path: string): SourceEdge {
       from,
       to,
       ...(trigger === undefined ? {} : { trigger }),
+      ...turn,
       start: start as Extract<SourceStart, { readonly type: "cut" }>,
       continuity: "cut",
       targetRunwayFrames: integer(
@@ -117,10 +123,31 @@ function cloneEdge(value: unknown, path: string): SourceEdge {
     from,
     to,
     ...(trigger === undefined ? {} : { trigger }),
+    ...turn,
     start: start as Exclude<SourceStart, { readonly type: "cut" }>,
     ...(transition === undefined ? {} : { transition }),
     continuity
   });
+}
+
+/**
+ * Read the authored turn marker. `kind: "turn"` is the author-facing spelling of
+ * ring membership, so it always travels with the ring and the signed step.
+ */
+function cloneTurnMembership(
+  input: Record<string, unknown>,
+  path: string
+): SourceTurnMembership {
+  const declared = TURN_KEYS.filter((key) =>
+    Object.prototype.hasOwnProperty.call(input, key)
+  );
+  if (declared.length === 0) return {};
+  literal(input.kind, "turn", `${path}.kind`);
+  const ring = identifier(input.ring, `${path}.ring`);
+  if (input.step !== 1 && input.step !== -1) {
+    invalid(`${path}.step`, "must be 1 or -1");
+  }
+  return Object.freeze({ kind: "turn" as const, ring, step: input.step });
 }
 
 function cloneTrigger(value: unknown, path: string): SourceTrigger | undefined {

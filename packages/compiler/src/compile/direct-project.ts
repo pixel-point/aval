@@ -302,7 +302,8 @@ function directProject(input: {
       ...(intro === undefined ? {} : { initialUnit: intro.id })
     })]),
     edges: Object.freeze([]),
-    bindings: Object.freeze([])
+    bindings: Object.freeze([]),
+    rings: Object.freeze([])
   });
 }
 

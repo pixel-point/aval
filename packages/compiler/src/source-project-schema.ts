@@ -31,6 +31,8 @@ import {
   cloneSourceBindings,
   cloneSourceEdges
 } from "./source-graph-schema.js";
+import { expandSourceRings } from "./source-ring-expansion.js";
+import { cloneSourceRings } from "./source-ring-schema.js";
 import { preflightSourceGraph } from "./source-graph-preflight.js";
 import { cloneVideoEncodings } from "./compile/video-encoding-policy.js";
 import { normalizeSourceProject } from "./source-project-normalize.js";
@@ -48,6 +50,8 @@ const PROJECT_KEYS = [
   "edges",
   "bindings"
 ] as const;
+/** Projects which author no ring omit the key, keeping their output unchanged. */
+const OPTIONAL_PROJECT_KEYS = ["rings"] as const;
 const PNG_DIMENSION_MAX = 0xffff_ffff;
 
 /** Parse strict JSON and validate the sole project format. */
@@ -71,18 +75,35 @@ export function validateSourceProject(
   value: unknown
 ): Readonly<NormalizedSourceProject> {
   const input = record(value, "project");
-  exactKeys(input, PROJECT_KEYS, "project");
+  exactKeys(input, PROJECT_KEYS, "project", OPTIONAL_PROJECT_KEYS);
   literal(input.projectVersion, "1.0", "project.projectVersion");
   const canvas = cloneCanvas(input.canvas);
   const frameRate = cloneSourceFrameRate(input.frameRate);
   const sources = cloneSourceDescriptors(input.sources);
   const units = cloneSourceUnits(input.units, sources);
   const states = cloneSourceStates(input.states, units);
-  const edges = cloneSourceEdges(input.edges, FORMAT_DEFAULT_BUDGETS.maxEdges);
+  const authoredEdges = cloneSourceEdges(
+    input.edges,
+    FORMAT_DEFAULT_BUDGETS.maxEdges
+  );
   const bindings = cloneSourceBindings(
     input.bindings,
     FORMAT_DEFAULT_BUDGETS.maxBindings
   );
+  const rings = cloneSourceRings(input.rings);
+  const expansion = expandSourceRings({
+    rings,
+    states,
+    units,
+    edges: authoredEdges
+  });
+  const edges = expansion.edges;
+  if (edges.length > FORMAT_DEFAULT_BUDGETS.maxEdges) {
+    invalid(
+      "project.edges",
+      `expand to ${String(edges.length)} entries, above the ${String(FORMAT_DEFAULT_BUDGETS.maxEdges)} edge budget`
+    );
+  }
   const initialState = identifier(input.initialState, "project.initialState");
   validateSourceReferences({
     initialState,
@@ -107,7 +128,12 @@ export function validateSourceProject(
     initialState,
     states,
     edges,
-    bindings
+    bindings,
+    // Omitted, not emptied: a project without rings normalizes exactly as it
+    // did before rings existed.
+    ...(rings.length === 0
+      ? {}
+      : { rings, ringNotes: expansion.notes })
   }) satisfies Readonly<NormalizedSourceProject>);
   preflightSourceGraph(project);
   return project;

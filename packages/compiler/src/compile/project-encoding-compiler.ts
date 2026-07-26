@@ -8,6 +8,7 @@ import {
   type CompiledManifestInput,
   type EncodedChunkInput,
   type ProductionRendition,
+  type Ring,
   type UnitInput,
   type VideoBitDepth,
   type VideoLayout,
@@ -18,6 +19,7 @@ import { CompilerError } from "../diagnostics.js";
 import type {
   NormalizedSourceProject,
   NormalizedVideoEncoding,
+  SourceRing,
   SourceUnit
 } from "../model.js";
 import { sha256Concat, sha256Hex } from "./hash.js";
@@ -124,6 +126,9 @@ export function compileProjectEncoding(
     states: input.project.states,
     edges: input.project.edges,
     bindings: input.project.bindings,
+    ...(input.project.rings === undefined || input.project.rings.length === 0
+      ? {}
+      : { rings: input.project.rings.map(lowerRing) }),
     readiness: deriveReadiness(input.project),
     limits: estimateRuntimeLimits(
       input.project,
@@ -307,6 +312,17 @@ function lowerUnit(
     });
   }
   return Object.freeze({ id: unit.id, kind: unit.kind, frameCount, chunks });
+}
+
+/** Strip the authoring-only turn defaults; the asset keeps only ring identity. */
+function lowerRing(ring: Readonly<SourceRing>): Ring {
+  return Object.freeze({
+    id: ring.id,
+    states: Object.freeze([...ring.states]),
+    cyclic: ring.cyclic,
+    tieBreak: ring.tieBreak,
+    maxChainedSteps: ring.maxChainedSteps
+  });
 }
 
 function checkedAdd(left: number, right: number, label: string): number {

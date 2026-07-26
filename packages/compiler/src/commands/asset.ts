@@ -28,6 +28,22 @@ export interface AssetInspection {
   readonly frameRate: string;
   readonly initialState: string;
   readonly states: readonly string[];
+  /** Every compiled edge, with the ring provenance of the turn steps. */
+  readonly edges: readonly {
+    readonly id: string;
+    readonly from: string;
+    readonly to: string;
+    readonly ring?: string;
+    readonly step?: 1 | -1;
+    readonly derived?: true;
+  }[];
+  readonly rings: readonly {
+    readonly id: string;
+    readonly states: readonly string[];
+    readonly cyclic: boolean;
+    readonly tieBreak: "forward" | "backward";
+    readonly maxChainedSteps: number;
+  }[];
   readonly renditions: readonly {
     readonly id: string;
     readonly codec: string;
@@ -110,6 +126,25 @@ export async function inspectAssetFile(
     frameRate: `${String(frameRate.numerator)}/${String(frameRate.denominator)}`,
     initialState: front.manifest.initialState,
     states: Object.freeze(front.manifest.states.map(({ id }) => id)),
+    edges: Object.freeze(front.manifest.edges.map((edge) =>
+      Object.freeze({
+        id: edge.id,
+        from: edge.from,
+        to: edge.to,
+        ...(edge.ring === undefined ? {} : { ring: edge.ring }),
+        ...(edge.step === undefined ? {} : { step: edge.step }),
+        ...(edge.derived === undefined ? {} : { derived: edge.derived })
+      })
+    )),
+    rings: Object.freeze((front.manifest.rings ?? []).map((ring) =>
+      Object.freeze({
+        id: ring.id,
+        states: Object.freeze([...ring.states]),
+        cyclic: ring.cyclic,
+        tieBreak: ring.tieBreak,
+        maxChainedSteps: ring.maxChainedSteps
+      })
+    )),
     renditions: Object.freeze(front.manifest.renditions.map((rendition) =>
       Object.freeze({
         id: rendition.id,

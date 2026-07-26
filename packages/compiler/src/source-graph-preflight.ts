@@ -21,7 +21,7 @@ import type {
  */
 export function preflightSourceGraph(project: Pick<
   SourceProject,
-  "initialState" | "states" | "edges" | "units"
+  "initialState" | "states" | "edges" | "units" | "rings"
 >): void {
   const units = new Map(project.units.map((unit) => [unit.id, unit]));
   let definition: MotionGraphDefinition;
@@ -39,12 +39,28 @@ export function preflightSourceGraph(project: Pick<
           to: edge.to,
           start: edge.start,
           continuity: edge.continuity,
-          ...(edge.trigger === undefined ? {} : { trigger: edge.trigger })
+          ...(edge.trigger === undefined ? {} : { trigger: edge.trigger }),
+          ...(edge.ring === undefined
+            ? {}
+            : { ring: edge.ring, step: edge.step ?? 1 })
         };
         return Object.freeze(
           transition === undefined ? base : { ...base, transition }
         ) as GraphEdgeDefinition;
-      })
+      }),
+      ...(project.rings === undefined || project.rings.length === 0
+        ? {}
+        : {
+            rings: project.rings!.map((ring) =>
+              Object.freeze({
+                id: ring.id,
+                states: Object.freeze([...ring.states]),
+                cyclic: ring.cyclic,
+                tieBreak: ring.tieBreak,
+                maxChainedSteps: ring.maxChainedSteps
+              })
+            )
+          })
     };
     validateMotionGraphDefinition(definition);
   } catch (error) {

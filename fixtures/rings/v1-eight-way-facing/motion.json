@@ -1,0 +1,271 @@
+{
+  "alpha": "auto",
+  "bindings": [],
+  "canvas": {
+    "colorSpace": "srgb",
+    "fit": "contain",
+    "height": 256,
+    "pixelAspect": [
+      1,
+      1
+    ],
+    "width": 256
+  },
+  "edges": [],
+  "encodings": [
+    {
+      "codec": "h264",
+      "preset": "slow",
+      "renditions": [
+        {
+          "crf": 20,
+          "height": 256,
+          "id": "walk.1x",
+          "width": 256
+        }
+      ]
+    }
+  ],
+  "frameRate": {
+    "denominator": 1,
+    "numerator": 30
+  },
+  "initialState": "walk_n",
+  "projectVersion": "1.0",
+  "rings": [
+    {
+      "cyclic": true,
+      "id": "facing.walk",
+      "maxChainedSteps": 4,
+      "states": [
+        "walk_n",
+        "walk_ne",
+        "walk_e",
+        "walk_se",
+        "walk_s",
+        "walk_sw",
+        "walk_w",
+        "walk_nw"
+      ],
+      "tieBreak": "forward",
+      "turn": {
+        "continuity": "exact-authored",
+        "mode": "cut",
+        "start": {
+          "maxWaitFrames": 8,
+          "sourcePort": "default",
+          "targetPort": "default",
+          "type": "portal"
+        }
+      }
+    }
+  ],
+  "sources": [
+    {
+      "digits": 4,
+      "directory": "frames",
+      "firstNumber": 0,
+      "frameCount": 64,
+      "id": "walk",
+      "prefix": "frame-",
+      "suffix": ".png",
+      "type": "png-sequence"
+    }
+  ],
+  "states": [
+    {
+      "bodyUnit": "walk_n.body",
+      "id": "walk_n"
+    },
+    {
+      "bodyUnit": "walk_ne.body",
+      "id": "walk_ne"
+    },
+    {
+      "bodyUnit": "walk_e.body",
+      "id": "walk_e"
+    },
+    {
+      "bodyUnit": "walk_se.body",
+      "id": "walk_se"
+    },
+    {
+      "bodyUnit": "walk_s.body",
+      "id": "walk_s"
+    },
+    {
+      "bodyUnit": "walk_sw.body",
+      "id": "walk_sw"
+    },
+    {
+      "bodyUnit": "walk_w.body",
+      "id": "walk_w"
+    },
+    {
+      "bodyUnit": "walk_nw.body",
+      "id": "walk_nw"
+    }
+  ],
+  "units": [
+    {
+      "id": "walk_n.body",
+      "kind": "body",
+      "playback": "loop",
+      "ports": [
+        {
+          "entryFrame": 0,
+          "id": "default",
+          "portalFrames": [
+            0,
+            4
+          ]
+        }
+      ],
+      "range": [
+        0,
+        8
+      ],
+      "source": "walk"
+    },
+    {
+      "id": "walk_ne.body",
+      "kind": "body",
+      "playback": "loop",
+      "ports": [
+        {
+          "entryFrame": 0,
+          "id": "default",
+          "portalFrames": [
+            0,
+            4
+          ]
+        }
+      ],
+      "range": [
+        8,
+        16
+      ],
+      "source": "walk"
+    },
+    {
+      "id": "walk_e.body",
+      "kind": "body",
+      "playback": "loop",
+      "ports": [
+        {
+          "entryFrame": 0,
+          "id": "default",
+          "portalFrames": [
+            0,
+            4
+          ]
+        }
+      ],
+      "range": [
+        16,
+        24
+      ],
+      "source": "walk"
+    },
+    {
+      "id": "walk_se.body",
+      "kind": "body",
+      "playback": "loop",
+      "ports": [
+        {
+          "entryFrame": 0,
+          "id": "default",
+          "portalFrames": [
+            0,
+            4
+          ]
+        }
+      ],
+      "range": [
+        24,
+        32
+      ],
+      "source": "walk"
+    },
+    {
+      "id": "walk_s.body",
+      "kind": "body",
+      "playback": "loop",
+      "ports": [
+        {
+          "entryFrame": 0,
+          "id": "default",
+          "portalFrames": [
+            0,
+            4
+          ]
+        }
+      ],
+      "range": [
+        32,
+        40
+      ],
+      "source": "walk"
+    },
+    {
+      "id": "walk_sw.body",
+      "kind": "body",
+      "playback": "loop",
+      "ports": [
+        {
+          "entryFrame": 0,
+          "id": "default",
+          "portalFrames": [
+            0,
+            4
+          ]
+        }
+      ],
+      "range": [
+        40,
+        48
+      ],
+      "source": "walk"
+    },
+    {
+      "id": "walk_w.body",
+      "kind": "body",
+      "playback": "loop",
+      "ports": [
+        {
+          "entryFrame": 0,
+          "id": "default",
+          "portalFrames": [
+            0,
+            4
+          ]
+        }
+      ],
+      "range": [
+        48,
+        56
+      ],
+      "source": "walk"
+    },
+    {
+      "id": "walk_nw.body",
+      "kind": "body",
+      "playback": "loop",
+      "ports": [
+        {
+          "entryFrame": 0,
+          "id": "default",
+          "portalFrames": [
+            0,
+            4
+          ]
+        }
+      ],
+      "range": [
+        56,
+        64
+      ],
+      "source": "walk"
+    }
+  ]
+}

@@ -223,6 +223,7 @@ export async function buildNormalizedProjectBundleArtifact(
     allInvocations.push(...toolchainInvocations("verify"));
     const warnings = Object.freeze([...new Set([
       ...(options.warnings ?? []),
+      ...(project.ringNotes ?? []),
       ...alphaPolicy.warnings,
       ...continuity.warnings,
       ...[...sources.values()].flatMap(({ warnings }) => warnings)

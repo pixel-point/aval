@@ -17,6 +17,8 @@ export function normalizeSourceProject(
     initialState: project.initialState,
     states: project.states,
     edges: project.edges,
-    bindings: project.bindings
+    bindings: project.bindings,
+    ...(project.rings === undefined ? {} : { rings: project.rings }),
+    ...(project.ringNotes === undefined ? {} : { ringNotes: project.ringNotes })
   });
 }
