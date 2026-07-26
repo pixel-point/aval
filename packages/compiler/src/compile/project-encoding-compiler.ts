@@ -124,7 +124,9 @@ export function compileProjectEncoding(
     units: Object.freeze(units),
     initialState: input.project.initialState,
     states: input.project.states,
-    edges: input.project.edges,
+    edges: Object.freeze(input.project.edges.map(({ kind: _k, ring: _r, step: _s, derived: _d, ...edge }) =>
+      Object.freeze(edge)
+    )),
     bindings: input.project.bindings,
     ...(input.project.rings === undefined || input.project.rings.length === 0
       ? {}
