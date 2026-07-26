@@ -355,6 +355,19 @@ describe("MotionGraphEngine ring traversal", () => {
         ]
       })
     ).toThrow(/edge "turn.n.e" references unknown ring "facing.turn"/u);
+    expect(() => {
+      const definition = facingGraph();
+      const [first, ...rest] = definition.edges;
+      install({
+        ...definition,
+        rings: [
+          ring({ id: "facing.other", states: ["walk_n", "walk_ne", "walk_e"] })
+        ],
+        edges: [{ ...first!, ring: "facing.walk", step: 1 }, ...rest]
+      });
+    }).toThrow(
+      /declares ring "facing.walk" but steps inside ring "facing.other"/u
+    );
   });
 });
 

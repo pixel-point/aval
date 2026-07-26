@@ -779,28 +779,38 @@ function validateRingStepOwnership(
     ReadonlyMap<GraphStateId, GraphEdgeDefinition>
   >
 ): void {
-  const owners = new Map<string, GraphRingId>();
+  const owners = new Map<string, RingStepOwner>();
   for (const ring of rings) {
     for (const [from, to] of ringNeighbourPairs(ring)) {
-      const key = `${from} ${to}`;
+      const key = pairKey(from, to);
       const owner = owners.get(key);
       if (owner !== undefined) {
         invalid(
-          `rings ${quote(owner)} and ${quote(ring.id)} both step from ${quote(from)} to ${quote(to)}`
+          `rings ${quote(owner.ring)} and ${quote(ring.id)} both step from ${quote(from)} to ${quote(to)}`
         );
       }
-      owners.set(key, ring.id);
+      owners.set(key, { ring: ring.id, from, to });
     }
   }
-  for (const [key, owner] of owners) {
-    const [from, to] = key.split(" ") as [GraphStateId, GraphStateId];
-    const edge = directEdgesByState.get(from)?.get(to);
-    if (edge?.ring !== undefined && edge.ring !== owner) {
+  for (const owner of owners.values()) {
+    const edge = directEdgesByState.get(owner.from)?.get(owner.to);
+    if (edge?.ring !== undefined && edge.ring !== owner.ring) {
       invalid(
-        `edge ${quote(edge.id)} declares ring ${quote(edge.ring)} but steps inside ring ${quote(owner)}`
+        `edge ${quote(edge.id)} declares ring ${quote(edge.ring)} but steps inside ring ${quote(owner.ring)}`
       );
     }
   }
+}
+
+/** The ring which owns one ordered neighbour pair, kept with the pair itself. */
+interface RingStepOwner {
+  readonly ring: GraphRingId;
+  readonly from: GraphStateId;
+  readonly to: GraphStateId;
+}
+
+function pairKey(from: GraphStateId, to: GraphStateId): string {
+  return `${from}\u0000${to}`;
 }
 
 /** Every ordered adjacency of a ring, forward first then backward. */
