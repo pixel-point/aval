@@ -4,6 +4,7 @@ import {
   cloneBindings,
   cloneEdges,
   cloneReadiness,
+  cloneRings,
   cloneStates
 } from "./manifest-graph-schema.js";
 import { cloneDeclaredLimits } from "./manifest-limits-schema.js";
@@ -53,6 +54,8 @@ const TOP_LEVEL_KEYS = [
   "readiness",
   "limits"
 ] as const;
+/** Assets which author no ring omit the key entirely. */
+const OPTIONAL_TOP_LEVEL_KEYS = ["rings"] as const;
 
 /** Validate, detach, and recursively freeze the sole production manifest. */
 export function validateCompiledManifest(
@@ -62,7 +65,7 @@ export function validateCompiledManifest(
   try {
     const budgets = resolveFormatBudgets(options);
     const input = record(value, "manifest");
-    exactKeys(input, TOP_LEVEL_KEYS, "manifest");
+    exactKeys(input, TOP_LEVEL_KEYS, "manifest", OPTIONAL_TOP_LEVEL_KEYS);
     literal(input.formatVersion, "1.0", "formatVersion");
     const generator = generatorString(input.generator, "generator");
     const codec = oneOf(input.codec, VIDEO_CODECS, "codec");
@@ -94,6 +97,9 @@ export function validateCompiledManifest(
     const states = cloneStates(input.states, budgets, "states");
     const edges = cloneEdges(input.edges, budgets, "edges");
     const bindings = cloneBindings(input.bindings, budgets, "bindings");
+    const rings = Object.prototype.hasOwnProperty.call(input, "rings")
+      ? cloneRings(input.rings, budgets, "rings")
+      : undefined;
     const readiness = cloneReadiness(input.readiness, budgets, "readiness");
     const limits = cloneDeclaredLimits(
       input.limits,
@@ -110,7 +116,8 @@ export function validateCompiledManifest(
       states,
       edges,
       bindings,
-      readiness
+      readiness,
+      ...(rings === undefined ? {} : { rings })
     });
 
     return Object.freeze({
@@ -127,6 +134,7 @@ export function validateCompiledManifest(
       states,
       edges,
       bindings,
+      ...(rings === undefined ? {} : { rings }),
       readiness,
       limits
     });

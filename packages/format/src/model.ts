@@ -25,6 +25,8 @@ export interface FormatBudgets {
   readonly maxJsonStringBytes: number;
   readonly maxStates: number;
   readonly maxEdges: number;
+  readonly maxRings: number;
+  readonly maxRingStates: number;
   readonly maxUnits: number;
   readonly maxRenditions: number;
   readonly maxBindings: number;
@@ -158,7 +160,15 @@ export type Transition =
       readonly reverseOf?: Id;
     };
 
-interface NonCutEdge {
+/** Ring membership carried by a turn edge: one signed step along `ring`. */
+interface TurnMembership {
+  readonly ring?: Id;
+  readonly step?: 1 | -1;
+  /** True when the compiler expanded this edge from a ring rather than authoring. */
+  readonly derived?: true;
+}
+
+interface NonCutEdge extends TurnMembership {
   readonly id: Id;
   readonly from: Id;
   readonly to: Id;
@@ -169,7 +179,7 @@ interface NonCutEdge {
   readonly targetRunwayFrames?: never;
 }
 
-interface CutEdge {
+interface CutEdge extends TurnMembership {
   readonly id: Id;
   readonly from: Id;
   readonly to: Id;
@@ -181,6 +191,18 @@ interface CutEdge {
 }
 
 export type Edge = NonCutEdge | CutEdge;
+
+/**
+ * An ordered axis of states joined by turn edges. Adjacent members are one step
+ * apart; a cyclic ring also joins its last member back to its first.
+ */
+export interface Ring {
+  readonly id: Id;
+  readonly states: readonly Id[];
+  readonly cyclic: boolean;
+  readonly tieBreak: "forward" | "backward";
+  readonly maxChainedSteps: number;
+}
 
 export type BindingSource =
   | "activate"
@@ -226,6 +248,8 @@ export interface CompiledManifest {
   readonly states: readonly State[];
   readonly edges: readonly Edge[];
   readonly bindings: readonly Binding[];
+  /** Omitted entirely by assets which author no ring. */
+  readonly rings?: readonly Ring[];
   readonly readiness: Readiness;
   readonly limits: DeclaredLimits;
 }

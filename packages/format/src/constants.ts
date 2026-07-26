@@ -34,6 +34,8 @@ export const FORMAT_DEFAULT_BUDGETS: Readonly<FormatBudgets> = Object.freeze({
   maxJsonStringBytes: 4_096,
   maxStates: 32,
   maxEdges: 64,
+  maxRings: 8,
+  maxRingStates: 32,
   maxUnits: 96,
   maxRenditions: 4,
   maxBindings: 32,

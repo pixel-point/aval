@@ -25,7 +25,20 @@ export function adaptManifestToMotionGraph(
     const definition: MotionGraphDefinition = {
       initialState: manifest.initialState,
       states: manifest.states.map((state) => adaptState(state, unitsById)),
-      edges: manifest.edges.map((edge) => adaptEdge(edge, unitsById))
+      edges: manifest.edges.map((edge) => adaptEdge(edge, unitsById)),
+      ...(manifest.rings === undefined
+        ? {}
+        : {
+            rings: manifest.rings.map((ring) =>
+              Object.freeze({
+                id: ring.id,
+                states: Object.freeze([...ring.states]),
+                cyclic: ring.cyclic,
+                tieBreak: ring.tieBreak,
+                maxChainedSteps: ring.maxChainedSteps
+              })
+            )
+          })
     };
     return validateMotionGraphDefinition(definition);
   } catch (error) {
@@ -103,7 +116,11 @@ function adaptEdge(
     from: edge.from,
     to: edge.to,
     start,
-    continuity: edge.continuity
+    continuity: edge.continuity,
+    // `derived` is provenance for tooling; the runtime only needs the axis.
+    ...(edge.ring === undefined
+      ? {}
+      : { ring: edge.ring, step: edge.step ?? 1 })
   };
   if (trigger === undefined && transition === undefined) {
     return Object.freeze(base);

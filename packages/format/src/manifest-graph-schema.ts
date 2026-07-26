@@ -23,6 +23,7 @@ import type {
   Edge,
   FormatBudgets,
   Readiness,
+  Ring,
   Start,
   State,
   Transition,
@@ -80,6 +81,8 @@ export function cloneEdges(
   return Object.freeze(edges);
 }
 
+const TURN_KEYS = ["ring", "step", "derived"] as const;
+
 function cloneEdge(value: unknown, path: string): Edge {
   const input = record(value, path);
   const startProbe = record(input.start, `${path}.start`);
@@ -90,8 +93,9 @@ function cloneEdge(value: unknown, path: string): Edge {
       ? ["id", "from", "to", "start", "continuity", "targetRunwayFrames"]
       : ["id", "from", "to", "start", "continuity"],
     path,
-    cut ? ["trigger"] : ["trigger", "transition"]
+    cut ? ["trigger", ...TURN_KEYS] : ["trigger", "transition", ...TURN_KEYS]
   );
+  const turn = cloneTurnMembership(input, path);
   const id = identifier(input.id, `${path}.id`);
   const from = identifier(input.from, `${path}.from`);
   const to = identifier(input.to, `${path}.to`);
@@ -111,7 +115,15 @@ function cloneEdge(value: unknown, path: string): Edge {
       MIN_RUNWAY_FRAMES,
       MAX_RUNWAY_FRAMES
     );
-    const base = { id, from, to, start, continuity: "cut", targetRunwayFrames } as const;
+    const base = {
+      id,
+      from,
+      to,
+      start,
+      continuity: "cut",
+      targetRunwayFrames,
+      ...turn
+    } as const;
     return trigger === undefined
       ? Object.freeze(base)
       : Object.freeze({ ...base, trigger });
@@ -125,7 +137,7 @@ function cloneEdge(value: unknown, path: string): Edge {
   const transition = owns(input, "transition")
     ? cloneTransition(input.transition, `${path}.transition`)
     : undefined;
-  const base = { id, from, to, start, continuity } as const;
+  const base = { id, from, to, start, continuity, ...turn } as const;
   if (trigger === undefined && transition === undefined) {
     return Object.freeze(base);
   }
@@ -136,6 +148,95 @@ function cloneEdge(value: unknown, path: string): Edge {
     return Object.freeze({ ...base, trigger });
   }
   return Object.freeze({ ...base, trigger, transition });
+}
+
+/**
+ * Read the optional ring membership of a turn edge. `ring` and `step` travel
+ * together: a step is meaningless without the axis it steps along.
+ */
+function cloneTurnMembership(
+  input: Record<string, unknown>,
+  path: string
+): {
+  readonly ring?: string;
+  readonly step?: 1 | -1;
+  readonly derived?: true;
+} {
+  const hasRing = owns(input, "ring");
+  if (!hasRing && !owns(input, "step")) {
+    if (owns(input, "derived")) {
+      invalid(`${path}.derived`, "requires ring membership");
+    }
+    return {};
+  }
+  if (!hasRing) invalid(`${path}.ring`, "is required by step");
+  const ring = identifier(input.ring, `${path}.ring`);
+  if (input.step !== 1 && input.step !== -1) {
+    invalid(`${path}.step`, "must be 1 or -1");
+  }
+  if (!owns(input, "derived")) return { ring, step: input.step };
+  if (input.derived !== true) {
+    invalid(`${path}.derived`, "must be true when present");
+  }
+  return { ring, step: input.step, derived: true };
+}
+
+/**
+ * Validate the manifest's rings. Member order is authored, so it is preserved;
+ * only the ring array itself must be sorted, which keeps the canonical bytes
+ * independent of authoring order.
+ */
+export function cloneRings(
+  value: unknown,
+  budgets: FormatBudgets,
+  path: string
+): readonly Ring[] {
+  const inputs = boundedArray(value, path, 1, budgets.maxRings);
+  const rings = inputs.map((entry, index) => {
+    const ringPath = `${path}[${String(index)}]`;
+    const input = record(entry, ringPath);
+    exactKeys(
+      input,
+      ["id", "states", "cyclic", "tieBreak", "maxChainedSteps"],
+      ringPath
+    );
+    const id = identifier(input.id, `${ringPath}.id`);
+    const states = boundedArray(
+      input.states,
+      `${ringPath}.states`,
+      2,
+      budgets.maxRingStates
+    ).map((state, stateIndex) =>
+      identifier(state, `${ringPath}.states[${String(stateIndex)}]`)
+    );
+    if (new Set(states).size !== states.length) {
+      invalid(`${ringPath}.states`, "must be unique");
+    }
+    if (typeof input.cyclic !== "boolean") {
+      invalid(`${ringPath}.cyclic`, "must be a boolean");
+    }
+    if (input.cyclic && states.length < 3) {
+      invalid(`${ringPath}.states`, "must contain 3 states when cyclic");
+    }
+    return Object.freeze({
+      id,
+      states: Object.freeze(states),
+      cyclic: input.cyclic,
+      tieBreak: oneOf(
+        input.tieBreak,
+        ["forward", "backward"],
+        `${ringPath}.tieBreak`
+      ),
+      maxChainedSteps: integerInRange(
+        input.maxChainedSteps,
+        `${ringPath}.maxChainedSteps`,
+        1,
+        budgets.maxRingStates
+      )
+    });
+  });
+  requireIdOrder(rings, path);
+  return Object.freeze(rings);
 }
 
 function cloneTrigger(value: unknown, path: string): Trigger {

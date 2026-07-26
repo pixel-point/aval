@@ -51,6 +51,7 @@ const MANIFEST_INPUT_KEYS = [
   "readiness",
   "limits"
 ] as const;
+const OPTIONAL_MANIFEST_INPUT_KEYS = ["rings"] as const;
 
 export interface NormalizedWriterInput {
   readonly manifest: CompiledManifest;
@@ -74,7 +75,12 @@ export function normalizeWriterInput(
     const root = record(input, "writer input");
     exactKeys(root, ["manifest", "chunks"], "writer input");
     const sourceManifest = record(root.manifest, "manifest input");
-    exactKeys(sourceManifest, MANIFEST_INPUT_KEYS, "manifest input");
+    exactKeys(
+      sourceManifest,
+      MANIFEST_INPUT_KEYS,
+      "manifest input",
+      OPTIONAL_MANIFEST_INPUT_KEYS
+    );
     const sourceRenditions = boundedInputArray(
       sourceManifest.renditions,
       "manifest.renditions",
@@ -171,6 +177,9 @@ export function normalizeWriterInput(
       ...unit.value,
       chunks: unitSpans[index]
     }));
+    const sourceRings = owns(sourceManifest, "rings")
+      ? boundedInputArray(sourceManifest.rings, "manifest.rings", budgets.maxRings, 1)
+      : null;
     const manifestCandidate = {
       ...sourceManifest,
       renditions: sourceRenditions,
@@ -178,6 +187,7 @@ export function normalizeWriterInput(
       states: sortById(sourceStates, "states"),
       edges: sortById(sourceEdges, "edges"),
       bindings: normalizeBindings(sourceBindings),
+      ...(sourceRings === null ? {} : { rings: sortById(sourceRings, "rings") }),
       readiness: normalizeReadiness(sourceManifest.readiness, budgets)
     };
     const manifest = validateCompiledManifest(manifestCandidate, options);

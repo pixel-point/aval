@@ -143,6 +143,7 @@ export type {
   Readiness,
   Rect,
   ResidencyEndpoint,
+  Ring,
   Sha256Hex,
   Start,
   State,
