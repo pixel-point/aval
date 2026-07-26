@@ -13,6 +13,7 @@ import type {
   MotionGraphTraceRecord,
   ValidatedMotionGraph
 } from "./model.js";
+import type { TurnChainPlan } from "./intent-router.js";
 import {
   OperationJournal,
   type OperationJournalCheckpoint,
@@ -43,6 +44,7 @@ interface MotionGraphEngineCheckpoint {
   readonly ledger: Readonly<RequestLedgerCheckpoint>;
   readonly journal: Readonly<OperationJournalCheckpoint>;
   readonly routes: Readonly<RoutePlanCheckpoint>;
+  readonly turn: Readonly<TurnChainPlan> | null;
 }
 
 /** Package-private mechanical storage for the canonical graph reducer. */
@@ -57,6 +59,8 @@ export class MotionGraphEngineState {
   public requestedState: GraphStateId | null = null;
   public visualState: GraphStateId | null = null;
   public presentation: Readonly<GraphPresentation> | null = null;
+  /** Remainder of the ring arc a chained turn is walking, if any. */
+  public turn: Readonly<TurnChainPlan> | null = null;
 
   #graph: ValidatedMotionGraph | null = null;
   #indexes: ValidatedGraphIndexes | null = null;
@@ -88,6 +92,8 @@ export class MotionGraphEngineState {
       pendingEdgeId: this.routes.pending?.edge.id ?? null,
       activeEdgeId: this.routes.active?.edge.id ?? null,
       followOnEdgeId: this.routes.followOn?.edge.id ?? null,
+      turnRing: this.turn?.ring ?? null,
+      turnStepsRemaining: this.turn?.remaining.length ?? 0,
       direction:
         this.presentation?.kind === "reversible"
           ? this.presentation.direction
@@ -110,7 +116,8 @@ export class MotionGraphEngineState {
       presentation: this.presentation,
       ledger: this.ledger.checkpoint(),
       journal: this.journal.checkpoint(),
-      routes: this.routes.checkpoint()
+      routes: this.routes.checkpoint(),
+      turn: this.turn
     });
   }
 
@@ -124,6 +131,7 @@ export class MotionGraphEngineState {
     this.ledger.restore(checkpoint.ledger);
     this.journal.restore(checkpoint.journal);
     this.routes.restore(checkpoint.routes);
+    this.turn = checkpoint.turn;
   }
 
   public record(

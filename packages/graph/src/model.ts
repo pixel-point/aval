@@ -1,6 +1,7 @@
 export type GraphStateId = string;
 export type GraphEdgeId = string;
 export type GraphUnitId = string;
+export type GraphRingId = string;
 
 export interface GraphPortDefinition {
   readonly id: string;
@@ -66,6 +67,12 @@ export type GraphEdgeTrigger =
 
 export type GraphContinuity = "exact-authored" | "exact-reverse" | "cut";
 
+/** Which arc a ring prefers when both directions are equally long. */
+export type GraphRingTieBreak = "forward" | "backward";
+
+/** One signed step along a ring: `1` walks forward, `-1` walks backward. */
+export type GraphTurnStep = 1 | -1;
+
 export interface GraphEdgeDefinition {
   readonly id: GraphEdgeId;
   readonly from: GraphStateId;
@@ -74,12 +81,30 @@ export interface GraphEdgeDefinition {
   readonly start: GraphStartPolicy;
   readonly transition?: GraphTransitionDefinition;
   readonly continuity: GraphContinuity;
+  /** Ring this edge steps along. Present on turn edges only. */
+  readonly ring?: GraphRingId;
+  /** Signed adjacency offset inside `ring`. Present on turn edges only. */
+  readonly step?: GraphTurnStep;
+}
+
+/**
+ * An ordered set of states along one axis. Adjacent members are joined by turn
+ * edges, so a multi-step request is served by chaining single steps rather than
+ * by authoring an edge for every ordered pair.
+ */
+export interface GraphRingDefinition {
+  readonly id: GraphRingId;
+  readonly states: readonly GraphStateId[];
+  readonly cyclic: boolean;
+  readonly tieBreak: GraphRingTieBreak;
+  readonly maxChainedSteps: number;
 }
 
 export interface MotionGraphDefinition {
   readonly initialState: GraphStateId;
   readonly states: readonly GraphStateDefinition[];
   readonly edges: readonly GraphEdgeDefinition[];
+  readonly rings?: readonly GraphRingDefinition[];
 }
 
 declare const validatedMotionGraphBrand: unique symbol;
@@ -191,6 +216,14 @@ export type MotionGraphEffect =
       readonly to: GraphStateId;
     }
   | {
+      readonly type: "turnstep";
+      readonly ring: GraphRingId;
+      readonly from: GraphStateId;
+      readonly to: GraphStateId;
+      /** Steps still queued after this landing. */
+      readonly remaining: number;
+    }
+  | {
       readonly type: "fallback";
       readonly reason: string;
     }
@@ -213,6 +246,10 @@ export interface MotionGraphSnapshot {
   readonly pendingEdgeId: GraphEdgeId | null;
   readonly activeEdgeId: GraphEdgeId | null;
   readonly followOnEdgeId: GraphEdgeId | null;
+  /** Ring owning the turn chain in flight, or null outside a chained turn. */
+  readonly turnRing: GraphRingId | null;
+  /** Steps still queued after the route currently in flight. */
+  readonly turnStepsRemaining: number;
   readonly direction: "forward" | "reverse" | null;
   readonly contentOrdinal: bigint | null;
   readonly inputSequence: number;

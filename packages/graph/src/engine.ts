@@ -24,7 +24,8 @@ import {
   planStateIntent,
   type EventIntentPlan,
   type IntentContext,
-  type StateIntentPlan
+  type StateIntentPlan,
+  type TurnChainPlan
 } from "./intent-router.js";
 import {
   findFinishBoundary,
@@ -32,6 +33,27 @@ import {
   nextBodyFrame
 } from "./portal-search.js";
 import type { RequestAdmission } from "./request-ledger.js";
+import { resolveRingRoute } from "./ring-plan.js";
+import type { ActiveRouteCompletion } from "./route-plan.js";
+
+/**
+ * How a multi-step ring request is served.
+ *
+ * `chain` walks every intermediate state, which is the only policy that keeps
+ * frame continuity across the whole arc. `direct` collapses the arc into its
+ * departure boundary and lands in the target, for hosts honouring a reduced
+ * motion preference.
+ */
+export type MotionGraphTurnPolicy = "chain" | "direct";
+
+export interface MotionGraphEngineOptions {
+  readonly turnPolicy?: MotionGraphTurnPolicy;
+}
+
+interface RoutedTurn {
+  readonly edge: GraphEdgeDefinition;
+  readonly turn: Readonly<TurnChainPlan> | null;
+}
 
 /**
  * Pure version-0 graph reducer. It owns authored cursors and emits abstract
@@ -39,6 +61,28 @@ import type { RequestAdmission } from "./request-ledger.js";
  */
 export class MotionGraphEngine {
   readonly #runtime = new MotionGraphEngineState();
+  readonly #turnPolicy: MotionGraphTurnPolicy;
+
+  public constructor(options: Readonly<MotionGraphEngineOptions> = {}) {
+    if (options === null || typeof options !== "object") {
+      throw new MotionGraphError(
+        "GRAPH_VALIDATION",
+        "graph engine options must be an object"
+      );
+    }
+    const policy = options.turnPolicy ?? "chain";
+    if (policy !== "chain" && policy !== "direct") {
+      throw new MotionGraphError(
+        "GRAPH_VALIDATION",
+        "turnPolicy must be chain or direct"
+      );
+    }
+    this.#turnPolicy = policy;
+  }
+
+  public get turnPolicy(): MotionGraphTurnPolicy {
+    return this.#turnPolicy;
+  }
 
   public install(
     definition: MotionGraphDefinition | ValidatedMotionGraph
@@ -156,6 +200,7 @@ export class MotionGraphEngine {
       );
     } else {
       this.#runtime.presentation = this.#runtime.staticPresentation(visual);
+      this.#runtime.turn = null;
       this.#runtime.routes.clear();
     }
     return this.#runtime.record("begin-static", effects);
@@ -229,6 +274,7 @@ export class MotionGraphEngine {
     } else {
       this.#runtime.presentation = this.#runtime.staticPresentation(visual);
     }
+    this.#runtime.turn = null;
     this.#runtime.routes.clear();
     this.#runtime.phase = "static";
     return this.#runtime.record("recover-static", effects);
@@ -272,6 +318,7 @@ export class MotionGraphEngine {
     if (settlement !== null) {
       effects.push(settlement);
     }
+    this.#runtime.turn = null;
     this.#runtime.routes.clear();
     this.#runtime.phase = "error";
     return this.#runtime.record("fail-static", effects);
@@ -350,6 +397,33 @@ export class MotionGraphEngine {
       this.#runtime.readiness === "error"
     ) return false;
     return planEventIntent(this.#intentContext(), event).kind !== "reject";
+  }
+
+  /**
+   * The landings `request(target)` would visit now, in order, or null when the
+   * target is unreachable. An empty plan means the target is already held. The
+   * graph is not advanced and no input is allocated.
+   */
+  public planFor(target: GraphStateId): readonly GraphStateId[] | null {
+    if (
+      typeof target !== "string" ||
+      this.#runtime.readiness === "unready" ||
+      this.#runtime.readiness === "disposed" ||
+      this.#runtime.readiness === "error" ||
+      !this.#runtime.hasState(target)
+    ) return null;
+
+    const source = this.#departureState();
+    if (source === null) return null;
+    if (source === target) return Object.freeze([]);
+    if (this.#runtime.edgeDirect(source, target) !== null) {
+      return Object.freeze([target]);
+    }
+    const route = resolveRingRoute(this.#runtime.indexes(), source, target);
+    if (route.kind !== "arc") return null;
+    return this.#turnPolicy === "direct"
+      ? Object.freeze([target])
+      : Object.freeze([...route.states]);
   }
 
   public tick(options: MotionGraphTickOptions): Readonly<MotionGraphResult> {
@@ -440,6 +514,7 @@ export class MotionGraphEngine {
     this.#changeReadiness("disposed", effects);
     this.#runtime.phase = "disposed";
     this.#runtime.presentation = null;
+    this.#runtime.turn = null;
     this.#runtime.routes.clear();
     return this.#runtime.record("dispose", effects);
   }
@@ -472,6 +547,7 @@ export class MotionGraphEngine {
     this.#appendSuperseded(admission, effects);
 
     if (plan.kind === "cancel-before-stable" || plan.kind === "cancel-pending") {
+      this.#runtime.turn = null;
       this.#runtime.routes.cancelPending();
       if (plan.kind === "cancel-pending") this.#runtime.phase = "stable";
       const settled = this.#runtime.ledger.settlePending({
@@ -484,30 +560,72 @@ export class MotionGraphEngine {
     }
 
     switch (plan.kind) {
-      case "replace-pending":
-        this.#runtime.routes.replacePending(plan.edge, sequence);
+      case "replace-pending": {
+        const routed = this.#routeTurn(plan.edge, plan.turn);
+        this.#runtime.turn = routed.turn;
+        this.#runtime.routes.replacePending(routed.edge, sequence);
         if (this.#runtime.phase !== "preparing" && this.#runtime.phase !== "intro") {
           this.#runtime.phase = "waiting";
         }
         break;
+      }
       case "continue-active-target":
+        this.#runtime.turn = null;
         this.#runtime.routes.clearFollowOn();
         this.#runtime.routes.clearReversal();
         break;
       case "continue-reversal-target":
+        this.#runtime.turn = null;
         this.#runtime.routes.clearFollowOn();
         break;
       case "queue-reversal":
+        this.#runtime.turn = null;
         this.#runtime.routes.queueReversal(plan.edge, sequence);
         break;
-      case "queue-follow-on":
-        this.#runtime.routes.queueFollowOn(plan.edge, sequence);
+      case "queue-follow-on": {
+        const routed = this.#routeTurn(plan.edge, plan.turn);
+        this.#runtime.turn = routed.turn;
+        this.#runtime.routes.queueFollowOn(routed.edge, sequence);
         break;
+      }
       case "static-commit":
+        this.#runtime.turn = null;
         this.#commitStaticEdge(plan.edge, sequence, effects, false);
         break;
     }
     return this.#acceptedRequest(admission, sequence, effects);
+  }
+
+  /**
+   * Apply the turn policy to a routed step. `direct` collapses the whole arc
+   * into one departure so no intermediate body is presented, while still
+   * reporting one landing on the ring.
+   */
+  #routeTurn(
+    edge: GraphEdgeDefinition,
+    turn: Readonly<TurnChainPlan> | undefined
+  ): RoutedTurn {
+    if (turn === undefined) return { edge, turn: null };
+    if (this.#turnPolicy === "chain" || turn.remaining.length === 0) {
+      return { edge, turn };
+    }
+    const last = turn.remaining[turn.remaining.length - 1]!;
+    const collapsed = Object.freeze({
+      id: `${turn.ring}.${edge.from}.${last.to}`,
+      from: edge.from,
+      to: last.to,
+      start: edge.start,
+      continuity: edge.continuity,
+      ring: turn.ring
+    }) as GraphEdgeDefinition;
+    return {
+      edge: collapsed,
+      turn: Object.freeze({
+        ring: turn.ring,
+        after: collapsed.id,
+        remaining: Object.freeze([])
+      })
+    };
   }
 
   #applyEventIntent(
@@ -517,6 +635,8 @@ export class MotionGraphEngine {
   ): void {
     if (plan.kind === "accept-noop") return;
 
+    // Event routes are authored point-to-point; they never continue a ring arc.
+    this.#runtime.turn = null;
     if (plan.kind === "cancel-pending") {
       this.#setRequestedState(plan.edge.to, sequence, effects);
       this.#abortPendingForEvent(effects);
@@ -574,8 +694,20 @@ export class MotionGraphEngine {
       visualState: this.#runtime.requireVisualState(),
       routes: this.#runtime.routes,
       indexes: this.#runtime.indexes(),
-      hasPendingRequests: this.#runtime.ledger.pendingRequestCount > 0
+      hasPendingRequests: this.#runtime.ledger.pendingRequestCount > 0,
+      turnInFlight: this.#runtime.turn !== null
     });
+  }
+
+  /** The state a new request would depart from, mirroring intent routing. */
+  #departureState(): GraphStateId | null {
+    const phase = this.#runtime.phase;
+    if (phase === "locked" || phase === "reversible") {
+      const active = this.#runtime.routes.active;
+      if (active === null) return null;
+      return (this.#runtime.routes.reversal ?? active).edge.to;
+    }
+    return this.#runtime.visualState;
   }
 
   #tickIntro(): void {
@@ -747,6 +879,7 @@ export class MotionGraphEngine {
     this.#setVisualState(edge.to, effects);
     effects.push(this.#transitionEnd(edge));
     const completion = this.#runtime.routes.completeActive();
+    if (this.#continueTurn(edge, completion, effects)) return;
 
     if (completion.promoted !== null) {
       this.#runtime.phase = "waiting";
@@ -762,6 +895,54 @@ export class MotionGraphEngine {
       });
       if (settlement !== null) effects.push(settlement);
     }
+  }
+
+  /**
+   * Report a ring landing and, when the chain still owes steps, arm the next
+   * one as the pending route. Returns whether the chain took over the phase.
+   *
+   * The chain is only advanced when the landing is the one it was planned from,
+   * so a route queued by a newer request replans instead of resuming a
+   * superseded arc.
+   */
+  #continueTurn(
+    edge: GraphEdgeDefinition,
+    completion: Readonly<ActiveRouteCompletion>,
+    effects: MotionGraphEffect[]
+  ): boolean {
+    const turn = this.#runtime.turn;
+    if (edge.ring === undefined && turn?.after !== edge.id) return false;
+
+    const owned = turn !== null && turn.after === edge.id;
+    const continues = owned && completion.promoted === null &&
+      turn.remaining.length > 0 &&
+      turn.remaining[0]!.from === edge.to;
+    const queued = completion.promoted === null
+      ? 0
+      : 1 + (turn !== null && turn.after === completion.promoted.edge.id
+        ? turn.remaining.length
+        : 0);
+    effects.push(freezeEffect({
+      type: "turnstep",
+      ring: turn?.ring ?? edge.ring!,
+      from: edge.from,
+      to: edge.to,
+      remaining: continues ? turn.remaining.length : queued
+    }));
+    if (!continues) {
+      if (owned) this.#runtime.turn = null;
+      return false;
+    }
+
+    const [next, ...rest] = turn.remaining;
+    this.#runtime.turn = Object.freeze({
+      ring: turn.ring,
+      after: next!.id,
+      remaining: Object.freeze(rest)
+    });
+    this.#runtime.routes.replacePending(next!, completion.completed.sequence);
+    this.#runtime.phase = "waiting";
+    return true;
   }
 
   #commitStaticEdge(
@@ -780,6 +961,7 @@ export class MotionGraphEngine {
       reason: preparationCommit ? "static-recovery" : "target-committed"
     });
     if (settlement !== null) effects.push(settlement);
+    this.#runtime.turn = null;
     this.#runtime.routes.clear();
     this.#runtime.phase = "static";
   }

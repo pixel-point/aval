@@ -1,8 +1,11 @@
 import type {
   GraphEdgeDefinition,
+  GraphEdgeId,
+  GraphRingId,
   GraphStateId,
   MotionGraphPhase
 } from "./model.js";
+import { resolveRingRoute } from "./ring-plan.js";
 import type { RoutePlanView } from "./route-plan.js";
 import type { ValidatedGraphIndexes } from "./validate.js";
 
@@ -17,6 +20,22 @@ export interface IntentContext {
   readonly routes: RoutePlanView;
   readonly indexes: ValidatedGraphIndexes;
   readonly hasPendingRequests: boolean;
+  /** Whether a chained turn is in flight, which makes pending routes provisional. */
+  readonly turnInFlight: boolean;
+}
+
+/**
+ * The steps a chained turn still owes after the routed edge.
+ *
+ * A plan carries the whole remainder so the engine never has to re-derive an arc
+ * it already chose; every step boundary can still replan from what actually
+ * landed.
+ */
+export interface TurnChainPlan {
+  readonly ring: GraphRingId;
+  /** Edge the remainder continues from; it identifies the chain's own landing. */
+  readonly after: GraphEdgeId;
+  readonly remaining: readonly Readonly<GraphEdgeDefinition>[];
 }
 
 export type StateIntentPlan =
@@ -28,6 +47,7 @@ export type StateIntentPlan =
   | {
       readonly kind: "replace-pending";
       readonly edge: Readonly<GraphEdgeDefinition>;
+      readonly turn?: Readonly<TurnChainPlan>;
     }
   | { readonly kind: "continue-active-target" }
   | { readonly kind: "continue-reversal-target" }
@@ -38,6 +58,7 @@ export type StateIntentPlan =
   | {
       readonly kind: "queue-follow-on";
       readonly edge: Readonly<GraphEdgeDefinition>;
+      readonly turn?: Readonly<TurnChainPlan>;
     }
   | {
       readonly kind: "static-commit";
@@ -97,7 +118,11 @@ export function planStateIntent(
 
   if (phase === "waiting") {
     const pending = requireSlot(context.routes.pending, "waiting pending edge");
-    if (target === pending.edge.to) return freezePlan({ kind: "join-pending" });
+    // A pending step of a chained turn is an intermediate landing, never the
+    // caller's intent, so it cannot absorb a new request by joining it.
+    if (target === pending.edge.to && !context.turnInFlight) {
+      return freezePlan({ kind: "join-pending" });
+    }
     if (target === visualState) return freezePlan({ kind: "cancel-pending" });
     return pendingOrReject(context, visualState, target);
   }
@@ -125,9 +150,15 @@ export function planStateIntent(
     }
   }
   const followOn = directEdge(context.indexes, effective.edge.to, target);
-  return followOn === null
+  if (followOn !== null) {
+    return freezePlan({ kind: "queue-follow-on", edge: followOn });
+  }
+  // Replanning happens from the landing state, so an in-flight step always
+  // completes before the newly chosen arc begins.
+  const turn = turnPlan(context, effective.edge.to, target);
+  return turn === null
     ? freezePlan({ kind: "reject" })
-    : freezePlan({ kind: "queue-follow-on", edge: followOn });
+    : freezePlan({ kind: "queue-follow-on", edge: turn.edge, turn: turn.turn });
 }
 
 /** Resolve and decide an event without mutating semantic state. */
@@ -226,9 +257,40 @@ function pendingOrReject(
   target: GraphStateId
 ): Readonly<StateIntentPlan> {
   const edge = directEdge(context.indexes, from, target);
-  return edge === null
+  if (edge !== null) return freezePlan({ kind: "replace-pending", edge });
+  const turn = turnPlan(context, from, target);
+  return turn === null
     ? freezePlan({ kind: "reject" })
-    : freezePlan({ kind: "replace-pending", edge });
+    : freezePlan({ kind: "replace-pending", edge: turn.edge, turn: turn.turn });
+}
+
+/**
+ * Resolve a multi-step ring arc into its first step plus the queued remainder.
+ *
+ * An arc longer than the ring's `maxChainedSteps` resolves to no plan, which the
+ * caller reports as a route failure rather than silently walking further than
+ * the ring allows.
+ */
+function turnPlan(
+  context: Readonly<IntentContext>,
+  from: GraphStateId,
+  target: GraphStateId
+): Readonly<{
+  edge: Readonly<GraphEdgeDefinition>;
+  turn: Readonly<TurnChainPlan>;
+}> | null {
+  const route = resolveRingRoute(context.indexes, from, target);
+  if (route.kind !== "arc") return null;
+  const first = route.steps[0];
+  if (first === undefined) return null;
+  return Object.freeze({
+    edge: first,
+    turn: Object.freeze({
+      ring: route.ring.id,
+      after: first.id,
+      remaining: Object.freeze(route.steps.slice(1))
+    })
+  });
 }
 
 function directEdge(

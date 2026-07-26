@@ -4,7 +4,17 @@ export {
   type MotionGraphErrorCode
 } from "./errors.js";
 export { GRAPH_IDENTIFIER_PATTERN, GRAPH_LIMITS } from "./limits.js";
-export { MotionGraphEngine } from "./engine.js";
+export {
+  MotionGraphEngine,
+  type MotionGraphEngineOptions,
+  type MotionGraphTurnPolicy
+} from "./engine.js";
+export {
+  planRingArc,
+  resolveRingRoute,
+  type RingArc,
+  type RingRoute
+} from "./ring-plan.js";
 export {
   findFinishBoundary,
   findNextPortalBoundary,
@@ -25,12 +35,16 @@ export type {
   GraphInitialUnitDefinition,
   GraphPortDefinition,
   GraphPresentation,
+  GraphRingDefinition,
+  GraphRingId,
+  GraphRingTieBreak,
   GraphSettlement,
   GraphSettlementError,
   GraphStartPolicy,
   GraphStateDefinition,
   GraphStateId,
   GraphTransitionDefinition,
+  GraphTurnStep,
   GraphUnitId,
   MotionGraphDefinition,
   MotionGraphDisposeOptions,

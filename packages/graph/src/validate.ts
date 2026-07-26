@@ -10,10 +10,13 @@ import type {
   GraphEdgeId,
   GraphEdgeTrigger,
   GraphPortDefinition,
+  GraphRingDefinition,
+  GraphRingId,
   GraphStartPolicy,
   GraphStateDefinition,
   GraphStateId,
   GraphTransitionDefinition,
+  GraphTurnStep,
   MotionGraphDefinition,
   ValidatedMotionGraph
 } from "./model.js";
@@ -38,6 +41,12 @@ export interface ValidatedGraphIndexes {
     GraphEdgeDefinition
   >;
   readonly inverseEdgesById: ReadonlyMap<GraphEdgeId, GraphEdgeDefinition>;
+  readonly ringsById: ReadonlyMap<GraphRingId, GraphRingDefinition>;
+  /** Rings a state belongs to, in ascending ring-id order. */
+  readonly ringsByState: ReadonlyMap<
+    GraphStateId,
+    readonly GraphRingDefinition[]
+  >;
 }
 
 const indexesByGraph = new WeakMap<
@@ -132,10 +141,19 @@ export function validateMotionGraphDefinition(
   const inverseEdgesById = validateReversiblePairs(edges, edgesById);
   validateImmediateCompletionCycles(completionEdgesByState, statesById);
 
+  const rings = cloneRings(input.rings, statesById);
+  const ringsById = new Map(rings.map((ring) => [ring.id, ring]));
+  const ringsByState = indexRingsByState(rings);
+  validateRingStepOwnership(rings, directMutable);
+  for (const edge of edges) {
+    validateTurnEdge(edge, ringsById);
+  }
+
   const definition = Object.freeze({
     initialState,
     states: Object.freeze(states),
-    edges: Object.freeze(edges)
+    edges: Object.freeze(edges),
+    ...(rings.length === 0 ? {} : { rings: Object.freeze(rings) })
   });
   const validated = Object.freeze({ definition }) as unknown as ValidatedMotionGraph;
   const indexes = Object.freeze({
@@ -145,7 +163,9 @@ export function validateMotionGraphDefinition(
     directEdgesByState: directMutable,
     eventEdgesByState: eventMutable,
     completionEdgesByState,
-    inverseEdgesById
+    inverseEdgesById,
+    ringsById,
+    ringsByState
   });
 
   indexesByGraph.set(validated, indexes);
@@ -336,7 +356,8 @@ function cloneEdge(
     }
   }
 
-  const base = { id, from, to, start, continuity } as const;
+  const turn = cloneTurn(input, path);
+  const base = { id, from, to, start, continuity, ...turn } as const;
   if (trigger === undefined) {
     if (transition === undefined) {
       // Transitionless state requests are valid.
@@ -348,6 +369,19 @@ function cloneEdge(
     return Object.freeze({ ...base, trigger });
   }
   return Object.freeze({ ...base, trigger, transition });
+}
+
+/** Read the optional ring membership which marks an edge as one turn step. */
+function cloneTurn(
+  input: Record<string, unknown>,
+  path: string
+): { readonly ring?: GraphRingId; readonly step?: GraphTurnStep } {
+  if (input.ring === undefined && input.step === undefined) return {};
+  const ring = expectIdentifier(input.ring, `${path}.ring`);
+  if (input.step !== 1 && input.step !== -1) {
+    invalid(`${path}.step must be 1 or -1`);
+  }
+  return { ring, step: input.step };
 }
 
 function cloneTrigger(value: unknown, path: string): GraphEdgeTrigger {
@@ -638,6 +672,180 @@ function validateReversiblePairs(
     inverseEdgesById.set(second.id, first);
   }
   return inverseEdgesById;
+}
+
+/**
+ * Clone and validate the authored rings.
+ *
+ * A ring is ordered, so its member list is not sorted here; only the ring array
+ * itself is required to be ascending by id, which keeps multi-ring routing
+ * deterministic without depending on authoring order.
+ */
+function cloneRings(
+  value: unknown,
+  statesById: ReadonlyMap<GraphStateId, GraphStateDefinition>
+): readonly GraphRingDefinition[] {
+  if (value === undefined) return [];
+  const inputs = expectArray(value, "rings");
+  if (inputs.length > GRAPH_LIMITS.maxRings) {
+    invalid(`rings must contain at most ${String(GRAPH_LIMITS.maxRings)} entries`);
+  }
+  const ringIds = new Set<string>();
+  const rings = Array.from(inputs, (entry, index) => {
+    const path = `rings[${String(index)}]`;
+    const input = expectRecord(entry, path);
+    const id = expectIdentifier(input.id, `${path}.id`);
+    addUnique(ringIds, id, `${path}.id`, "ring ID");
+    if (typeof input.cyclic !== "boolean") {
+      invalid(`ring ${quote(id)} cyclic must be a boolean`);
+    }
+    if (input.tieBreak !== "forward" && input.tieBreak !== "backward") {
+      invalid(`ring ${quote(id)} tieBreak must be forward or backward`);
+    }
+    const stateInputs = expectArray(input.states, `${path}.states`);
+    if (stateInputs.length > GRAPH_LIMITS.maxRingStates) {
+      invalid(
+        `ring ${quote(id)} must contain at most ${String(GRAPH_LIMITS.maxRingStates)} states`
+      );
+    }
+    const seen = new Set<string>();
+    const states = Array.from(stateInputs, (state, stateIndex) => {
+      const stateId = expectIdentifier(
+        state,
+        `${path}.states[${String(stateIndex)}]`
+      );
+      if (seen.has(stateId)) {
+        invalid(`ring ${quote(id)} duplicates state ${quote(stateId)}`);
+      }
+      seen.add(stateId);
+      if (!statesById.has(stateId)) {
+        invalid(`ring ${quote(id)} references unknown state ${quote(stateId)}`);
+      }
+      return stateId;
+    });
+    if (states.length < 2) {
+      invalid(`ring ${quote(id)} must contain at least 2 states`);
+    }
+    if (input.cyclic && states.length < 3) {
+      invalid(`cyclic ring ${quote(id)} must contain at least 3 states`);
+    }
+    const maxChainedSteps = expectPositiveSafeInteger(
+      input.maxChainedSteps,
+      `ring ${quote(id)} maxChainedSteps`
+    );
+    if (maxChainedSteps > GRAPH_LIMITS.maxChainedSteps) {
+      invalid(
+        `ring ${quote(id)} maxChainedSteps must be at most ${String(GRAPH_LIMITS.maxChainedSteps)}`
+      );
+    }
+    return Object.freeze({
+      id,
+      states: Object.freeze(states),
+      cyclic: input.cyclic,
+      tieBreak: input.tieBreak,
+      maxChainedSteps
+    });
+  });
+  for (let index = 1; index < rings.length; index += 1) {
+    if (rings[index - 1]!.id >= rings[index]!.id) {
+      invalid("rings must be sorted and unique by id");
+    }
+  }
+  return rings;
+}
+
+function indexRingsByState(
+  rings: readonly GraphRingDefinition[]
+): ReadonlyMap<GraphStateId, readonly GraphRingDefinition[]> {
+  const byState = new Map<GraphStateId, GraphRingDefinition[]>();
+  for (const ring of rings) {
+    for (const state of ring.states) {
+      const group = byState.get(state);
+      if (group === undefined) byState.set(state, [ring]);
+      else group.push(ring);
+    }
+  }
+  return byState;
+}
+
+/**
+ * Reject two rings which both claim the same ordered neighbour pair. The pair
+ * has exactly one authored edge, so two owners would make routing ambiguous.
+ */
+function validateRingStepOwnership(
+  rings: readonly GraphRingDefinition[],
+  directEdgesByState: ReadonlyMap<
+    GraphStateId,
+    ReadonlyMap<GraphStateId, GraphEdgeDefinition>
+  >
+): void {
+  const owners = new Map<string, GraphRingId>();
+  for (const ring of rings) {
+    for (const [from, to] of ringNeighbourPairs(ring)) {
+      const key = `${from} ${to}`;
+      const owner = owners.get(key);
+      if (owner !== undefined) {
+        invalid(
+          `rings ${quote(owner)} and ${quote(ring.id)} both step from ${quote(from)} to ${quote(to)}`
+        );
+      }
+      owners.set(key, ring.id);
+    }
+  }
+  for (const [key, owner] of owners) {
+    const [from, to] = key.split(" ") as [GraphStateId, GraphStateId];
+    const edge = directEdgesByState.get(from)?.get(to);
+    if (edge?.ring !== undefined && edge.ring !== owner) {
+      invalid(
+        `edge ${quote(edge.id)} declares ring ${quote(edge.ring)} but steps inside ring ${quote(owner)}`
+      );
+    }
+  }
+}
+
+/** Every ordered adjacency of a ring, forward first then backward. */
+function ringNeighbourPairs(
+  ring: GraphRingDefinition
+): readonly (readonly [GraphStateId, GraphStateId])[] {
+  const pairs: (readonly [GraphStateId, GraphStateId])[] = [];
+  const length = ring.states.length;
+  const last = ring.cyclic ? length : length - 1;
+  for (let index = 0; index < last; index += 1) {
+    const from = ring.states[index]!;
+    const to = ring.states[(index + 1) % length]!;
+    pairs.push([from, to]);
+  }
+  for (const [from, to] of [...pairs]) pairs.push([to, from]);
+  return pairs;
+}
+
+/** A turn edge must name a real ring and connect two of its neighbours. */
+function validateTurnEdge(
+  edge: GraphEdgeDefinition,
+  ringsById: ReadonlyMap<GraphRingId, GraphRingDefinition>
+): void {
+  if (edge.ring === undefined) return;
+  const ring = ringsById.get(edge.ring);
+  if (ring === undefined) {
+    invalid(`${edgePath(edge)} references unknown ring ${quote(edge.ring)}`);
+  }
+  const fromIndex = ring.states.indexOf(edge.from);
+  const toIndex = ring.states.indexOf(edge.to);
+  if (fromIndex < 0 || toIndex < 0) {
+    invalid(
+      `${edgePath(edge)} connects states outside ring ${quote(ring.id)}`
+    );
+  }
+  const length = ring.states.length;
+  const offset = edge.step ?? 1;
+  const expected = ring.cyclic
+    ? (((fromIndex + offset) % length) + length) % length
+    : fromIndex + offset;
+  if (expected !== toIndex) {
+    invalid(
+      `${edgePath(edge)} is not step ${String(offset)} from ${quote(edge.from)} in ring ${quote(ring.id)}`
+    );
+  }
 }
 
 function validateImmediateCompletionCycles(
