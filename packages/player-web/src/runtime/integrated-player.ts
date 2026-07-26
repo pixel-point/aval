@@ -1,4 +1,8 @@
-import { MotionGraphEngine, type MotionGraphResult } from "@pixel-point/aval-graph";
+import {
+  MotionGraphEngine,
+  type GraphRingDefinition as Ring,
+  type MotionGraphResult
+} from "@pixel-point/aval-graph";
 import {
   RuntimeAssetCatalog,
   type CertifiedVideoRendition
@@ -49,6 +53,8 @@ import { admitIntegratedPlayerAssetSource } from "./integrated-player-resource-a
 import type { RuntimeCanvasResourceLease } from "./canvas-resource-plan.js";
 import { IntegratedContentTicker } from "./integrated-content-ticker.js";
 import { assertSelectedVideoRenditionCatalogIdentity } from "./video-rendition-inspection.js";
+const EMPTY_RINGS: readonly Readonly<Ring>[] = Object.freeze([]);
+
 export * from "./integrated-player-contracts.js";
 export type { RuntimeVisibilitySnapshot, RuntimeVisibilityState } from "./model.js";
 /**
@@ -681,6 +687,20 @@ export class IntegratedPlayer {
     return this.#catalog.graph.definition.edges.some((edge) =>
       edge.from === source && edge.to === target
     );
+  }
+
+  /** The ring axes this asset declares, in compiled order. */
+  public get rings(): readonly Readonly<Ring>[] {
+    return this.#catalog.graph.definition.rings ?? EMPTY_RINGS;
+  }
+
+  /**
+   * The landings a `requestState(target)` would visit now, or null when the
+   * target is unreachable. An empty plan means the target is already held.
+   */
+  public planFor(target: string): readonly string[] | null {
+    if (this.#disposed || typeof target !== "string") return null;
+    return this.#graph.planFor(target);
   }
 
   /** Public M8 clock seam; logical presentation time is retained. */

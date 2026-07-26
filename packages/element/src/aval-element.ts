@@ -20,7 +20,8 @@ import type {
   AvalElementConstructor,
   AvalFit,
   AvalMode,
-  AvalMotion
+  AvalMotion,
+  AvalRing
 } from "./public-types.js";
 
 /** Browser reflection facade. All coordination and effects live in ElementReconciler. */
@@ -92,6 +93,9 @@ export function createAvalElementClass(
     public get inputBindings(): readonly Readonly<Binding>[] {
       return this.#reconciler.inputBindings;
     }
+    public get rings(): readonly Readonly<AvalRing>[] {
+      return this.#reconciler.rings;
+    }
 
     public prepare(
       options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }> = {}
@@ -101,6 +105,9 @@ export function createAvalElementClass(
     public setState(name: string): Promise<void> { return this.#reconciler.setState(name); }
     public send(event: string): boolean { return this.#reconciler.send(event); }
     public readyFor(state: string): boolean { return this.#reconciler.readyFor(state); }
+    public planFor(state: string): readonly string[] | null {
+      return this.#reconciler.planFor(state);
+    }
     public pause(): void { this.#reconciler.pause(); }
     public resume(): Promise<void> { return this.#reconciler.resume(); }
     public getDiagnostics(

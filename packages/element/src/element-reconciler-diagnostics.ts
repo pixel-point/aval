@@ -60,6 +60,7 @@ export function createReconcilerDiagnostics(
     stateNames: state.stateNames,
     eventNames: state.eventNames,
     inputBindings: state.inputBindings,
+    rings: state.rings,
     configuredMotion: configuration.motion,
     hostReducedMotion: desired.hostReducedMotion,
     autoplay: configuration.autoplay,

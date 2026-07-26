@@ -192,6 +192,11 @@ export class ElementAssetGeneration {
     return !this.#terminal && this.#runtime?.readyFor(state) === true;
   }
 
+  public planFor(state: string): readonly string[] | null {
+    if (this.#terminal) return null;
+    return this.#runtime?.planFor(state) ?? null;
+  }
+
   public pause(): void {
     this.#runtime?.pause();
   }

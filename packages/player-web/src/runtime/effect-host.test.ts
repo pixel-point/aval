@@ -409,6 +409,8 @@ function graphSnapshot(): Readonly<MotionGraphSnapshot> {
     pendingEdgeId: null,
     activeEdgeId: null,
     followOnEdgeId: null,
+    turnRing: null,
+    turnStepsRemaining: 0,
     direction: null,
     contentOrdinal: null,
     inputSequence: 0,

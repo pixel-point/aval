@@ -8,7 +8,8 @@ import type {
 import type {
   AvalMode,
   AvalMotion,
-  AvalPublicFailure
+  AvalPublicFailure,
+  AvalRing
 } from "./public-types.js";
 
 /** Sole mutable authority for the element's public playback state. */
@@ -24,6 +25,7 @@ export class ElementPublicState {
   #stateNames: readonly string[] = Object.freeze([]);
   #eventNames: readonly string[] = Object.freeze([]);
   #inputBindings: readonly Readonly<Binding>[] = Object.freeze([]);
+  #rings: readonly Readonly<AvalRing>[] = Object.freeze([]);
   #lastFailure: Readonly<AvalPublicFailure> | null = null;
 
   public get readiness(): RuntimeReadiness { return this.#readiness; }
@@ -37,6 +39,7 @@ export class ElementPublicState {
   public get stateNames(): readonly string[] { return this.#stateNames; }
   public get eventNames(): readonly string[] { return this.#eventNames; }
   public get inputBindings(): readonly Readonly<Binding>[] { return this.#inputBindings; }
+  public get rings(): readonly Readonly<AvalRing>[] { return this.#rings; }
   public get lastFailure(): Readonly<AvalPublicFailure> | null {
     return this.#lastFailure;
   }
@@ -62,6 +65,7 @@ export class ElementPublicState {
     stateNames: readonly string[];
     eventNames: readonly string[];
     bindings: readonly Readonly<Binding>[];
+    rings?: readonly Readonly<AvalRing>[];
   }>): void {
     this.#initialState = metadata.initialState;
     this.#requestedState = metadata.initialState;
@@ -70,6 +74,13 @@ export class ElementPublicState {
     this.#eventNames = Object.freeze([...metadata.eventNames]);
     this.#inputBindings = Object.freeze(metadata.bindings.map((binding) =>
       Object.freeze({ source: binding.source, event: binding.event })
+    ));
+    this.#rings = Object.freeze((metadata.rings ?? []).map((ring) =>
+      Object.freeze({
+        id: ring.id,
+        states: Object.freeze([...ring.states]),
+        cyclic: ring.cyclic
+      })
     ));
   }
 
@@ -121,5 +132,6 @@ export class ElementPublicState {
     this.#stateNames = Object.freeze([]);
     this.#eventNames = Object.freeze([]);
     this.#inputBindings = Object.freeze([]);
+    this.#rings = Object.freeze([]);
   }
 }

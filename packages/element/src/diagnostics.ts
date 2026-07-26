@@ -17,6 +17,7 @@ import type {
   AvalMode,
   AvalMotion,
   AvalPublicFailure,
+  AvalRing,
   AvalTerminalCleanupProof
 } from "./public-types.js";
 
@@ -41,6 +42,7 @@ export interface ElementDiagnosticState {
   readonly stateNames: readonly string[];
   readonly eventNames: readonly string[];
   readonly inputBindings: readonly Readonly<Binding>[];
+  readonly rings?: readonly Readonly<AvalRing>[];
   readonly configuredMotion: AvalMotion;
   readonly hostReducedMotion: boolean | null;
   readonly autoplay: AvalAutoplay;
@@ -98,6 +100,7 @@ export function createElementDiagnostics(
     paused: state.paused,
     effectivelyVisible: state.effectivelyVisible,
     stateNames: Object.freeze([...state.stateNames]),
+    rings: Object.freeze([...(state.rings ?? [])]),
     eventNames: Object.freeze([...state.eventNames]),
     inputBindings: Object.freeze(state.inputBindings.map((binding) =>
       Object.freeze({ source: binding.source, event: binding.event })

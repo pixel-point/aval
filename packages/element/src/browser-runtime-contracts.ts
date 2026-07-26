@@ -9,13 +9,15 @@ import type {
   RuntimeVisibilityState
 } from "@pixel-point/aval-player-web";
 
-import type { AvalRuntimeTraceRecord } from "./public-types.js";
+import type { AvalRing, AvalRuntimeTraceRecord } from "./public-types.js";
 
 export interface BrowserRuntimeMetadata {
   readonly initialState: string;
   readonly stateNames: readonly string[];
   readonly eventNames: readonly string[];
   readonly bindings: readonly Readonly<Binding>[];
+  /** Absent when the asset declares no ring. */
+  readonly rings?: readonly Readonly<AvalRing>[];
   readonly renditions: readonly Readonly<{
     id: string;
     codec: string;
@@ -64,6 +66,7 @@ export interface BrowserRuntimePlayer {
   canSend(event: string): boolean;
   send(event: string): boolean;
   readyFor(state: string): boolean;
+  planFor(state: string): readonly string[] | null;
   pause(): void;
   resume(): Promise<void>;
   setMotionPolicy(policy: MotionPolicy): Promise<unknown>;

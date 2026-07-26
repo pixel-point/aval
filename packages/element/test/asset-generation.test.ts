@@ -454,6 +454,7 @@ function runtimeFixture(dispose: () => Promise<void>): BrowserRuntimePlayer {
     canSend: () => false,
     send: () => false,
     readyFor: () => false,
+    planFor: () => null,
     pause: () => undefined,
     resume: async () => undefined,
     setMotionPolicy: async () => undefined,

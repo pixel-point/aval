@@ -70,6 +70,7 @@ import { assertInteractionTarget } from "./interaction-target.js";
 import type {
   AvalDiagnostics,
   AvalMode,
+  AvalRing,
   AvalTerminalCleanupProof
 } from "./public-types.js";
 
@@ -167,6 +168,7 @@ export class ElementReconciler implements ElementOwnerAuthority {
   public get stateNames(): readonly string[] { return this.#publicState.stateNames; }
   public get eventNames(): readonly string[] { return this.#publicState.eventNames; }
   public get inputBindings(): readonly Readonly<Binding>[] { return this.#publicState.inputBindings; }
+  public get rings(): readonly Readonly<AvalRing>[] { return this.#publicState.rings; }
   public get interactionTarget(): Element | null { return this.#desired.snapshot().interactionTarget; }
   public ownerFailureContext() { return elementFailureContext(
     this.#owners.lifecycle.terminal,
@@ -323,6 +325,15 @@ export class ElementReconciler implements ElementOwnerAuthority {
       const checked = normalizeState(state);
       return checked !== null && this.#owners.controller.active?.readyFor(checked) === true;
     } catch { return false; }
+  }
+
+  /** Dry-run route for a state request; null when there is no route today. */
+  public planFor(state: string): readonly string[] | null {
+    try {
+      const checked = normalizeState(state);
+      if (checked === null) return null;
+      return this.#owners.controller.active?.planFor(checked) ?? null;
+    } catch { return null; }
   }
 
   public pause(): void {

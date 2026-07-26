@@ -436,6 +436,7 @@ export class EffectHost {
         this.#dispatch(cloneGraphEvent(effect), phase);
         return;
       case "fallback":
+      case "turnstep":
         this.#dispatch(cloneGraphEvent(effect), phase);
         return;
       case "settle":
@@ -602,6 +603,8 @@ function isPostDrawEffect(
   // legitimately emits settlement before its readiness change with no pixels.
   return effect.type === "visualstatechange" ||
     effect.type === "transitionend" ||
+    // A ring landing is only real once the body it landed on has been drawn.
+    effect.type === "turnstep" ||
     effect.type === "settle" && hasPresentationBarrier;
 }
 

@@ -83,6 +83,22 @@ export interface AvalFallbackDetail {
   readonly visualState: string | null;
 }
 
+/** One ring axis declared by the loaded asset. */
+export interface AvalRing {
+  readonly id: string;
+  readonly states: readonly string[];
+  readonly cyclic: boolean;
+}
+
+export interface AvalTurnStepDetail {
+  readonly generation: number;
+  readonly ring: string;
+  readonly from: string;
+  readonly to: string;
+  /** Steps still queued after this landing. */
+  readonly remaining: number;
+}
+
 export interface AvalErrorDetail {
   readonly generation: number;
   readonly failure: Readonly<AvalPublicFailure>;
@@ -97,6 +113,7 @@ export interface AvalElementEventMap {
   readonly transitionend: CustomEvent<Readonly<AvalTransitionDetail>>;
   readonly underflow: CustomEvent<Readonly<AvalUnderflowDetail>>;
   readonly fallback: CustomEvent<Readonly<AvalFallbackDetail>>;
+  readonly turnstep: CustomEvent<Readonly<AvalTurnStepDetail>>;
   readonly error: CustomEvent<Readonly<AvalErrorDetail>>;
 }
 
@@ -243,6 +260,7 @@ export interface AvalDiagnostics {
   readonly stateNames: readonly string[];
   readonly eventNames: readonly string[];
   readonly inputBindings: readonly Readonly<Binding>[];
+  readonly rings: readonly Readonly<AvalRing>[];
   readonly configuredMotion: AvalMotion;
   readonly hostReducedMotion: boolean | null;
   readonly autoplay: AvalAutoplay;
@@ -345,11 +363,13 @@ export interface AvalElement extends HTMLElement {
   readonly stateNames: readonly string[];
   readonly eventNames: readonly string[];
   readonly inputBindings: readonly Readonly<Binding>[];
+  readonly rings: readonly Readonly<AvalRing>[];
 
   prepare(options?: Readonly<AvalPrepareOptions>): Promise<RuntimeReadinessResult>;
   setState(name: string): Promise<void>;
   send(event: string): boolean;
   readyFor(state: string): boolean;
+  planFor(state: string): readonly string[] | null;
   pause(): void;
   resume(): Promise<void>;
   getDiagnostics(options?: Readonly<{ readonly trace?: boolean }>): Readonly<AvalDiagnostics>;

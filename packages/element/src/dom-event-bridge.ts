@@ -94,6 +94,15 @@ export class DomEventBridge {
           to: event.to
         }));
         return;
+      case "turnstep":
+        this.#dispatch("turnstep", freezeEventDetail({
+          generation: this.#generation,
+          ring: event.ring,
+          from: event.from,
+          to: event.to,
+          remaining: event.remaining
+        }));
+        return;
       case "fallback": {
         const snapshot = this.#stage.snapshot();
         const reason = normalizeStaticReason(event.reason);

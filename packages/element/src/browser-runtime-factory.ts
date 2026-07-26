@@ -29,6 +29,7 @@ import {
 } from "./cleanup-receipt.js";
 import type {
   AvalCleanupReceipt,
+  AvalRing,
   AvalSourceCandidate
 } from "./public-types.js";
 import { RuntimeAcquisitionCleanupError } from "./runtime-acquisition-error.js";
@@ -242,6 +243,7 @@ function captureMetadata(manifest: Readonly<{
     trigger?: Readonly<{ type: string; name?: string }>;
   }>[];
   bindings: readonly Readonly<Binding>[];
+  rings?: readonly Readonly<AvalRing>[];
   renditions: readonly Readonly<{
     id: string;
     codec: string;
@@ -272,6 +274,13 @@ function captureMetadata(manifest: Readonly<{
     eventNames: Object.freeze(eventNames),
     bindings: Object.freeze(manifest.bindings.map((binding) =>
       Object.freeze({ source: binding.source, event: binding.event })
+    )),
+    rings: Object.freeze((manifest.rings ?? []).map((ring) =>
+      Object.freeze({
+        id: ring.id,
+        states: Object.freeze([...ring.states]),
+        cyclic: ring.cyclic
+      })
     )),
     renditions: Object.freeze(manifest.renditions.map((rendition) =>
       Object.freeze({

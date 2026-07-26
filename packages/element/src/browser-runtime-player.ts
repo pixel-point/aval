@@ -106,6 +106,9 @@ export class BrowserRuntimePlayerOwner implements BrowserRuntimePlayer {
   public canSend(event: string): boolean { return this.#player.canSend(event); }
   public send(event: string): boolean { return this.#player.send(event); }
   public readyFor(state: string): boolean { return this.#player.readyFor(state); }
+  public planFor(state: string): readonly string[] | null {
+    return this.#player.planFor(state);
+  }
   public pause(): void { this.#player.pauseRealtime(); }
   public resume(): Promise<void> { return this.#player.resumeRealtime(); }
   public setMotionPolicy(policy: MotionPolicy): Promise<unknown> {
