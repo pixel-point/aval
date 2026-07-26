@@ -10,15 +10,23 @@ Assets are literal direct-child `<source>` elements. Each requires `src` and
 `type='application/vnd.aval; codecs="..."'`; optional integrity applies to that
 source alone. Child order is preference order.
 
-Core methods are `prepare()`, `setState()`, `send()`, `readyFor()`, `pause()`,
-`resume()`, `getDiagnostics()`, and terminal `dispose()`. Runtime state is read
-through `readiness`, `mode`, `staticReason`, `requestedState`, `visualState`,
-`isTransitioning`, `paused`, `effectivelyVisible`, `stateNames`, `eventNames`,
-and `inputBindings`.
+Core methods are `prepare()`, `setState()`, `send()`, `readyFor()`,
+`planFor()`, `pause()`, `resume()`, `getDiagnostics()`, and terminal
+`dispose()`. Runtime state is read through `readiness`, `mode`, `staticReason`,
+`requestedState`, `visualState`, `isTransitioning`, `paused`,
+`effectivelyVisible`, `stateNames`, `eventNames`, `inputBindings`, and `rings`.
+
+`rings` lists the ordered state axes the asset declares, each as
+`{ id, states, cyclic }`. `planFor(state)` is a dry run of `setState(state)`: it
+returns the landings that request would visit, in order, `[]` when the state is
+already held, or `null` when there is no route today. It never advances the
+graph.
 
 Events are non-cancelable `CustomEvent` instances with immutable bounded
 details: `readinesschange`, `requestedstatechange`, `visualstatechange`,
-`transitionstart`, `transitionend`, `underflow`, `fallback`, and `error`. Every
+`transitionstart`, `transitionend`, `turnstep`, `underflow`, `fallback`, and
+`error`. `turnstep` fires once per landing while a request walks a ring, with
+`{ ring, from, to, remaining }`; its pixels are already drawn when it fires. Every
 event except `error` bubbles and is composed. Listen for `error` directly on
 the element; keeping that event local follows native media behavior and avoids
 colliding with page-wide error handlers. Every detail includes a positive

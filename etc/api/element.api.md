@@ -111,6 +111,10 @@ export interface AvalDiagnostics {
     readonly requestedState: string | null;
     // (undocumented)
     readonly resizeGeneration: number;
+    // Warning: (ae-forgotten-export) The symbol "AvalRing" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly rings: readonly Readonly<AvalRing>[];
     // (undocumented)
     readonly runtime: Readonly<{
         selectedRendition: string | null;
@@ -208,6 +212,8 @@ export interface AvalElement extends HTMLElement {
     // (undocumented)
     readonly paused: boolean;
     // (undocumented)
+    planFor(state: string): readonly string[] | null;
+    // (undocumented)
     prepare(options?: Readonly<AvalPrepareOptions>): Promise<RuntimeReadinessResult>;
     // (undocumented)
     readonly readiness: RuntimeReadiness;
@@ -223,6 +229,8 @@ export interface AvalElement extends HTMLElement {
     readonly requestedState: string | null;
     // (undocumented)
     resume(): Promise<void>;
+    // (undocumented)
+    readonly rings: readonly Readonly<AvalRing>[];
     // (undocumented)
     send(event: string): boolean;
     // (undocumented)
@@ -280,6 +288,10 @@ export interface AvalElementEventMap {
     readonly transitionend: CustomEvent<Readonly<AvalTransitionDetail>>;
     // (undocumented)
     readonly transitionstart: CustomEvent<Readonly<AvalTransitionDetail>>;
+    // Warning: (ae-forgotten-export) The symbol "AvalTurnStepDetail" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly turnstep: CustomEvent<Readonly<AvalTurnStepDetail>>;
     // (undocumented)
     readonly underflow: CustomEvent<Readonly<AvalUnderflowDetail>>;
     // (undocumented)

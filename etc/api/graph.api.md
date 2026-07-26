@@ -34,6 +34,9 @@ export const GRAPH_IDENTIFIER_PATTERN: RegExp;
 export const GRAPH_LIMITS: Readonly<{
     maxStates: 32;
     maxEdges: 64;
+    maxRings: 8;
+    maxRingStates: 32;
+    maxChainedSteps: 16;
     maxPortsPerBody: 16;
     maxInputsPerTick: 32;
     maxRoutingOperationsPerTick: 64;
@@ -66,8 +69,10 @@ export interface GraphEdgeDefinition {
     readonly from: GraphStateId;
     // (undocumented)
     readonly id: GraphEdgeId;
+    readonly ring?: GraphRingId;
     // (undocumented)
     readonly start: GraphStartPolicy;
+    readonly step?: GraphTurnStep;
     // (undocumented)
     readonly to: GraphStateId;
     // (undocumented)
@@ -132,6 +137,26 @@ export type GraphPresentation = {
     readonly direction: "forward" | "reverse";
 };
 
+// @public
+export interface GraphRingDefinition {
+    // (undocumented)
+    readonly cyclic: boolean;
+    // (undocumented)
+    readonly id: GraphRingId;
+    // (undocumented)
+    readonly maxChainedSteps: number;
+    // (undocumented)
+    readonly states: readonly GraphStateId[];
+    // (undocumented)
+    readonly tieBreak: GraphRingTieBreak;
+}
+
+// @public (undocumented)
+export type GraphRingId = string;
+
+// @public
+export type GraphRingTieBreak = "forward" | "backward";
+
 // @public (undocumented)
 export type GraphSettlement = {
     readonly type: "resolve";
@@ -188,6 +213,9 @@ export type GraphTransitionDefinition = {
     readonly reverseOf?: GraphEdgeId;
 };
 
+// @public
+export type GraphTurnStep = 1 | -1;
+
 // @public (undocumented)
 export type GraphUnitId = string;
 
@@ -203,6 +231,8 @@ export interface MotionGraphDefinition {
     readonly edges: readonly GraphEdgeDefinition[];
     // (undocumented)
     readonly initialState: GraphStateId;
+    // (undocumented)
+    readonly rings?: readonly GraphRingDefinition[];
     // (undocumented)
     readonly states: readonly GraphStateDefinition[];
 }
@@ -240,6 +270,12 @@ export type MotionGraphEffect = {
     readonly from: GraphStateId;
     readonly to: GraphStateId;
 } | {
+    readonly type: "turnstep";
+    readonly ring: GraphRingId;
+    readonly from: GraphStateId;
+    readonly to: GraphStateId;
+    readonly remaining: number;
+} | {
     readonly type: "fallback";
     readonly reason: string;
 } | {
@@ -250,6 +286,7 @@ export type MotionGraphEffect = {
 
 // @public
 export class MotionGraphEngine {
+    constructor(options?: Readonly<MotionGraphEngineOptions>);
     // (undocumented)
     beginAnimated(): Readonly<MotionGraphResult>;
     // (undocumented)
@@ -263,6 +300,7 @@ export class MotionGraphEngine {
     getTrace(): readonly Readonly<MotionGraphTraceRecord>[];
     // (undocumented)
     install(definition: MotionGraphDefinition | ValidatedMotionGraph): Readonly<MotionGraphResult>;
+    planFor(target: GraphStateId): readonly GraphStateId[] | null;
     previewTick(options: MotionGraphTickOptions): Readonly<MotionGraphResult>;
     // (undocumented)
     recoverStatic(reason: string, options?: Readonly<MotionGraphRecoveryOptions>): Readonly<MotionGraphResult>;
@@ -276,6 +314,14 @@ export class MotionGraphEngine {
     snapshot(): Readonly<MotionGraphSnapshot>;
     // (undocumented)
     tick(options: MotionGraphTickOptions): Readonly<MotionGraphResult>;
+    // (undocumented)
+    get turnPolicy(): MotionGraphTurnPolicy;
+}
+
+// @public (undocumented)
+export interface MotionGraphEngineOptions {
+    // (undocumented)
+    readonly turnPolicy?: MotionGraphTurnPolicy;
 }
 
 // @public (undocumented)
@@ -356,6 +402,8 @@ export interface MotionGraphSnapshot {
     readonly requestedState: GraphStateId | null;
     // (undocumented)
     readonly routeOperationsLastTick: number;
+    readonly turnRing: GraphRingId | null;
+    readonly turnStepsRemaining: number;
     // (undocumented)
     readonly visualState: GraphStateId | null;
 }
@@ -382,6 +430,9 @@ export interface MotionGraphTraceRecord {
     readonly result: Readonly<MotionGraphResult>;
 }
 
+// @public
+export type MotionGraphTurnPolicy = "chain" | "direct";
+
 // @public (undocumented)
 export class MotionGraphValidationError extends MotionGraphError {
     constructor(message: string, options?: ErrorOptions);
@@ -389,6 +440,36 @@ export class MotionGraphValidationError extends MotionGraphError {
 
 // @public
 export function nextBodyFrame(body: GraphBodyDefinition, currentFrame: number): Readonly<BodyFrameStep>;
+
+// @public
+export function planRingArc(ring: Readonly<GraphRingDefinition>, from: GraphStateId, to: GraphStateId): Readonly<RingArc> | null;
+
+// Warning: (ae-forgotten-export) The symbol "ValidatedGraphIndexes" needs to be exported by the entry point index.d.ts
+//
+// @public
+export function resolveRingRoute(indexes: ValidatedGraphIndexes, from: GraphStateId, to: GraphStateId): Readonly<RingRoute>;
+
+// @public
+export interface RingArc {
+    // (undocumented)
+    readonly direction: "forward" | "backward";
+    readonly states: readonly GraphStateId[];
+}
+
+// @public
+export type RingRoute = {
+    readonly kind: "none";
+} | {
+    readonly kind: "too-long";
+    readonly ring: Readonly<GraphRingDefinition>;
+    readonly distance: number;
+} | {
+    readonly kind: "arc";
+    readonly ring: Readonly<GraphRingDefinition>;
+    readonly direction: "forward" | "backward";
+    readonly states: readonly GraphStateId[];
+    readonly steps: readonly Readonly<GraphEdgeDefinition>[];
+};
 
 // @public (undocumented)
 export interface ValidatedMotionGraph {

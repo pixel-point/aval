@@ -15,6 +15,7 @@ import { FormatHeader } from '@pixel-point/aval-format';
 import { GraphBodyDefinition } from '@pixel-point/aval-graph';
 import { GraphEdgeDefinition } from '@pixel-point/aval-graph';
 import type { GraphPresentation } from '@pixel-point/aval-graph';
+import { GraphRingDefinition } from '@pixel-point/aval-graph';
 import type { GraphSettlementError } from '@pixel-point/aval-graph';
 import { GraphStartPolicy } from '@pixel-point/aval-graph';
 import type { GraphStateDefinition } from '@pixel-point/aval-graph';
@@ -1995,6 +1996,7 @@ export class IntegratedPlayer {
     // (undocumented)
     participantSnapshot(): Readonly<IntegratedPlayerParticipantSnapshot> | null;
     pauseRealtime(): void;
+    planFor(target: string): readonly string[] | null;
     // (undocumented)
     prepare(options?: IntegratedPrepareOptions): Promise<RuntimeReadinessResult>;
     readyFor(target: string): boolean;
@@ -2004,6 +2006,7 @@ export class IntegratedPlayer {
     // (undocumented)
     requestState(target: string): Promise<void>;
     resumeRealtime(): Promise<void>;
+    get rings(): readonly Readonly<GraphRingDefinition>[];
     send(event: string): boolean;
     // (undocumented)
     setHostReducedMotion(reduced: boolean): Promise<Readonly<MotionPolicySnapshot>>;

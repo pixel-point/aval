@@ -547,6 +547,7 @@ export interface CompiledManifest {
     readonly readiness: Readiness;
     // (undocumented)
     readonly renditions: readonly ProductionRendition[];
+    readonly rings?: readonly Ring[];
     // (undocumented)
     readonly states: readonly State[];
     // (undocumented)
@@ -712,6 +713,10 @@ export interface FormatBudgets {
     readonly maxRenditions: number;
     // (undocumented)
     readonly maxReversibleFrames: number;
+    // (undocumented)
+    readonly maxRings: number;
+    // (undocumented)
+    readonly maxRingStates: number;
     // (undocumented)
     readonly maxStates: number;
     // (undocumented)
@@ -1660,6 +1665,20 @@ export interface ResidencyEndpoint {
 
 // @public
 export function resolveFormatBudgets(options?: FormatOptions): Readonly<FormatBudgets>;
+
+// @public
+export interface Ring {
+    // (undocumented)
+    readonly cyclic: boolean;
+    // (undocumented)
+    readonly id: Id;
+    // (undocumented)
+    readonly maxChainedSteps: number;
+    // (undocumented)
+    readonly states: readonly Id[];
+    // (undocumented)
+    readonly tieBreak: "forward" | "backward";
+}
 
 // @public (undocumented)
 export function sameH265ProfileTierLevel(left: H265ProfileTierLevel, right: H265ProfileTierLevel): boolean;

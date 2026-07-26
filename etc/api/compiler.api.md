@@ -76,6 +76,14 @@ export interface AssetInspection {
     readonly codec: VideoCodec_2;
     // (undocumented)
     readonly digestClaim: "all-internal-and-whole-file";
+    readonly edges: readonly {
+        readonly id: string;
+        readonly from: string;
+        readonly to: string;
+        readonly ring?: string;
+        readonly step?: 1 | -1;
+        readonly derived?: true;
+    }[];
     // (undocumented)
     readonly file: string;
     // (undocumented)
@@ -95,6 +103,14 @@ export interface AssetInspection {
         readonly bitDepth: 8 | 10;
         readonly coded: string;
         readonly alphaLayout: AlphaLayout;
+    }[];
+    // (undocumented)
+    readonly rings: readonly {
+        readonly id: string;
+        readonly states: readonly string[];
+        readonly cyclic: boolean;
+        readonly tieBreak: "forward" | "backward";
+        readonly maxChainedSteps: number;
     }[];
     // (undocumented)
     readonly sha256: string;
@@ -732,7 +748,6 @@ export interface NormalizedSourceProject {
     readonly bindings: readonly SourceBinding[];
     // (undocumented)
     readonly canvas: Canvas;
-    // (undocumented)
     readonly edges: readonly SourceEdge[];
     // (undocumented)
     readonly encodings: readonly NormalizedVideoEncoding[];
@@ -742,6 +757,9 @@ export interface NormalizedSourceProject {
     readonly initialState: string;
     // (undocumented)
     readonly projectVersion: "1.0";
+    readonly ringNotes?: readonly string[];
+    // Warning: (ae-forgotten-export) The symbol "SourceRing" needs to be exported by the entry point index.d.ts
+    readonly rings?: readonly SourceRing[];
     // (undocumented)
     readonly sources: readonly SourceDescriptor[];
     // (undocumented)
@@ -845,8 +863,10 @@ export type SourceDescriptor = {
     readonly frameCount: number;
 };
 
+// Warning: (ae-forgotten-export) The symbol "SourceTurnMembership" needs to be exported by the entry point index.d.ts
+//
 // @public (undocumented)
-export type SourceEdge = {
+export type SourceEdge = (SourceTurnMembership & {
     readonly id: string;
     readonly from: string;
     readonly to: string;
@@ -857,7 +877,7 @@ export type SourceEdge = {
     readonly transition?: SourceTransition;
     readonly continuity: "exact-authored" | "exact-reverse";
     readonly targetRunwayFrames?: never;
-} | {
+}) | (SourceTurnMembership & {
     readonly id: string;
     readonly from: string;
     readonly to: string;
@@ -868,7 +888,7 @@ export type SourceEdge = {
     readonly transition?: never;
     readonly continuity: "cut";
     readonly targetRunwayFrames: number;
-};
+});
 
 // @public (undocumented)
 export interface SourcePort {
@@ -898,6 +918,7 @@ export interface SourceProject {
     readonly initialState: string;
     // (undocumented)
     readonly projectVersion: "1.0";
+    readonly rings?: readonly SourceRing[];
     // (undocumented)
     readonly sources: readonly SourceDescriptor[];
     // (undocumented)
