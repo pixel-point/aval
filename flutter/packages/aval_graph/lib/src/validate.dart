@@ -32,6 +32,8 @@ class ValidatedGraphIndexes {
     required this.eventEdgesByState,
     required this.completionEdgesByState,
     required this.inverseEdgesById,
+    required this.ringsById,
+    required this.ringsByState,
   });
 
   final Map<GraphStateId, GraphStateDefinition> statesById;
@@ -42,6 +44,10 @@ class ValidatedGraphIndexes {
   final Map<GraphStateId, Map<String, GraphEdgeDefinition>> eventEdgesByState;
   final Map<GraphStateId, GraphEdgeDefinition> completionEdgesByState;
   final Map<GraphEdgeId, GraphEdgeDefinition> inverseEdgesById;
+  final Map<GraphRingId, GraphRingDefinition> ringsById;
+
+  /// Rings a state belongs to, in ascending ring-id order.
+  final Map<GraphStateId, List<GraphRingDefinition>> ringsByState;
 }
 
 final Expando<ValidatedGraphIndexes> _indexesByGraph =
@@ -119,10 +125,21 @@ ValidatedMotionGraph validateMotionGraphDefinition(Object? value) {
   final inverseEdgesById = _validateReversiblePairs(edges, edgesById);
   _validateImmediateCompletionCycles(completionEdgesByState, statesById);
 
+  final rings = _cloneRings(input['rings'], statesById);
+  final ringsById = <GraphRingId, GraphRingDefinition>{
+    for (final ring in rings) ring.id: ring,
+  };
+  final ringsByState = _indexRingsByState(rings);
+  _validateRingStepOwnership(rings, directMutable);
+  for (final edge in edges) {
+    _validateTurnEdge(edge, ringsById);
+  }
+
   final definition = MotionGraphDefinition(
     initialState: initialState,
     states: states,
     edges: edges,
+    rings: rings.isEmpty ? null : rings,
   );
   final validated = ValidatedMotionGraph(definition);
   final indexes = ValidatedGraphIndexes(
@@ -133,6 +150,8 @@ ValidatedMotionGraph validateMotionGraphDefinition(Object? value) {
     eventEdgesByState: eventMutable,
     completionEdgesByState: completionEdgesByState,
     inverseEdgesById: inverseEdgesById,
+    ringsById: ringsById,
+    ringsByState: ringsByState,
   );
 
   _indexesByGraph[validated] = indexes;
@@ -321,6 +340,8 @@ GraphEdgeDefinition _cloneEdge(
     }
   }
 
+  final turn = _cloneTurnMembership(input, path);
+
   return GraphEdgeDefinition(
     id: id,
     from: from,
@@ -329,7 +350,24 @@ GraphEdgeDefinition _cloneEdge(
     continuity: continuity,
     trigger: trigger,
     transition: transition,
+    ring: turn.ring,
+    step: turn.step,
   );
+}
+
+({GraphRingId? ring, GraphTurnStep? step}) _cloneTurnMembership(
+  Map<String, Object?> input,
+  String path,
+) {
+  if (input['ring'] == null && input['step'] == null) {
+    return (ring: null, step: null);
+  }
+  final ring = _expectIdentifier(input['ring'], '$path.ring');
+  final step = _asInteger(input['step']);
+  if (step != 1 && step != -1) {
+    _invalid('$path.step must be 1 or -1');
+  }
+  return (ring: ring, step: step);
 }
 
 GraphEdgeTrigger _cloneTrigger(Object? value, String path) {
@@ -698,5 +736,162 @@ Map<V, GraphEdgeDefinition> _getOrCreate<K, V>(
 String _edgePath(GraphEdgeDefinition edge) => 'edge ${_quote(edge.id)}';
 
 String _quote(String value) => jsonEncode(value);
+
+List<GraphRingDefinition> _cloneRings(
+  Object? value,
+  Map<GraphStateId, GraphStateDefinition> statesById,
+) {
+  if (value == null) return const <GraphRingDefinition>[];
+  final inputs = _expectArray(value, 'rings');
+  if (inputs.length > GraphLimits.maxRings) {
+    _invalid('rings must contain at most ${GraphLimits.maxRings} entries');
+  }
+  final rings = <GraphRingDefinition>[
+    for (var index = 0; index < inputs.length; index += 1)
+      _cloneRing(inputs[index], index, statesById),
+  ];
+  for (var index = 1; index < rings.length; index += 1) {
+    if (rings[index - 1].id.compareTo(rings[index].id) >= 0) {
+      _invalid('rings must be sorted and unique by id');
+    }
+  }
+  return rings;
+}
+
+GraphRingDefinition _cloneRing(
+  Object? value,
+  int index,
+  Map<GraphStateId, GraphStateDefinition> statesById,
+) {
+  final path = 'rings[$index]';
+  final input = _expectRecord(value, path);
+  final id = _expectIdentifier(input['id'], '$path.id');
+  final cyclic = input['cyclic'];
+  if (cyclic is! bool) {
+    _invalid('ring ${_quote(id)} cyclic must be a boolean');
+  }
+  final tieBreakRaw = input['tieBreak'];
+  if (tieBreakRaw != 'forward' && tieBreakRaw != 'backward') {
+    _invalid('ring ${_quote(id)} tieBreak must be forward or backward');
+  }
+  final tieBreak = tieBreakRaw == 'forward'
+      ? GraphRingTieBreak.forward
+      : GraphRingTieBreak.backward;
+  final stateInputs = _expectArray(input['states'], '$path.states');
+  if (stateInputs.length > GraphLimits.maxRingStates) {
+    _invalid(
+      'ring ${_quote(id)} must contain at most ${GraphLimits.maxRingStates} states',
+    );
+  }
+  final seen = <String>{};
+  final states = <GraphStateId>[
+    for (var stateIndex = 0; stateIndex < stateInputs.length; stateIndex += 1)
+      () {
+        final stateId = _expectIdentifier(
+          stateInputs[stateIndex],
+          '$path.states[$stateIndex]',
+        );
+        if (seen.contains(stateId)) {
+          _invalid('ring ${_quote(id)} duplicates state ${_quote(stateId)}');
+        }
+        seen.add(stateId);
+        if (!statesById.containsKey(stateId)) {
+          _invalid(
+            'ring ${_quote(id)} references unknown state ${_quote(stateId)}',
+          );
+        }
+        return stateId;
+      }(),
+  ];
+  if (states.length < 2) {
+    _invalid('ring ${_quote(id)} must contain at least 2 states');
+  }
+  if (cyclic && states.length < 3) {
+    _invalid('cyclic ring ${_quote(id)} must contain at least 3 states');
+  }
+  final maxChainedSteps =
+      _expectPositiveSafeInteger(input['maxChainedSteps'], '$path.maxChainedSteps');
+  if (maxChainedSteps > GraphLimits.maxChainedSteps) {
+    _invalid(
+      'ring ${_quote(id)} maxChainedSteps must be at most ${GraphLimits.maxChainedSteps}',
+    );
+  }
+  return GraphRingDefinition(
+    id: id,
+    states: states,
+    cyclic: cyclic,
+    tieBreak: tieBreak,
+    maxChainedSteps: maxChainedSteps,
+  );
+}
+
+Map<GraphStateId, List<GraphRingDefinition>> _indexRingsByState(
+  List<GraphRingDefinition> rings,
+) {
+  final byState = <GraphStateId, List<GraphRingDefinition>>{};
+  for (final ring in rings) {
+    for (final state in ring.states) {
+      (byState[state] ??= <GraphRingDefinition>[]).add(ring);
+    }
+  }
+  return byState;
+}
+
+void _validateRingStepOwnership(
+  List<GraphRingDefinition> rings,
+  Map<GraphStateId, Map<GraphStateId, GraphEdgeDefinition>> directEdgesByState,
+) {
+  final owners = <String, ({GraphRingId ring, GraphStateId from, GraphStateId to})>{};
+  for (final ring in rings) {
+    for (final pair in _ringNeighbourPairs(ring)) {
+      final key = '${pair.$1}\u0000${pair.$2}';
+      final owner = owners[key];
+      if (owner != null) {
+        _invalid(
+          'rings ${_quote(owner.ring)} and ${_quote(ring.id)} both step from '
+          '${_quote(pair.$1)} to ${_quote(pair.$2)}',
+        );
+      }
+      owners[key] = (ring: ring.id, from: pair.$1, to: pair.$2);
+    }
+  }
+  for (final owner in owners.values) {
+    final edge = directEdgesByState[owner.from]?[owner.to];
+    if (edge?.ring != null && edge!.ring != owner.ring) {
+      _invalid(
+        'edge ${_quote(edge.id)} declares ring ${_quote(edge.ring!)} but steps '
+        'inside ring ${_quote(owner.ring)}',
+      );
+    }
+  }
+}
+
+Iterable<(GraphStateId, GraphStateId)> _ringNeighbourPairs(GraphRingDefinition ring) sync* {
+  final states = ring.states;
+  for (var i = 0; i < states.length - 1; i += 1) {
+    yield (states[i], states[i + 1]);
+    yield (states[i + 1], states[i]);
+  }
+  if (ring.cyclic && states.length >= 2) {
+    yield (states.last, states.first);
+    yield (states.first, states.last);
+  }
+}
+
+void _validateTurnEdge(
+  GraphEdgeDefinition edge,
+  Map<GraphRingId, GraphRingDefinition> ringsById,
+) {
+  if (edge.ring == null && edge.step == null) return;
+  if (edge.ring == null || edge.step == null) {
+    _invalid('edge ${_quote(edge.id)} turn membership requires both ring and step');
+  }
+  final ring = ringsById[edge.ring];
+  if (ring == null) {
+    _invalid(
+      'edge ${_quote(edge.id)} references unknown ring ${_quote(edge.ring!)}',
+    );
+  }
+}
 
 Never _invalid(String message) => throw MotionGraphValidationError(message);

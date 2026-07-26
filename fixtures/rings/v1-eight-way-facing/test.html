@@ -9,18 +9,35 @@
     body { font-family: monospace; background: #111; color: #eee; display: flex; height: 100vh; overflow: hidden; }
 
     #left { flex: 0 0 300px; display: flex; flex-direction: column; padding: 16px; gap: 12px; border-right: 1px solid #333; overflow-y: auto; }
-    #right { flex: 1; display: flex; flex-direction: column; padding: 16px; gap: 12px; overflow: hidden; }
+    #right { flex: 1; display: flex; flex-direction: column; padding: 16px; gap: 12px; overflow: hidden; min-width: 0; }
 
     h2 { font-size: 13px; color: #999; text-transform: uppercase; letter-spacing: 1px; }
 
-    #stage { display: flex; align-items: center; justify-content: center; flex: 1; background: #1a1a1a; border-radius: 8px; }
-    aval-player { width: 256px; height: 256px; image-rendering: pixelated; }
+    #stage {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      min-height: 280px;
+      background: #1a1a1a;
+      border-radius: 8px;
+    }
+
+    /* Custom elements default to display:inline — width/height only apply when block-level. */
+    aval-player {
+      display: block;
+      width: 256px;
+      height: 256px;
+      background: #0d0d0d;
+      image-rendering: pixelated;
+    }
 
     .dir-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
     .dir-btn {
       padding: 10px 4px; border: 1px solid #444; background: #222; color: #ccc;
       border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 12px;
       transition: background 0.1s;
+      min-height: 44px;
     }
     .dir-btn:hover { background: #333; }
     .dir-btn.active { background: #2a4a2a; border-color: #5a5; color: #8f8; }
@@ -28,11 +45,14 @@
     #policy-select { padding: 6px; background: #222; border: 1px solid #444; color: #ccc; border-radius: 4px; font-family: monospace; width: 100%; }
 
     #plan-out { background: #0a1a0a; border: 1px solid #2a3a2a; border-radius: 4px; padding: 10px; font-size: 11px; min-height: 80px; white-space: pre; overflow: auto; color: #8f8; }
-    #event-log { flex: 1; background: #1a1a0a; border: 1px solid #3a3a2a; border-radius: 4px; padding: 10px; font-size: 11px; overflow-y: auto; color: #dd8; }
+    #ring-info { background: #0a0a1a; border: 1px solid #2a2a3a; border-radius: 4px; padding: 10px; font-size: 11px; color: #88f; line-height: 1.5; }
+    #event-log { flex: 1; background: #1a1a0a; border: 1px solid #3a3a2a; border-radius: 4px; padding: 10px; font-size: 11px; overflow-y: auto; color: #dd8; min-height: 120px; }
     #event-log .entry { margin-bottom: 2px; }
     #event-log .turnstep { color: #f90; }
     #event-log .statechange { color: #9cf; }
     #event-log .transition { color: #c9f; }
+    #event-log .ready { color: #8f8; }
+    #event-log .error { color: #f66; }
 
     #state-badge { font-size: 16px; font-weight: bold; color: #8f8; text-align: center; padding: 4px; }
     #frame-badge { font-size: 11px; color: #666; text-align: center; }
@@ -44,38 +64,36 @@
 <div id="left">
   <h2>State Control</h2>
   <div id="state-badge">walk_n</div>
-  <div id="frame-badge">—</div>
+  <div id="frame-badge">readiness: —</div>
 
   <div class="dir-grid">
     <div></div>
-    <button class="dir-btn active" data-state="walk_n">N</button>
+    <button class="dir-btn active" data-state="walk_n" type="button">N</button>
     <div></div>
-    <button class="dir-btn" data-state="walk_nw">NW</button>
+    <button class="dir-btn" data-state="walk_nw" type="button">NW</button>
     <div></div>
-    <button class="dir-btn" data-state="walk_ne">NE</button>
-    <button class="dir-btn" data-state="walk_w">W</button>
+    <button class="dir-btn" data-state="walk_ne" type="button">NE</button>
+    <button class="dir-btn" data-state="walk_w" type="button">W</button>
     <div></div>
-    <button class="dir-btn" data-state="walk_e">E</button>
-    <button class="dir-btn" data-state="walk_sw">SW</button>
+    <button class="dir-btn" data-state="walk_e" type="button">E</button>
+    <button class="dir-btn" data-state="walk_sw" type="button">SW</button>
     <div></div>
-    <button class="dir-btn" data-state="walk_se">SE</button>
+    <button class="dir-btn" data-state="walk_se" type="button">SE</button>
     <div></div>
-    <button class="dir-btn" data-state="walk_s">S</button>
+    <button class="dir-btn" data-state="walk_s" type="button">S</button>
     <div></div>
   </div>
 
-  <h2>Turn Policy</h2>
-  <select id="policy-select">
-    <option value="forward">forward (prefer +1 steps)</option>
-    <option value="backward">backward (prefer -1 steps)</option>
-    <option value="shortest">shortest (auto-pick)</option>
+  <h2>Turn Policy note</h2>
+  <select id="policy-select" disabled title="turnPolicy is fixed at player construction in this build">
+    <option value="forward">forward (compile-time default)</option>
   </select>
 
   <h2>planFor output</h2>
   <div id="plan-out">awaiting player...</div>
 
   <h2>Ring info</h2>
-  <div id="plan-out" style="min-height:40px; color:#88f;">
+  <div id="ring-info">
     Ring: facing.walk · 8 states · cyclic<br>
     16 derived turn edges (±1 step each)<br>
     maxChainedSteps: 4
@@ -84,32 +102,37 @@
 <div id="right">
   <h2>AVAL Player — v1-eight-way-facing (placeholder frames)</h2>
   <div id="stage">
-    <aval-player id="player">
+    <aval-player
+      id="player"
+      width="256"
+      height="256"
+      aria-label="Eight-way facing ring test player"
+    >
       <source
         src="./public/vp9.avl"
-        type='application/vnd.aval; codecs="vp09.00.21.08.01.01.01.01.00"'>
+        type='application/vnd.aval; codecs="vp09.00.11.08.01.01.01.01.00"'>
     </aval-player>
   </div>
 
   <h2 style="display:flex;justify-content:space-between;align-items:center;">
     Event log
-    <button class="clear-btn" id="clear-log">clear</button>
+    <button class="clear-btn" id="clear-log" type="button">clear</button>
   </h2>
   <div id="event-log"><div class="entry">Waiting for player...</div></div>
 </div>
 
 <script type="module">
-  import { defineAvalElement } from "../../../packages/element/dist/auto.js";
-  defineAvalElement();
+  // auto.js defines + registers <aval-player> as a side effect
+  import "@pixel-point/aval-element/auto";
 
   const player = document.getElementById("player");
   const planOut = document.getElementById("plan-out");
   const eventLog = document.getElementById("event-log");
   const stateBadge = document.getElementById("state-badge");
   const frameBadge = document.getElementById("frame-badge");
-  const policySelect = document.getElementById("policy-select");
   let currentState = "walk_n";
   let logCount = 0;
+  let interactive = false;
 
   function addLog(text, cls) {
     const entry = document.createElement("div");
@@ -131,80 +154,165 @@
     }
     try {
       const plan = player.planFor(currentState);
-      planOut.textContent = JSON.stringify(plan, null, 2);
+      planOut.textContent = plan == null
+        ? "null (player not interactive yet)"
+        : JSON.stringify(plan, null, 2);
     } catch (e) {
       planOut.textContent = `Error: ${e.message}`;
     }
   }
 
-  // Direction buttons
-  document.querySelectorAll(".dir-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const target = btn.dataset.state;
-      document.querySelectorAll(".dir-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      currentState = target;
-      stateBadge.textContent = target;
-      try {
+  function setActiveButton(state) {
+    document.querySelectorAll(".dir-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.state === state);
+    });
+  }
+
+  let chainBusy = false;
+
+  /**
+   * Drive the ring one authored step at a time.
+   *
+   * Hard-cut edges (used so WebCodecs can reconfigure between units) are
+   * reliable for single hops; multi-hop `setState` on this short placeholder
+   * asset can stall in route warm-up. Walking `planFor()` intermediates keeps
+   * the compass UI snappy and still exercises ring planning + turn edges.
+   */
+  async function applyState(target) {
+    if (chainBusy) {
+      addLog(`busy — ignored setState("${target}")`);
+      return;
+    }
+    chainBusy = true;
+    setActiveButton(target);
+    try {
+      const plan = typeof player.planFor === "function" ? player.planFor(target) : null;
+      if (plan == null) {
+        addLog(`planFor("${target}") = null — falling back to setState`, "error");
         player.setState(target);
         addLog(`setState("${target}")`, "statechange");
-      } catch (e) {
-        addLog(`setState error: ${e.message}`);
+      } else if (plan.length === 0) {
+        addLog(`already at "${target}"`);
+      } else {
+        addLog(`planFor("${target}") = ${JSON.stringify(plan)}`, "statechange");
+        for (const step of plan) {
+          await new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+              if (done) return;
+              done = true;
+              player.removeEventListener("transitionend", onEnd);
+              player.removeEventListener("visualstatechange", onVisual);
+              resolve();
+            };
+            const onEnd = (e) => {
+              if ((e.detail?.to ?? null) === step) finish();
+            };
+            const onVisual = (e) => {
+              if ((e.detail?.to ?? null) === step) finish();
+            };
+            player.addEventListener("transitionend", onEnd);
+            player.addEventListener("visualstatechange", onVisual);
+            try {
+              player.setState(step);
+              addLog(`setState("${step}")`, "statechange");
+            } catch (e) {
+              addLog(`setState error: ${e.message}`, "error");
+              finish();
+              return;
+            }
+            // Hard-cuts are near-instant; don't hang the UI if an event is missed.
+            setTimeout(finish, 2500);
+          });
+          // Brief settle so the next hop's runway decode is not raced.
+          await new Promise((r) => setTimeout(r, 120));
+        }
       }
+    } catch (e) {
+      addLog(`applyState error: ${e.message}`, "error");
+    } finally {
+      chainBusy = false;
+      currentState = player.visualState || target;
+      stateBadge.textContent = currentState;
+      setActiveButton(currentState);
       updatePlan();
+    }
+  }
+
+  document.querySelectorAll(".dir-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void applyState(btn.dataset.state);
     });
   });
 
-  // Turn policy
-  policySelect.addEventListener("change", () => {
-    const policy = policySelect.value;
-    try {
-      player.turnPolicy = policy;
-      addLog(`turnPolicy = "${policy}"`);
-    } catch (e) {
-      // turnPolicy may not exist in all builds
-      addLog(`turnPolicy N/A: ${e.message}`);
+  // Official element events (see grass-rabbit main.js)
+  player.addEventListener("readinesschange", (e) => {
+    const to = e.detail?.to ?? player.readiness ?? "?";
+    frameBadge.textContent = `readiness: ${to}`;
+    addLog(`readiness → ${to}`, "ready");
+    if (to === "interactiveReady" || to === "visualReady" || to === "staticReady") {
+      interactive = true;
+      updatePlan();
     }
   });
 
-  // Player events
-  player.addEventListener("statechange", e => {
-    const state = e.detail?.state ?? e.state ?? "?";
-    stateBadge.textContent = state;
-    currentState = state;
-    document.querySelectorAll(".dir-btn").forEach(b => {
-      b.classList.toggle("active", b.dataset.state === state);
-    });
-    addLog(`statechange → "${state}"`, "statechange");
+  player.addEventListener("visualstatechange", (e) => {
+    const to = e.detail?.to ?? "?";
+    const from = e.detail?.from ?? "?";
+    currentState = to;
+    stateBadge.textContent = to;
+    setActiveButton(to);
+    addLog(`visualstate ${from} → ${to}`, "statechange");
     updatePlan();
   });
 
-  player.addEventListener("turnstep", e => {
-    const d = e.detail ?? e;
-    addLog(`turnstep: ${d.from ?? "?"} → ${d.to ?? "?"} (step ${d.step ?? "?"})`, "turnstep");
+  player.addEventListener("requestedstatechange", (e) => {
+    const to = e.detail?.to ?? "?";
+    addLog(`requestedstate → ${to}`, "statechange");
   });
 
-  player.addEventListener("transition", e => {
-    const d = e.detail ?? e;
-    addLog(`transition: ${d.from ?? "?"} → ${d.to ?? "?"}`, "transition");
+  player.addEventListener("turnstep", (e) => {
+    const d = e.detail ?? {};
+    addLog(
+      `turnstep: ${d.from ?? "?"} → ${d.to ?? "?"} (remaining ${d.remaining ?? "?"}) ring=${d.ring ?? "?"}`,
+      "turnstep",
+    );
   });
 
-  player.addEventListener("framechange", e => {
-    const f = e.detail?.frame ?? e.frame;
-    if (f !== undefined) frameBadge.textContent = `frame ${f}`;
+  player.addEventListener("transitionstart", (e) => {
+    const d = e.detail ?? {};
+    addLog(`transitionstart: ${d.from ?? "?"} → ${d.to ?? "?"} edge=${d.edge ?? "?"}`, "transition");
   });
 
-  player.addEventListener("ready", () => {
-    addLog("player ready");
+  player.addEventListener("transitionend", (e) => {
+    const d = e.detail ?? {};
+    addLog(`transitionend: ${d.from ?? "?"} → ${d.to ?? "?"}`, "transition");
+  });
+
+  player.addEventListener("error", (e) => {
+    const detail = e.detail ?? e;
+    addLog(`error: ${JSON.stringify(detail)}`, "error");
+    console.error("AVAL player error", detail);
+  });
+
+  // Poll readiness once in case the event already fired before listeners attached
+  const boot = () => {
+    if (player.readiness) {
+      frameBadge.textContent = `readiness: ${player.readiness}`;
+      if (["interactiveReady", "visualReady", "staticReady"].includes(player.readiness)) {
+        interactive = true;
+      }
+    }
     updatePlan();
+  };
+  boot();
+  // Element upgrades async after the module import
+  customElements.whenDefined("aval-player").then(() => {
+    requestAnimationFrame(boot);
+    setTimeout(boot, 100);
+    setTimeout(boot, 500);
+    setTimeout(boot, 2000);
   });
-
-  player.addEventListener("error", e => {
-    addLog(`error: ${e.message ?? JSON.stringify(e.detail)}`, "");
-  });
-
-  // Initial plan
-  updatePlan();
 </script>
 </body>
 </html>

@@ -19,6 +19,27 @@ typedef GraphEdgeId = String;
 /// A body, transition, or intro clip's stable identifier.
 typedef GraphUnitId = String;
 
+/// A facing / locomotion ring's stable identifier.
+typedef GraphRingId = String;
+
+/// Which arc a ring prefers when both directions are equally long.
+enum GraphRingTieBreak {
+  forward,
+  backward;
+}
+
+/// One signed step along a ring: `1` walks forward, `-1` walks backward.
+typedef GraphTurnStep = int;
+
+/// How a multi-step ring request is served.
+///
+/// [chain] walks every intermediate state (frame continuity). [direct]
+/// collapses the arc into its departure boundary for reduced-motion hosts.
+enum MotionGraphTurnPolicy {
+  chain,
+  direct;
+}
+
 /// Direction of travel for a reversible transition or its live presentation.
 enum TransitionDirection {
   forward,
@@ -214,6 +235,8 @@ class GraphEdgeDefinition {
     required this.continuity,
     this.trigger,
     this.transition,
+    this.ring,
+    this.step,
   });
 
   final GraphEdgeId id;
@@ -223,6 +246,30 @@ class GraphEdgeDefinition {
   final GraphStartPolicy start;
   final GraphTransitionDefinition? transition;
   final GraphContinuity continuity;
+
+  /// Ring this edge steps along. Present on turn edges only.
+  final GraphRingId? ring;
+
+  /// Signed adjacency offset inside [ring]. Present on turn edges only (`1` or `-1`).
+  final GraphTurnStep? step;
+}
+
+/// An ordered set of states along one axis. Adjacent members are joined by turn
+/// edges so multi-step requests chain single steps rather than authoring every pair.
+class GraphRingDefinition {
+  GraphRingDefinition({
+    required this.id,
+    required List<GraphStateId> states,
+    required this.cyclic,
+    required this.tieBreak,
+    required this.maxChainedSteps,
+  }) : states = List.unmodifiable(states);
+
+  final GraphRingId id;
+  final List<GraphStateId> states;
+  final bool cyclic;
+  final GraphRingTieBreak tieBreak;
+  final int maxChainedSteps;
 }
 
 /// An untrusted, author-supplied graph definition.
@@ -231,12 +278,15 @@ class MotionGraphDefinition {
     required this.initialState,
     required List<GraphStateDefinition> states,
     required List<GraphEdgeDefinition> edges,
+    List<GraphRingDefinition>? rings,
   })  : states = List.unmodifiable(states),
-        edges = List.unmodifiable(edges);
+        edges = List.unmodifiable(edges),
+        rings = rings == null ? null : List.unmodifiable(rings);
 
   final GraphStateId initialState;
   final List<GraphStateDefinition> states;
   final List<GraphEdgeDefinition> edges;
+  final List<GraphRingDefinition>? rings;
 }
 
 /// A definition that has passed [validateMotionGraphDefinition].

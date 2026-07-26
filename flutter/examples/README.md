@@ -36,3 +36,20 @@ example with `--dart-define=AVAL_DECODE_LIB=<abs path to dylib>`.
 - `aval_player` (the runtime engine package) is under active development and is
   intentionally **not** a dependency of these examples yet — they wire the graph
   and the decoder directly.
+
+## rings_eight_way
+
+Compass demo for **rings + turn edges** (Dart `planFor` / sequential `request`).
+
+```bash
+cd flutter/examples/rings_eight_way && flutter pub get && flutter run -d chrome
+```
+
+## rings_climbing
+
+Advanced climbing **motion atlas** demo (Grok Imagine stills + stamina ring +
+action spokes). See `rings_climbing/README.md`.
+
+```bash
+cd flutter/examples/rings_climbing && flutter pub get && flutter run -d chrome
+```

@@ -6,6 +6,7 @@
 library;
 
 import 'model.dart';
+import 'ring_plan.dart';
 import 'route_plan.dart';
 import 'validate.dart';
 
@@ -21,6 +22,7 @@ class IntentContext {
     required this.routes,
     required this.indexes,
     required this.hasPendingRequests,
+    this.turnInFlight = false,
   });
 
   final MotionGraphPhase phase;
@@ -28,6 +30,24 @@ class IntentContext {
   final RoutePlanView routes;
   final ValidatedGraphIndexes indexes;
   final bool hasPendingRequests;
+
+  /// Whether a chained turn is in flight (makes pending routes provisional).
+  final bool turnInFlight;
+}
+
+/// The steps a chained turn still owes after the routed edge.
+class TurnChainPlan {
+  const TurnChainPlan({
+    required this.ring,
+    required this.after,
+    required this.remaining,
+  });
+
+  final GraphRingId ring;
+
+  /// Edge the remainder continues from.
+  final GraphEdgeId after;
+  final List<GraphEdgeDefinition> remaining;
 }
 
 sealed class StateIntentPlan {
@@ -100,16 +120,19 @@ class StateIntentPlanCancelPending extends StateIntentPlan {
 }
 
 class StateIntentPlanReplacePending extends StateIntentPlan {
-  const StateIntentPlanReplacePending(this.edge);
+  const StateIntentPlanReplacePending(this.edge, {this.turn});
 
   final GraphEdgeDefinition edge;
+  final TurnChainPlan? turn;
 
   @override
   bool operator ==(Object other) =>
-      other is StateIntentPlanReplacePending && other.edge == edge;
+      other is StateIntentPlanReplacePending &&
+      other.edge == edge &&
+      other.turn == turn;
 
   @override
-  int get hashCode => Object.hash(StateIntentPlanReplacePending, edge);
+  int get hashCode => Object.hash(StateIntentPlanReplacePending, edge, turn);
 
   @override
   String toString() => 'StateIntentPlan.replacePending(edge: ${edge.id})';
@@ -158,16 +181,19 @@ class StateIntentPlanQueueReversal extends StateIntentPlan {
 }
 
 class StateIntentPlanQueueFollowOn extends StateIntentPlan {
-  const StateIntentPlanQueueFollowOn(this.edge);
+  const StateIntentPlanQueueFollowOn(this.edge, {this.turn});
 
   final GraphEdgeDefinition edge;
+  final TurnChainPlan? turn;
 
   @override
   bool operator ==(Object other) =>
-      other is StateIntentPlanQueueFollowOn && other.edge == edge;
+      other is StateIntentPlanQueueFollowOn &&
+      other.edge == edge &&
+      other.turn == turn;
 
   @override
-  int get hashCode => Object.hash(StateIntentPlanQueueFollowOn, edge);
+  int get hashCode => Object.hash(StateIntentPlanQueueFollowOn, edge, turn);
 
   @override
   String toString() => 'StateIntentPlan.queueFollowOn(edge: ${edge.id})';
@@ -363,10 +389,10 @@ StateIntentPlan planStateIntent(IntentContext context, GraphStateId target) {
       return StateIntentPlanQueueReversal(inverse);
     }
   }
-  final followOn = _directEdge(context.indexes, effective.edge.to, target);
-  return followOn == null
+  final follow = _pendingTurnOrDirect(context, effective.edge.to, target);
+  return follow == null
       ? const StateIntentPlanReject()
-      : StateIntentPlanQueueFollowOn(followOn);
+      : StateIntentPlanQueueFollowOn(follow.edge, turn: follow.turn);
 }
 
 /// Resolve and decide an event without mutating semantic state.
@@ -455,10 +481,41 @@ StateIntentPlan _pendingOrReject(
   GraphStateId from,
   GraphStateId target,
 ) {
-  final edge = _directEdge(context.indexes, from, target);
-  return edge == null
+  final routed = _pendingTurnOrDirect(context, from, target);
+  return routed == null
       ? const StateIntentPlanReject()
-      : StateIntentPlanReplacePending(edge);
+      : StateIntentPlanReplacePending(routed.edge, turn: routed.turn);
+}
+
+/// Direct neighbour edge, or first step of a ring arc with the remainder queued.
+({GraphEdgeDefinition edge, TurnChainPlan? turn})? _pendingTurnOrDirect(
+  IntentContext context,
+  GraphStateId from,
+  GraphStateId target,
+) {
+  final edge = _directEdge(context.indexes, from, target);
+  if (edge != null) return (edge: edge, turn: null);
+  return _turnPlan(context, from, target);
+}
+
+/// Resolve a multi-step ring arc into its first step plus the queued remainder.
+({GraphEdgeDefinition edge, TurnChainPlan turn})? _turnPlan(
+  IntentContext context,
+  GraphStateId from,
+  GraphStateId target,
+) {
+  final route = resolveRingRoute(context.indexes, from, target);
+  if (route is! RingRouteArc) return null;
+  if (route.steps.isEmpty) return null;
+  final first = route.steps.first;
+  return (
+    edge: first,
+    turn: TurnChainPlan(
+      ring: route.ring.id,
+      after: first.id,
+      remaining: List.unmodifiable(route.steps.skip(1)),
+    ),
+  );
 }
 
 GraphEdgeDefinition? _directEdge(

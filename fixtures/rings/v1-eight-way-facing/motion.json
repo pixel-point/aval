@@ -11,14 +11,257 @@
     ],
     "width": 256
   },
-  "edges": [],
+  "edges": [
+    {
+      "id": "facing.walk.n.ne",
+      "from": "walk_n",
+      "to": "walk_ne",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": 1
+    },
+    {
+      "id": "facing.walk.n.nw",
+      "from": "walk_n",
+      "to": "walk_nw",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": -1
+    },
+    {
+      "id": "facing.walk.ne.e",
+      "from": "walk_ne",
+      "to": "walk_e",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": 1
+    },
+    {
+      "id": "facing.walk.ne.n",
+      "from": "walk_ne",
+      "to": "walk_n",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": -1
+    },
+    {
+      "id": "facing.walk.e.se",
+      "from": "walk_e",
+      "to": "walk_se",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": 1
+    },
+    {
+      "id": "facing.walk.e.ne",
+      "from": "walk_e",
+      "to": "walk_ne",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": -1
+    },
+    {
+      "id": "facing.walk.se.s",
+      "from": "walk_se",
+      "to": "walk_s",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": 1
+    },
+    {
+      "id": "facing.walk.se.e",
+      "from": "walk_se",
+      "to": "walk_e",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": -1
+    },
+    {
+      "id": "facing.walk.s.sw",
+      "from": "walk_s",
+      "to": "walk_sw",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": 1
+    },
+    {
+      "id": "facing.walk.s.se",
+      "from": "walk_s",
+      "to": "walk_se",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": -1
+    },
+    {
+      "id": "facing.walk.sw.w",
+      "from": "walk_sw",
+      "to": "walk_w",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": 1
+    },
+    {
+      "id": "facing.walk.sw.s",
+      "from": "walk_sw",
+      "to": "walk_s",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": -1
+    },
+    {
+      "id": "facing.walk.w.nw",
+      "from": "walk_w",
+      "to": "walk_nw",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": 1
+    },
+    {
+      "id": "facing.walk.w.sw",
+      "from": "walk_w",
+      "to": "walk_sw",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": -1
+    },
+    {
+      "id": "facing.walk.nw.n",
+      "from": "walk_nw",
+      "to": "walk_n",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": 1
+    },
+    {
+      "id": "facing.walk.nw.w",
+      "from": "walk_nw",
+      "to": "walk_w",
+      "continuity": "cut",
+      "start": {
+        "type": "cut",
+        "targetPort": "default",
+        "maxWaitFrames": 1
+      },
+      "targetRunwayFrames": 6,
+      "kind": "turn",
+      "ring": "facing.walk",
+      "step": -1
+    }
+  ],
   "encodings": [
     {
-      "codec": "h264",
-      "preset": "slow",
+      "codec": "vp9",
+      "deadline": "good",
+      "cpuUsed": 4,
+      "threads": 4,
       "renditions": [
         {
-          "crf": 20,
+          "crf": 33,
           "height": 256,
           "id": "walk.1x",
           "width": 256
@@ -65,7 +308,7 @@
       "digits": 4,
       "directory": "frames",
       "firstNumber": 0,
-      "frameCount": 64,
+      "frameCount": 128,
       "id": "walk",
       "prefix": "frame-",
       "suffix": ".png",
@@ -117,13 +360,13 @@
           "id": "default",
           "portalFrames": [
             0,
-            4
+            8
           ]
         }
       ],
       "range": [
         0,
-        8
+        16
       ],
       "source": "walk"
     },
@@ -137,13 +380,13 @@
           "id": "default",
           "portalFrames": [
             0,
-            4
+            8
           ]
         }
       ],
       "range": [
-        8,
-        16
+        16,
+        32
       ],
       "source": "walk"
     },
@@ -157,13 +400,13 @@
           "id": "default",
           "portalFrames": [
             0,
-            4
+            8
           ]
         }
       ],
       "range": [
-        16,
-        24
+        32,
+        48
       ],
       "source": "walk"
     },
@@ -177,13 +420,13 @@
           "id": "default",
           "portalFrames": [
             0,
-            4
+            8
           ]
         }
       ],
       "range": [
-        24,
-        32
+        48,
+        64
       ],
       "source": "walk"
     },
@@ -197,13 +440,13 @@
           "id": "default",
           "portalFrames": [
             0,
-            4
+            8
           ]
         }
       ],
       "range": [
-        32,
-        40
+        64,
+        80
       ],
       "source": "walk"
     },
@@ -217,13 +460,13 @@
           "id": "default",
           "portalFrames": [
             0,
-            4
+            8
           ]
         }
       ],
       "range": [
-        40,
-        48
+        80,
+        96
       ],
       "source": "walk"
     },
@@ -237,13 +480,13 @@
           "id": "default",
           "portalFrames": [
             0,
-            4
+            8
           ]
         }
       ],
       "range": [
-        48,
-        56
+        96,
+        112
       ],
       "source": "walk"
     },
@@ -257,13 +500,13 @@
           "id": "default",
           "portalFrames": [
             0,
-            4
+            8
           ]
         }
       ],
       "range": [
-        56,
-        64
+        112,
+        128
       ],
       "source": "walk"
     }

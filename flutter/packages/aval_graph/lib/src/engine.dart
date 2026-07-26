@@ -12,9 +12,16 @@ import 'model.dart';
 import 'operation_journal.dart';
 import 'portal_search.dart';
 import 'request_ledger.dart';
+import 'ring_plan.dart';
 
 class MotionGraphEngine {
+  MotionGraphEngine({MotionGraphTurnPolicy turnPolicy = MotionGraphTurnPolicy.chain})
+      : _turnPolicy = turnPolicy;
+
   final MotionGraphEngineState _runtime = MotionGraphEngineState();
+  final MotionGraphTurnPolicy _turnPolicy;
+
+  MotionGraphTurnPolicy get turnPolicy => _turnPolicy;
 
   /// Installs a graph definition. [definition] may be raw, untrusted data
   /// (validated internally — see `validate.dart`) or an already-validated
@@ -302,6 +309,43 @@ class MotionGraphEngine {
       return false;
     }
     return planEventIntent(_intentContext(), event) is! EventIntentPlanReject;
+  }
+
+  /// Landings [request] would visit now, in order, or `null` when unreachable.
+  /// An empty plan means the target is already held. Does not advance the graph.
+  List<GraphStateId>? planFor(GraphStateId target) {
+    if (_runtime.readiness == MotionGraphReadiness.unready ||
+        _runtime.readiness == MotionGraphReadiness.disposed ||
+        _runtime.readiness == MotionGraphReadiness.error ||
+        !_runtime.hasState(target)) {
+      return null;
+    }
+    final source = _departureState();
+    if (source == null) return null;
+    if (source == target) return const <GraphStateId>[];
+    if (_runtime.edgeDirect(source, target) != null) {
+      return List<GraphStateId>.unmodifiable(<GraphStateId>[target]);
+    }
+    final route = resolveRingRoute(_runtime.indexes(), source, target);
+    if (route is! RingRouteArc) return null;
+    if (_turnPolicy == MotionGraphTurnPolicy.direct) {
+      return List<GraphStateId>.unmodifiable(<GraphStateId>[target]);
+    }
+    return List<GraphStateId>.unmodifiable(route.states);
+  }
+
+  GraphStateId? _departureState() {
+    final visual = _runtime.visualState;
+    if (visual == null) return null;
+    final pending = _runtime.routes.pending;
+    if (pending != null) return pending.edge.to;
+    final followOn = _runtime.routes.followOn;
+    if (followOn != null) return followOn.edge.to;
+    final reversal = _runtime.routes.reversal;
+    if (reversal != null) return reversal.edge.to;
+    final active = _runtime.routes.active;
+    if (active != null) return active.edge.to;
+    return visual;
   }
 
   MotionGraphResult tick(MotionGraphTickOptions options) {

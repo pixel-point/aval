@@ -13,4 +13,7 @@ abstract final class GraphLimits {
   static const int maxInputsPerTick = 32;
   static const int maxRoutingOperationsPerTick = 64;
   static const int maxTraceRecords = 256;
+  static const int maxRings = 8;
+  static const int maxRingStates = 32;
+  static const int maxChainedSteps = 16;
 }

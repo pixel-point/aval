@@ -23,4 +23,13 @@ export 'src/portal_search.dart'
         greatestFinishWaitFrames,
         greatestPortalWaitFrames,
         nextBodyFrame;
+export 'src/ring_plan.dart'
+    show
+        RingArc,
+        RingRoute,
+        RingRouteArc,
+        RingRouteNone,
+        RingRouteTooLong,
+        planRingArc,
+        resolveRingRoute;
 export 'src/validate.dart' show validateMotionGraphDefinition;

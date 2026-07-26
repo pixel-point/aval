@@ -35,3 +35,26 @@ any 64-frame render of a walk cycle to compile it for real.
 
 - `packages/compiler/test/source-ring-fixture.test.ts` — expansion, ids, and
   budget of the checked-in markup.
+
+## Browser test bed
+
+Serve the **aval monorepo root** with Vite (bare package imports + decoder
+module workers will not resolve under plain `python -m http.server`):
+
+```bash
+# from /home/johndpope/Documents/GitHub/aval
+./node_modules/.bin/vite --config fixtures/rings/v1-eight-way-facing/vite.config.js
+# open http://localhost:8765/fixtures/rings/v1-eight-way-facing/test.html
+```
+
+Notes:
+
+- Placeholder frames live in `frames/` (64 opaque PNGs). Recompile with
+  `npm run avl -- compile fixtures/rings/v1-eight-way-facing/motion.json --out fixtures/rings/v1-eight-way-facing/public --force`.
+- Ring steps are **authored hard-cut edges** that shadow the compiler's
+  derived portal edges. Portal multi-unit switches currently fail WebCodecs
+  decode on this short fixture; hard-cuts reconfigure cleanly. The `rings`
+  declaration remains so `planFor()` / ring metadata still work.
+- `test.html` walks `planFor()` one hop at a time for reliable multi-direction
+  clicks.
+

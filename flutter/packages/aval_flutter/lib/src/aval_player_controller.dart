@@ -12,6 +12,7 @@
 library;
 
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:aval_format/aval_format.dart';
@@ -329,6 +330,27 @@ class AvalPlayerController extends ChangeNotifier {
   /// Sends a graph event by name directly.
   void send(String event) {
     if (_graph != null) engine.send(event);
+  }
+
+  /// Dry-run landings for a [request] toward [target], or `null` if unreachable.
+  /// Empty means already at [target]. Does not advance the graph.
+  List<String>? planFor(String target) {
+    if (_graph == null) return null;
+    return engine.planFor(target);
+  }
+
+  /// Requests a graph state by id (turn / locomotion). Preloads the body unit
+  /// for [target] so the first painted frame is ready after the edge commits.
+  MotionGraphResult? request(String target) {
+    if (_graph == null) return null;
+    final result = engine.request(target);
+    final unit = _unitForState[target];
+    if (unit != null) {
+      // Fire-and-forget decode for the landing unit.
+      unawaited(ensureUnitDecoded(unit));
+    }
+    notifyListeners();
+    return result;
   }
 
   @override

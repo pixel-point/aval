@@ -1,0 +1,12 @@
+[package]
+name = "aval_graph"
+version = "0.1.0"
+edition = "2021"
+description = "Pure Rust port of AVAL ring arc planning (packages/graph ring-plan.ts)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "aval_graph"
+path = "src/lib.rs"
+
+[dependencies]
