@@ -26,6 +26,7 @@ import type { MotionGraphReadiness } from '@pixel-point/aval-graph';
 import type { MotionGraphResult } from '@pixel-point/aval-graph';
 import type { MotionGraphSnapshot } from '@pixel-point/aval-graph';
 import type { MotionGraphTickOptions } from '@pixel-point/aval-graph';
+import type { MotionGraphTurnPolicy } from '@pixel-point/aval-graph';
 import { ParsedFrontIndex } from '@pixel-point/aval-format';
 import { parseVideoCodecString } from '@pixel-point/aval-format';
 import type { Port } from '@pixel-point/aval-format';

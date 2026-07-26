@@ -67,7 +67,7 @@ export class IntegratedPlayer {
   readonly #assetBinding: IntegratedPlayerAssetBinding;
   readonly #participant: IntegratedPlayerParticipantController;
   readonly #decoderReentry: IntegratedPlayerDecoderReentry;
-  readonly #graph = new MotionGraphEngine();
+  readonly #graph: MotionGraphEngine;
   readonly #requests = new RequestPromises();
   readonly #effects: EffectHost;
   readonly #fallbackStore: IntegratedFallbackStore;
@@ -112,6 +112,11 @@ export class IntegratedPlayer {
       workerAvailable: candidateAvailability.workerAvailable,
       rendererAvailable: candidateAvailability.rendererAvailable
     });
+    // Host option objects are read once; the turn policy is fixed for the
+    // player's lifetime because it shapes every route it plans.
+    this.#graph = new MotionGraphEngine(
+      options.turnPolicy === undefined ? {} : { turnPolicy: options.turnPolicy }
+    );
     const eventSink = options.eventSink;
     const diagnosticsSink = options.diagnosticsSink;
     const hostMaxRuntimeBytesOption = options.hostMaxRuntimeBytes;

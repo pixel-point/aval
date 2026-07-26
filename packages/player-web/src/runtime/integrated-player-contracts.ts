@@ -2,7 +2,8 @@ import type {
   GraphPresentation,
   MotionGraphResult,
   MotionGraphSnapshot,
-  MotionGraphTickOptions
+  MotionGraphTickOptions,
+  MotionGraphTurnPolicy
 } from "@pixel-point/aval-graph";
 
 import type {
@@ -190,6 +191,12 @@ interface IntegratedPlayerCommonOptions {
   readonly timers?: IntegratedTimerHost;
   /** Internal M5.5 clock ownership; public pause/autoplay remains M8. */
   readonly realtime?: Readonly<IntegratedRealtimeDriverOptions>;
+  /**
+   * How a multi-step ring request is served. "chain" (default) walks every
+   * intermediate state; "direct" lands in the target without them, for hosts
+   * honouring a reduced motion preference.
+   */
+  readonly turnPolicy?: MotionGraphTurnPolicy;
 }
 
 export type IntegratedPlayerOptions = IntegratedPlayerCommonOptions & (

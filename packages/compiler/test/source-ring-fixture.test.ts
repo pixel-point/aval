@@ -13,6 +13,10 @@ const FIXTURE = resolve(
   HERE,
   "../../../fixtures/rings/v1-eight-way-facing/motion.json"
 );
+const PRE_RINGS_FIXTURE = resolve(
+  HERE,
+  "../../../fixtures/compiler/v1/source/motion.json"
+);
 
 describe("eight-way facing ring fixture", () => {
   it("expands into the whole ring without authoring one edge", () => {
@@ -95,5 +99,23 @@ describe("eight-way facing ring fixture", () => {
       if (result.snapshot.phase === "stable") break;
     }
     expect(landed).toEqual(["walk_ne", "walk_e"]);
+  });
+});
+
+describe("projects authored before rings existed", () => {
+  it("normalize with no ring keys and no expansion at all", () => {
+    const raw = readFileSync(PRE_RINGS_FIXTURE);
+    const project = parseSourceProject(raw);
+
+    // AC10: the checked-in pre-rings project is untouched by expansion, so its
+    // compiled output stays byte-identical.
+    expect("rings" in project).toBe(false);
+    expect("ringNotes" in project).toBe(false);
+    const authored = JSON.parse(new TextDecoder().decode(raw)) as {
+      readonly edges: readonly { readonly id: string }[];
+    };
+    expect(project.edges.map(({ id }) => id))
+      .toEqual([...authored.edges.map(({ id }) => id)].sort());
+    expect(project.edges.some((edge) => edge.derived === true)).toBe(false);
   });
 });
