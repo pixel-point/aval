@@ -16,6 +16,7 @@ The element package retains its exact graph and format `1.0.2` dependencies. The
 ```sh
 node scripts/release/prepare-safari-hotfix.mjs
 node scripts/release/verify-safari-hotfix.mjs
+node scripts/release/verify-safari-hotfix.mjs --registry
 ```
 
 The preparation script verifies the baseline SHA-512 values against pinned registry archives, checks the precise changed-file allowlist, packs each release archive twice to confirm identical bytes, and requires the archive file lists to remain identical. It writes tarballs and `package-index.json` to ignored `artifacts/safari-hotfix/1.0.3/`. It refuses to overwrite that output.
@@ -29,4 +30,8 @@ The candidate archives have these SHA-256 digests:
 | `pixel-point-aval-element-1.0.3.tgz` | `5a896d3ad7a8dbc0f8e8a07d86fad8f14ada010cb84b802feb9f4a0a085ea98b` |
 | `pixel-point-aval-svelte-1.0.3.tgz` | `337b49f9ad9516ed720ab0d3d0454bf0bba6ca6eaff8ea9db5c1632052ec312b` |
 
-Publish element then Svelte under `next`. Verify both exact registry integrity values and install them into a fresh consumer before moving either `latest` tag. Registry tags should only change after both packages pass.
+## Publication result
+
+Published on 2026-09-25: element first, then Svelte, both under `next`. The registry returned the candidate SHA-512 integrity for each version. A fresh registry install passed the same declaration, production build and ten Chromium/WebKit browser checks. Both `latest` tags were then promoted to `1.0.3`; final registry reads show `latest` and `next` at `1.0.3` for both packages. The pre-promotion `latest` versions were `1.0.2`.
+
+The package source manifests in this checkout remain at `1.0.1` because the source for the published 1.0.2 `/lazy` entries is absent. Future interactive releases must restore that source or use another explicitly reviewed artifact-based release recipe. Local Playwright WebKit confirms the regression; this host did not run shipping Safari 26.

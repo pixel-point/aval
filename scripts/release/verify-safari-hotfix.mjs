@@ -9,6 +9,8 @@ import { chromium, webkit } from "@playwright/test";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const baseline = process.argv.includes("--baseline");
+const registry = process.argv.includes("--registry");
+if (baseline && registry) throw new Error("Choose baseline or registry verification");
 const releaseRoot = join(root, "artifacts/safari-hotfix/1.0.3");
 const index = baseline ? null : JSON.parse(await readFile(join(releaseRoot, "package-index.json"), "utf8"));
 if (!baseline && (index.version !== "1.0.3" || index.packages?.length !== 2)) throw new Error("Safari hotfix package index is invalid");
@@ -16,11 +18,13 @@ const work = await mkdtemp(join(tmpdir(), "aval-safari-consumer-"));
 let preview;
 try {
   await writeFile(join(work, "package.json"), `${JSON.stringify({ private: true, type: "module" }, null, 2)}\n`);
-  run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock",
+  run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--prefer-online", "--cache", join(work, "npm-cache"),
     "svelte@5.56.8", "vite@8.1.4", "@sveltejs/vite-plugin-svelte@7.2.0", "typescript@6.0.3", "svelte-check@4.7.4",
     ...(baseline
       ? ["@pixel-point/aval-element@1.0.2", "@pixel-point/aval-svelte@1.0.2"]
-      : index.packages.map((entry) => join(releaseRoot, entry.filename)))], work);
+      : registry
+        ? ["@pixel-point/aval-element@1.0.3", "@pixel-point/aval-svelte@1.0.3"]
+        : index.packages.map((entry) => join(releaseRoot, entry.filename)))], work);
 
   await writeFile(join(work, "vite.config.js"), `import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
@@ -125,7 +129,7 @@ document.body.append(output);
       await browser.close();
     }
   }
-  process.stdout.write(`${JSON.stringify({ status: "passed", version: baseline ? "1.0.2" : "1.0.3", checks: results }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ status: "passed", source: baseline ? "baseline" : registry ? "registry" : "local archives", version: baseline ? "1.0.2" : "1.0.3", checks: results }, null, 2)}\n`);
 } finally {
   if (preview !== undefined) preview.kill("SIGTERM");
   await rm(work, { recursive: true, force: true });
