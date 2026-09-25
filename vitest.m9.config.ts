@@ -29,6 +29,8 @@ export default defineConfig({
     // Match the workspace suite's single source-module identity. Packed and
     // registry consumer tests address built artifacts by explicit file path.
     alias: {
+      "@pixel-point/aval-alpha/adapter": fileURLToPath(new URL("./packages/alpha/src/adapter.ts", import.meta.url)),
+      "@pixel-point/aval-alpha": fileURLToPath(new URL("./packages/alpha/src/index.ts", import.meta.url)),
       "@pixel-point/aval-compiler": fileURLToPath(
         new URL("./packages/compiler/src/index.ts", import.meta.url)
       ),

@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "jsx": "react-jsx", "types": ["node", "vite/client", "react"] },
+  "include": ["*.ts", "*.tsx", "*.svelte"]
+}

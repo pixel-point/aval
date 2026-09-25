@@ -33,6 +33,92 @@ export interface AlphaAuditSummary {
 }
 
 // @public (undocumented)
+export interface AlphaCliArguments {
+    // (undocumented)
+    readonly command: "alpha";
+    // (undocumented)
+    readonly input: string;
+    // (undocumented)
+    readonly json: boolean;
+    // (undocumented)
+    readonly options: Omit<AlphaCompileOptions, "out" | "signal">;
+    // (undocumented)
+    readonly output: string;
+}
+
+// @public (undocumented)
+export type AlphaCodec = "av1" | "vp9" | "h265" | "h264";
+
+// @public (undocumented)
+export interface AlphaCompileOptions {
+    readonly baseUrl?: string;
+    // (undocumented)
+    readonly encodings?: readonly AlphaEncoding[];
+    // (undocumented)
+    readonly ffmpeg?: string;
+    // (undocumented)
+    readonly ffprobe?: string;
+    // (undocumented)
+    readonly fps?: number;
+    // (undocumented)
+    readonly frames?: number;
+    // (undocumented)
+    readonly height?: number;
+    readonly layout?: "auto" | "vertical" | "horizontal";
+    readonly optimize?: {
+        readonly crfs: readonly number[];
+        readonly maxAlphaMae: number;
+        readonly maxCompositeMae: number;
+        readonly presets?: Partial<Record<AlphaCodec, readonly string[]>>;
+    };
+    // (undocumented)
+    readonly out: string;
+    // (undocumented)
+    readonly premultiplied?: boolean;
+    // (undocumented)
+    readonly signal?: AbortSignal;
+    // (undocumented)
+    readonly startNumber?: number;
+    // (undocumented)
+    readonly timeoutMs?: number;
+    // (undocumented)
+    readonly width?: number;
+}
+
+// @public (undocumented)
+export interface AlphaEncoding {
+    // (undocumented)
+    readonly bitDepth?: 8 | 10;
+    // (undocumented)
+    readonly codec: AlphaCodec;
+    // (undocumented)
+    readonly cpuUsed?: number;
+    // (undocumented)
+    readonly crf?: number;
+    // (undocumented)
+    readonly deadline?: "good" | "best";
+    // (undocumented)
+    readonly encoder?: "libaom-av1" | "libsvtav1";
+    readonly gop?: number;
+    // (undocumented)
+    readonly preset?: string;
+    // (undocumented)
+    readonly threads?: number;
+    readonly x265?: {
+        readonly aqMode?: 0 | 1 | 2 | 3 | 4;
+        readonly aqStrength?: number;
+        readonly psyRd?: number;
+        readonly psyRdoq?: number;
+        readonly rd?: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+        readonly rdoqLevel?: 0 | 1 | 2;
+        readonly lookahead?: number;
+        readonly bframes?: number;
+        readonly ref?: number;
+        readonly sao?: boolean;
+    };
+}
+
+// @public (undocumented)
 export interface AlphaPixelLocation {
     // (undocumented)
     readonly alpha: number;
@@ -205,7 +291,7 @@ export interface Canvas {
 }
 
 // @public (undocumented)
-export type CliArguments = CompileCliArguments | InspectCliArguments | ValidateCliArguments | UnpackCliArguments | InitCliArguments | DevCliArguments | HelpCliArguments;
+export type CliArguments = AlphaCliArguments | CompileCliArguments | InspectCliArguments | ValidateCliArguments | UnpackCliArguments | DevCliArguments | HelpCliArguments;
 
 // @public (undocumented)
 export interface CliRuntime {
@@ -634,20 +720,12 @@ export interface H265Encoding<R extends SourceRenditionTarget = SourceRenditionT
 }
 
 // @public (undocumented)
-export const HELP_TEXT = "Usage:\n  avl compile <project.json> --out <bundle-directory>\n  avl compile <input.mov|input.mp4|input.m4v> --codec <h264|h265|vp9|av1> --loop <start:end> [codec options] [--alpha auto|opaque|packed] --out <bundle-directory>\n  avl compile <prefix%0Nd.png> --codec <h264|h265|vp9|av1> --frames <first:count> --fps <n/d> --loop <start:end> [codec options] [--canvas <wxh>] [--alpha auto|opaque|packed] --out <bundle-directory>\n  avl inspect <asset.avl> [--json]\n  avl validate <asset.avl> [--json]\n  avl unpack <asset.avl> --out <empty-directory> [--json]\n  avl init <directory> [--json]\n  avl dev <project.json> --out <bundle-directory> [--media-timeout-ms <integer>] [--port <0-65535>] [--open] [--force] [--json]\n\nDirect encoding options:\n  --crf <integer>                constant quality (H.264 1..51; H.265 0..51; VP9/AV1 0..63)\n  --preset <name>                H.264/H.265, ultrafast through placebo (defaults: H.264 medium; H.265 veryslow)\n  --deadline <mode>              VP9 best, good, or realtime deadline (default: best)\n  --cpu-used <integer>           VP9 -8..8 or AV1 0..8 speed/quality control\n  --bit-depth <8|10>             AV1 output bit depth\n  --tiles <columns>x<rows>       AV1 power-of-two tile layout, product at most 64\n  --row-mt                       enable AV1 row multithreading\n  --threads <1..64>              H.265, VP9, or AV1 encoder threads\n\nOperational options:\n  --media-timeout-ms <integer>   per FFmpeg operation for slow/large encodes\n\nProject files own their ordered codec-major rendition and compression policy.\nMuxer tags, faststart, arbitrary filters, audio, and raw FFmpeg arguments are unavailable.\n\nCommon compile options: --ffmpeg <absolute-path> --ffprobe <absolute-path> --force --json";
+export const HELP_TEXT = "Usage:\n  avl alpha <input.mov|prefix%0Nd.png|alpha.json> --out <directory> [--codecs av1,vp9,h265,h264] [--crf <number>] [--preset <value>] [--fps <number>] [--frames <count>]\n  avl compile <project.json> --out <bundle-directory>\n  avl compile <input.mov|input.mp4|input.m4v> --codec <h264|h265|vp9|av1> --loop <start:end> [codec options] [--alpha auto|opaque|packed] --out <bundle-directory>\n  avl compile <prefix%0Nd.png> --codec <h264|h265|vp9|av1> --frames <first:count> --fps <n/d> --loop <start:end> [codec options] [--canvas <wxh>] [--alpha auto|opaque|packed] --out <bundle-directory>\n  avl inspect <asset.avl> [--json]\n  avl validate <asset.avl> [--json]\n  avl unpack <asset.avl> --out <empty-directory> [--json]\n  avl dev <project.json> --out <bundle-directory> [--media-timeout-ms <integer>] [--port <0-65535>] [--open] [--force] [--json]\n\nDirect encoding options:\n  --crf <integer>                constant quality (H.264 1..51; H.265 0..51; VP9/AV1 0..63)\n  --preset <name>                H.264/H.265, ultrafast through placebo (defaults: H.264 medium; H.265 veryslow)\n  --deadline <mode>              VP9 best, good, or realtime deadline (default: best)\n  --cpu-used <integer>           VP9 -8..8 or AV1 0..8 speed/quality control\n  --bit-depth <8|10>             AV1 output bit depth\n  --tiles <columns>x<rows>       AV1 power-of-two tile layout, product at most 64\n  --row-mt                       enable AV1 row multithreading\n  --threads <1..64>              H.265, VP9, or AV1 encoder threads\n\nOperational options:\n  --media-timeout-ms <integer>   per FFmpeg operation for slow/large encodes\n\nProject files own their ordered codec-major rendition and compression policy.\nMuxer tags, faststart, arbitrary filters, audio, and raw FFmpeg arguments are unavailable.\n\nCommon compile options: --ffmpeg <absolute-path> --ffprobe <absolute-path> --force --json";
 
 // @public (undocumented)
 export interface HelpCliArguments {
     // (undocumented)
     readonly command: "help";
-}
-
-// @public (undocumented)
-export interface InitCliArguments extends CliBaseArguments {
-    // (undocumented)
-    readonly command: "init";
-    // (undocumented)
-    readonly directory: string;
 }
 
 // @public (undocumented)

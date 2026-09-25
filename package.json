@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "build": "npm run build:public-packages && npm run build -w @pixel-point/aval-certification && npm run build -w @pixel-point/aval-playground && npm run build -w @pixel-point/aval-end-user-playground && npm run build -w @pixel-point/aval-grass-rabbit-example && npm run build -w @pixel-point/aval-grass-rabbit-react-example && npm run build -w @pixel-point/aval-grass-rabbit-svelte-example && npm run build -w @pixel-point/aval-grass-rabbit-codecs-example && npm run build -w @pixel-point/aval-kinetic-orb-example && npm run build -w @pixel-point/aval-lend-borrow-react-example",
-    "build:public-packages": "npm run build -w @pixel-point/aval-graph && npm run build -w @pixel-point/aval-format && npm run build -w @pixel-point/aval-element && npm run build -w @pixel-point/aval-react && npm run build -w @pixel-point/aval-svelte && npm run build -w @pixel-point/aval-compiler",
+    "build:public-packages": "npm run build -w @pixel-point/aval-graph && npm run build -w @pixel-point/aval-format && npm run build -w @pixel-point/aval-element && npm run build -w @pixel-point/aval-react && npm run build -w @pixel-point/aval-svelte && npm run build -w @pixel-point/aval-compiler && npm run build:alpha",
     "dev": "npm run dev -w @pixel-point/aval-playground",
     "playground": "npm run dev -w @pixel-point/aval-end-user-playground --",
     "grass-rabbit": "npm run dev -w @pixel-point/aval-grass-rabbit-example --",
@@ -76,8 +76,19 @@
     "release:prepare-npm": "sh scripts/release/publish-packages.sh prepare",
     "release:publish-npm": "sh scripts/release/publish-packages.sh publish",
     "release:rollback-drill": "vitest run --config vitest.m9.config.ts packages/certification/test/publication-ledger.test.ts tests/package/registry-client.test.ts tests/security/workflow-hardening.test.ts",
-    "typecheck": "npm run typecheck --workspaces --if-present && npm run typecheck:tests",
-    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
+    "typecheck": "npm run build:alpha && npm run typecheck --workspaces --if-present && npm run typecheck:tests",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
+    "alpha": "vite --config examples/alpha/vite.config.ts",
+    "alpha:fixtures": "npm run build:public-packages && node scripts/alpha/generate-fixtures.mjs",
+    "alpha:size": "npm run build:alpha && node scripts/alpha/measure-bundles.mjs",
+    "test:alpha": "vitest run --config vitest.m9.config.ts packages/alpha/test packages/compiler/test/alpha packages/alpha-react/test packages/alpha-svelte/test",
+    "test:alpha:media": "AVAL_ALPHA_FFMPEG_TESTS=1 vitest run --config vitest.m9.config.ts packages/compiler/test/alpha",
+    "test:alpha:browser": "playwright test --config playwright.alpha.config.ts",
+    "alpha:pack": "npm run build:alpha && node scripts/alpha/check-packages.mjs",
+    "typecheck:alpha": "npm run build:alpha && npm run typecheck -w @pixel-point/aval-alpha && npm run typecheck -w @pixel-point/aval-alpha-react && npm run typecheck -w @pixel-point/aval-alpha-svelte && tsc -p examples/alpha/tsconfig.json && packages/alpha-svelte/node_modules/.bin/svelte-check --tsconfig examples/alpha/frameworks/tsconfig.json",
+    "build:alpha": "npm run build -w @pixel-point/aval-alpha && npm run build -w @pixel-point/aval-alpha-react && npm run build -w @pixel-point/aval-alpha-svelte",
+    "alpha:frameworks": "npm run build:alpha && vite --config examples/alpha/frameworks/vite.config.ts",
+    "test:alpha:frameworks": "npm run build:alpha && playwright test --config playwright.alpha-frameworks.config.ts"
   },
   "devDependencies": {
     "@microsoft/api-extractor": "7.58.9",

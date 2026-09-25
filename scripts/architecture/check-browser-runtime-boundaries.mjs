@@ -17,6 +17,8 @@ import {
 } from "./browser-runtime-boundaries/framework-adapter-rules.mjs";
 import { collectRuntimeOwnershipViolations } from
   "./browser-runtime-boundaries/owner-rules.mjs";
+import { collectAlphaProvenanceViolations } from
+  "./browser-runtime-boundaries/alpha-rules.mjs";
 import {
   assertElementSourceSentinels,
   assertWorkspaceRoot,
@@ -56,6 +58,7 @@ export async function checkBrowserRuntimeBoundaries(
   const files = [];
   await collectTextFiles(repositoryRoot, ".", files);
   const scannedFiles = [...new Set(files)].sort(compareText);
+  await collectAlphaProvenanceViolations(repositoryRoot, scannedFiles, violations);
   await collectFrameworkProvenanceViolations(
     repositoryRoot,
     scannedFiles,

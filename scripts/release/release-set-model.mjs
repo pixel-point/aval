@@ -70,6 +70,8 @@ export const RELEASE_PACKAGE_SPECS = Object.freeze([
     name: "@pixel-point/aval-compiler",
     directory: "compiler",
     dependencies: ["@pixel-point/aval-graph", "@pixel-point/aval-format", "@pixel-point/aval-element"],
+    exports: { ...ROOT_EXPORT, "./alpha": { types: "./dist/alpha.d.ts", import: "./dist/alpha.js" } },
+    apiExtractorConfigs: ["api-extractor.json", "api-extractor.alpha.json"],
     bin: { avl: "./dist/cli.js" },
     productionEntries: [],
     buildConfig: typescriptBuild({

@@ -4,6 +4,17 @@ AVAL is a web format and runtime for short prerendered motion with continuous
 loops, named application states, authored triggers, bounded transitions,
 reversals, and packed transparency.
 
+For ordinary transparent video, use the separate
+[`aval-alpha` package](packages/alpha/README.md). It supports ordered child
+sources, standard AV1/VP9/HEVC/H.264 files, and a small native-video/WebGL player.
+Dedicated [React](packages/alpha-react/README.md) and [Svelte](packages/alpha-svelte/README.md)
+adapters share the same lightweight core and lifecycle binding.
+See the [Aval Alpha tested compatibility matrix](docs/alpha/browser-support.md)
+for device, browser and codec results.
+
+Compile those files with `avl alpha`; they use a separate contract from the
+interactive AVAL format described below.
+
 One logical animation is published as a codec bundle. Each codec gets its own
 AVAL wire 1.1 file—AV1, VP9, H.265/HEVC, or H.264—and the browser selects the
 first candidate in AVAL's fixed AV1 → VP9 → H.265 → H.264 ladder that decodes

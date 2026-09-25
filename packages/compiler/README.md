@@ -5,6 +5,11 @@ graph and a codec-major encoding set. Compilation publishes a bundle
 directory containing one `.avl` per requested codec and a canonical
 `build.json` report.
 
+The separate `avl alpha` command compiles ordinary transparent videos into
+packed-alpha MP4/WebM for [`aval-alpha`](../alpha/README.md), with per-codec
+compression controls and an offline CRF/preset search. Its Node API is available
+from `@pixel-point/aval-compiler/alpha`; it does not require an AVAL motion graph.
+
 Run the scoped CLI directly without adding the compiler to the project:
 
 ```sh

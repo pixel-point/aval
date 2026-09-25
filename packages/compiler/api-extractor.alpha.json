@@ -1,0 +1,6 @@
+{
+  "extends": "../../api-extractor.base.json",
+  "mainEntryPointFilePath": "<projectFolder>/dist/alpha.d.ts",
+  "apiReport": { "reportFileName": "compiler-alpha.api.md" },
+  "dtsRollup": { "untrimmedFilePath": "<projectFolder>/dist/alpha.rollup.d.ts" }
+}

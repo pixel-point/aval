@@ -189,6 +189,18 @@ export function collectManifestViolations(manifests, violations) {
       );
     }
   }
+  const alpha = manifests.get("alpha");
+  if (dependencyNames(alpha).length ||
+    !isAbsentOrEmptyDependencyRecord(alpha.optionalDependencies) ||
+    !isAbsentOrEmptyBundleList(alpha.bundledDependencies) ||
+    !isAbsentOrEmptyBundleList(alpha.bundleDependencies)) {
+    violations.push("packages/alpha must have no runtime dependencies");
+  }
+  for (const wrapper of ["alpha-react", "alpha-svelte"]) {
+    if (!hasExactWrapperRuntimeDependencies(manifests.get(wrapper), "@pixel-point/aval-alpha")) {
+      violations.push(`packages/${wrapper} must depend exactly on @pixel-point/aval-alpha`);
+    }
+  }
 }
 
 export async function collectTextFiles(repositoryRoot, path, output) {
@@ -231,10 +243,10 @@ function dependencyNames(manifest) {
   return Object.keys(manifest.dependencies).sort(compareText);
 }
 
-function hasExactWrapperRuntimeDependencies(manifest) {
+function hasExactWrapperRuntimeDependencies(manifest, runtime = CANONICAL_RUNTIME) {
   const dependencies = dependencyNames(manifest);
   return dependencies.length === 1 &&
-    dependencies[0] === CANONICAL_RUNTIME &&
+    dependencies[0] === runtime &&
     isAbsentOrEmptyDependencyRecord(manifest.optionalDependencies) &&
     isAbsentOrEmptyBundleList(manifest.bundledDependencies) &&
     isAbsentOrEmptyBundleList(manifest.bundleDependencies);

@@ -1,0 +1,20 @@
+{
+  "name": "@pixel-point/aval-alpha-svelte",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Small Svelte bindings for aval-alpha transparent video.",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "svelte": "./dist/index.js" } },
+  "files": ["dist", "README.md", "LICENSE"],
+  "repository": { "type": "git", "url": "https://github.com/pixel-point/aval.git", "directory": "packages/alpha-svelte" },
+  "dependencies": { "@pixel-point/aval-alpha": "0.1.0" },
+  "peerDependencies": { "svelte": "^5.0.0" },
+  "devDependencies": { "@sveltejs/package": "2.5.8", "svelte": "5.56.8", "svelte-check": "4.7.4", "typescript": "6.0.3" },
+  "scripts": {
+    "build": "svelte-package -i src -o dist --tsconfig tsconfig.json",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
+  }
+}

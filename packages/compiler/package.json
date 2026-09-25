@@ -18,6 +18,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./alpha": {
+      "types": "./dist/alpha.d.ts",
+      "import": "./dist/alpha.js"
     }
   },
   "files": [

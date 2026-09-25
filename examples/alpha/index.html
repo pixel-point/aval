@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>aval-alpha · transparent video</title>
+<style>
+  body{font:16px/1.5 system-ui,sans-serif;background:#f5f5f1;color:#222;margin:48px auto;padding:0 24px;max-width:960px}
+  h1{font-size:42px;letter-spacing:-2px;margin-bottom:4px}p{max-width:700px;color:#555}
+  .stage{display:grid;place-items:center;min-height:340px;border:1px solid #ccc;border-radius:12px;background:repeating-conic-gradient(#fff 0 25%,#e5e5e5 0 50%) 0/24px 24px;margin:24px 0}
+  aval-alpha{width:512px;max-width:100%;aspect-ratio:4/3}button,select{font:inherit;padding:8px 12px;margin:4px;border:1px solid #bbb;border-radius:6px;background:white}
+  label{display:inline-block;margin-right:14px}pre{white-space:pre-wrap;background:#fff;border:1px solid #ddd;padding:16px;border-radius:8px;font:13px/1.5 monospace}
+</style>
+<h1>aval-alpha</h1>
+<p>One ordinary compressed video contains color and a mask. A small player turns it into transparent pixels. These bands exercise clear, 25%, 50%, opaque, and gradient alpha.</p>
+<label>Codec <select id="codec"><option value="all">Automatic · authored order</option><option value="av1">AV1</option><option value="vp9">VP9</option><option value="h265">HEVC · x265</option><option value="h264">H.264</option></select></label>
+<label>Background <select id="background"><option value="checker">Checkerboard</option><option value="white">White</option><option value="black">Black</option><option value="magenta">Magenta</option></select></label>
+<div class="stage"><aval-alpha autoplay loop aria-label="Transparency test animation"></aval-alpha></div>
+<button id="play">Play</button><button id="pause">Pause</button><button id="seek">Seek to 0.5s</button><button id="check">Run checks</button>
+<p role="status" id="status">Loading sources…</p>
+<pre id="results">The compiler produces a source per codec; only the selected source plays.</pre>
+<script type="module" src="./main.ts"></script>
+</html>

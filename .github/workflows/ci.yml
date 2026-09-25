@@ -30,6 +30,9 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm run api:check
+      - run: npm run typecheck:alpha
+      - run: npm run alpha:size
+      - run: npm run alpha:pack
       - run: npm run docs:check
       - run: git diff --check
 
@@ -97,6 +100,23 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:browser:production
+
+  alpha-frameworks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run alpha:fixtures
+      - run: npm run test:alpha:frameworks
 
   kinetic-orb:
     runs-on: ubuntu-24.04

@@ -54,6 +54,9 @@ export const REVIEWED_ADAPTER_EXPORTS = Object.freeze([
 ]);
 
 export const REVIEWED_PACKAGES = Object.freeze([
+  reviewedPackage("alpha", "@pixel-point/aval-alpha"),
+  reviewedPackage("alpha-react", "@pixel-point/aval-alpha-react"),
+  reviewedPackage("alpha-svelte", "@pixel-point/aval-alpha-svelte"),
   reviewedPackage("certification", "@pixel-point/aval-certification"),
   reviewedPackage("compiler", "@pixel-point/aval-compiler"),
   reviewedPackage("element", CANONICAL_RUNTIME),

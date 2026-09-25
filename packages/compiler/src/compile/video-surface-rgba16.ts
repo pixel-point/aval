@@ -35,12 +35,13 @@ export function composeVideoSurfaceRgba16(
       output[targetOffset + 2] = dilated[sourceOffset + 2]!;
     }
   }
-  if (facts.alphaY !== null) {
+  if (facts.alphaRect !== null) {
+    const [alphaX, alphaY] = facts.alphaRect;
     for (let y = 0; y < facts.visibleHeight; y += 1) {
       for (let x = 0; x < facts.visibleWidth; x += 1) {
         const sourceOffset = (y * facts.visibleWidth + x) * CHANNELS;
         const targetOffset = (
-          (facts.alphaY + y) * facts.codedWidth + x
+          (alphaY + y) * facts.codedWidth + alphaX + x
         ) * CHANNELS;
         const alpha = source[sourceOffset + 3]!;
         output[targetOffset] = alpha;
@@ -57,7 +58,7 @@ interface SurfaceFacts {
   readonly visibleHeight: number;
   readonly codedWidth: number;
   readonly codedHeight: number;
-  readonly alphaY: number | null;
+  readonly alphaRect: Rect | null;
 }
 
 function validate(
@@ -89,7 +90,7 @@ function validate(
   ) {
     throw invalid("Video surface rectangles do not fit the coded geometry");
   }
-  let alphaY: number | null = null;
+  let alphaRect: Rect | null = null;
   if (geometry.layout === "opaque") {
     if (geometry.visibleAlphaRect !== undefined) {
       throw invalid("Opaque video surface cannot declare an alpha rectangle");
@@ -99,16 +100,18 @@ function validate(
       throw invalid("Packed video surface requires an alpha rectangle");
     }
     const alpha = rect(geometry.visibleAlphaRect, "visible alpha rectangle");
+    const below = alpha[0] === 0 && alpha[1] >= align(color[3], 2) + PACKED_ALPHA_GUTTER;
+    const beside = alpha[1] === 0 && alpha[0] >= align(color[2], 2) + PACKED_ALPHA_GUTTER;
     if (
-      alpha[0] !== 0 ||
       alpha[2] !== color[2] ||
       alpha[3] !== color[3] ||
-      alpha[1] < align(color[3], 2) + PACKED_ALPHA_GUTTER ||
+      (!below && !beside) ||
+      alpha[0] + alpha[2] > decoded[2] ||
       alpha[1] + alpha[3] > decoded[3]
     ) {
       throw invalid("Packed alpha rectangle is inconsistent with shared geometry");
     }
-    alphaY = alpha[1];
+    alphaRect = alpha;
   } else {
     throw invalid("Video surface layout is invalid");
   }
@@ -121,7 +124,7 @@ function validate(
     visibleHeight: color[3],
     codedWidth,
     codedHeight,
-    alphaY
+    alphaRect
   });
 }
 

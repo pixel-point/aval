@@ -35,6 +35,7 @@ export const PUBLIC_RELEASE_PACKAGE_CONTRACTS = Object.freeze({
   }),
   "@pixel-point/aval-compiler": releaseContract({
     dependencies: ["@pixel-point/aval-graph", "@pixel-point/aval-format", "@pixel-point/aval-element"],
+    exports: { ...ROOT_EXPORT, "./alpha": { types: "./dist/alpha.d.ts", import: "./dist/alpha.js" } },
     bin: { avl: "./dist/cli.js" }
   }),
   "@pixel-point/aval-react": releaseContract({

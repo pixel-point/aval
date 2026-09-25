@@ -1,0 +1,21 @@
+{
+  "name": "@pixel-point/aval-alpha",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Tiny player for packed-alpha AV1, VP9, HEVC and H.264 video.",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./element": { "types": "./dist/element.d.ts", "import": "./dist/element.js" },
+    "./adapter": { "types": "./dist/adapter.d.ts", "import": "./dist/adapter.js" }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "repository": { "type": "git", "url": "https://github.com/pixel-point/aval.git", "directory": "packages/alpha" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit"
+  }
+}

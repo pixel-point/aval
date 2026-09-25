@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 
 import { CompilerError } from "./diagnostics.js";
+import { parseAlphaCli, type AlphaCliArguments } from "./alpha/cli.js";
 import {
   H264_ENCODER_PRESETS,
   H265_ENCODER_PRESETS,
@@ -139,6 +140,7 @@ export interface HelpCliArguments {
 }
 
 export type CliArguments =
+  | AlphaCliArguments
   | CompileCliArguments
   | InspectCliArguments
   | ValidateCliArguments
@@ -183,6 +185,7 @@ interface RawCommand {
 
 /** Parse the closed, noninteractive launch command grammar without reading IO. */
 export function parseCliArguments(argv: readonly string[]): CliArguments {
+  if (argv[0] === "alpha") return parseAlphaCli(argv.slice(1));
   if (argv.length === 0 || argv[0] === "help" || argv[0] === "--help") {
     return Object.freeze({ command: "help" });
   }

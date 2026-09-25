@@ -1,5 +1,9 @@
 # Browser support
 
+For the separate transparent-video player, see the
+[Aval Alpha tested compatibility matrix](./alpha/browser-support.md).
+The support policy below applies to the interactive AVAL runtime.
+
 Functional CI uses pinned Playwright engines for fast browser-path coverage; it
 is not branded-browser certification. Each release targets a rolling 24-month
 matrix: Windows 11 stable-channel Chrome and desktop Firefox

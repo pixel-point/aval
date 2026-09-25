@@ -95,11 +95,19 @@ describe("browser runtime architecture", () => {
     }
   });
 
-  it("keeps element as the sole browser runtime", async () => {
+  it("keeps element as the interactive runtime and alpha as an independent video runtime", async () => {
     await expect(checkBrowserRuntimeBoundaries()).resolves.toMatchObject({
       status: "passed",
       canonicalRuntime: "@pixel-point/aval-element"
     });
+  });
+
+  it("rejects interactive dependencies and cross-package imports in alpha adapters", async () => {
+    const root = await architectureFixture();
+    await writePackageSource(root, "alpha-react", "src/invalid.ts", 'import "@pixel-point/aval-element";\nimport "../../alpha/src/player.js";\n');
+    await expect(checkBrowserRuntimeBoundaries(root)).rejects.toThrow(/unexpected alpha dependency @pixel-point\/aval-element/u);
+    await writePackageSource(root, "alpha-react", "src/invalid.ts", 'import "../../alpha/src/player.js";\n');
+    await expect(checkBrowserRuntimeBoundaries(root)).rejects.toThrow(/alpha relative imports must stay inside/u);
   });
 
   it("rejects a nonexistent or malformed repository root", async () => {
@@ -576,6 +584,9 @@ void node;
 });
 
 const PACKAGE_FIXTURES = Object.freeze([
+  { directory: "alpha", manifest: { name: "@pixel-point/aval-alpha" } },
+  { directory: "alpha-react", manifest: { name: "@pixel-point/aval-alpha-react", dependencies: { "@pixel-point/aval-alpha": "0.1.0" } } },
+  { directory: "alpha-svelte", manifest: { name: "@pixel-point/aval-alpha-svelte", dependencies: { "@pixel-point/aval-alpha": "0.1.0" } } },
   Object.freeze({
     directory: "certification",
     manifest: Object.freeze({

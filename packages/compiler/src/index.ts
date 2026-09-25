@@ -71,6 +71,8 @@ export type {
   ToolProvenance
 } from "./model.js";
 export { HELP_TEXT, runCli } from "./cli.js";
+export type { AlphaCliArguments } from "./alpha/cli.js";
+export type { AlphaCompileOptions, AlphaEncoding, AlphaCodec } from "./alpha/types.js";
 export type { CliRuntime } from "./cli.js";
 export { parseCliArguments } from "./cli-args.js";
 export type {

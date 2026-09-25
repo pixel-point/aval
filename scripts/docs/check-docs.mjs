@@ -100,6 +100,9 @@ for (const root of [
 ]) await collectPublicBoundaryFiles(root, publicBoundaryFiles);
 publicBoundaryFiles.push("packages/element/README.md");
 for (const path of publicBoundaryFiles) {
+  // The alpha runtime has a separate error/readiness contract, exercised by
+  // test:alpha:browser; the interactive AVAL rules below do not apply to it.
+  if (path.startsWith("examples/alpha/")) continue;
   const text = await readFile(path, "utf8");
   if (hasRemovedImageApi(text)) {
     failures.push(`${path}: removed external image API is still exposed at the public boundary`);

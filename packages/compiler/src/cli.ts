@@ -3,6 +3,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { runAlphaCommand } from "./alpha/cli.js";
 
 import {
   parseCliArguments,
@@ -61,6 +62,12 @@ export async function runCli(
   try {
     arguments_ = parseCliArguments(argv);
     switch (arguments_.command) {
+      case "alpha": {
+        const result = await runAlphaCommand(arguments_, cwd, runtime.signal);
+        if (arguments_.json) io.stdout(JSON.stringify(result) + "\n");
+        else writeTextResult(io, `Compiled aval-alpha sources to ${safe(result.output)}\n${result.markup}`);
+        return 0;
+      }
       case "help":
         writeTextResult(io, HELP_TEXT);
         return 0;
@@ -230,6 +237,7 @@ function count(value: number, noun: string): string {
 }
 
 export const HELP_TEXT = `Usage:
+  avl alpha <input.mov|prefix%0Nd.png|alpha.json> --out <directory> [--codecs av1,vp9,h265,h264] [--crf <number>] [--preset <value>] [--fps <number>] [--frames <count>]
   avl compile <project.json> --out <bundle-directory>
   avl compile <input.mov|input.mp4|input.m4v> --codec <h264|h265|vp9|av1> --loop <start:end> [codec options] [--alpha auto|opaque|packed] --out <bundle-directory>
   avl compile <prefix%0Nd.png> --codec <h264|h265|vp9|av1> --frames <first:count> --fps <n/d> --loop <start:end> [codec options] [--canvas <wxh>] [--alpha auto|opaque|packed] --out <bundle-directory>

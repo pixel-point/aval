@@ -74,10 +74,16 @@ function cloneEncodingSet(
   return Object.freeze(encodings);
 }
 
+type CompressionEncoding =
+  | { readonly codec: "h264"; readonly preset: string }
+  | { readonly codec: "h265"; readonly preset: string; readonly threads: number }
+  | Pick<Vp9Encoding, "codec" | "cpuUsed" | "deadline" | "threads">
+  | Pick<Av1Encoding, "codec" | "bitDepth" | "cpuUsed" | "threads" | "tiles" | "rowMt">;
+
 /** Lower only the allowlisted compression controls owned by an encoding. */
 export function videoCompressionArguments(
-  encoding: Readonly<NormalizedVideoEncoding>,
-  rendition: Readonly<NormalizedSourceRenditionTarget>
+  encoding: Readonly<CompressionEncoding>,
+  rendition: Readonly<Pick<NormalizedSourceRenditionTarget, "crf">>
 ): readonly string[] {
   const crf = ["-crf", String(rendition.crf)];
   switch (encoding.codec) {
